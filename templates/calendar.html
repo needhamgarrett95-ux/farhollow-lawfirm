@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Calendar — Case Management{% endblock %}
 {% block content %}
 <div class="cal-nav">
-  <a href="{{ url_for('calendar_view', y=prev_y, m=prev_m) }}" class="btn">← Prev</a>
+  <a href="{{ url_for('calendar_view', y=prev_y, m=prev_m) }}" class="btn">{{ icon("chevron-left", 16) }} Prev</a>
   <h2>{{ month_name }}</h2>
-  <a href="{{ url_for('calendar_view', y=next_y, m=next_m) }}" class="btn">Next →</a>
+  <a href="{{ url_for('calendar_view', y=next_y, m=next_m) }}" class="btn">Next {{ icon("chevron-right", 16) }}</a>
 </div>
 <div style="margin-bottom:12px">
   <a href="{{ url_for('event_new') }}" class="btn btn-primary btn-small">Add event</a>
