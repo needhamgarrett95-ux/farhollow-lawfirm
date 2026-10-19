@@ -1607,7 +1607,7 @@ NAV_GROUPS = [
     ]},
     {"label": "Financial", "icon": "billing", "items": [
         {"label": "Billing", "icon": "billing", "endpoint": "invoice_list",
-         "permission": "view_billing", "active_prefixes": ["invoice", "time"]},
+         "permission": "view_billing", "active_prefixes": ["invoice", "time_"]},
         {"label": "Trust", "icon": "trust", "endpoint": "trust_overview",
          "permission": "view_trust", "active_prefixes": ["trust"]},
         {"label": "Accounting", "icon": "billing", "endpoint": "accounting_overview",
@@ -5107,6 +5107,10 @@ def payroll_run():
             else:
                 reg_h, ot_h = 0.0, 0.0
             calc = calculate_paycheck(db, emp, reg_h, ot_h)
+            # Integer cents for template display and DB storage
+            for _k in ("gross", "federal", "ss", "medicare", "pfml", "wacares", "net"):
+                calc[_k + "_cents"] = int(round(calc[_k] * 100))
+            calc["employer_total_cents"] = int(round(calc["employer_total"] * 100))
             calc["employee_id"] = emp["id"]
             calc["full_name"] = emp["full_name"]
             preview.append(calc)
@@ -5118,7 +5122,7 @@ def payroll_run():
                     "SELECT COALESCE(SUM(gross_cents), 0) AS g FROM paychecks WHERE employee_id = ?",
                     (emp_id,),
                 ).fetchone()["g"]
-                gross_c = int(round(calc["gross"] * 100))
+                gross_c = calc["gross_cents"]
                 db.execute(
                     """INSERT INTO paychecks (employee_id, pay_period_start, pay_period_end,
                         pay_date, reg_hours, ot_hours, gross_cents, federal_cents, ss_cents,
@@ -5127,9 +5131,9 @@ def payroll_run():
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (emp_id, period_start, period_end, pay_date,
                      calc["reg_hours"], calc["ot_hours"], gross_c,
-                     int(round(calc["federal"] * 100)), int(round(calc["ss"] * 100)),
-                     int(round(calc["medicare"] * 100)), int(round(calc["pfml"] * 100)),
-                     int(round(calc["wacares"] * 100)), int(round(calc["net"] * 100)),
+                     calc["federal_cents"], calc["ss_cents"],
+                     calc["medicare_cents"], calc["pfml_cents"],
+                     calc["wacares_cents"], calc["net_cents"],
                      ytd_before + gross_c, session.get("user_id"), now),
                 )
                 # Book the payroll: wages expense + payroll tax expense
@@ -5147,7 +5151,7 @@ def payroll_run():
                          session.get("user_id"), now),
                     )
                 if tax_acct:
-                    er_cost_c = int(round(calc["employer_total"] * 100))
+                    er_cost_c = calc["employer_total_cents"]
                     db.execute(
                         """INSERT INTO op_transactions (account_id, txn_date, amount_cents,
                             description, created_by, created_at)
@@ -5157,9 +5161,9 @@ def payroll_run():
                          session.get("user_id"), now),
                     )
                 if liab_acct:
-                    ded_c = (int(round(calc["federal"] * 100)) + int(round(calc["ss"] * 100))
-                             + int(round(calc["medicare"] * 100)) + int(round(calc["pfml"] * 100))
-                             + int(round(calc["wacares"] * 100)))
+                    ded_c = (calc["federal_cents"] + calc["ss_cents"]
+                             + calc["medicare_cents"] + calc["pfml_cents"]
+                             + calc["wacares_cents"])
                     db.execute(
                         """INSERT INTO op_transactions (account_id, txn_date, amount_cents,
                             description, created_by, created_at)
