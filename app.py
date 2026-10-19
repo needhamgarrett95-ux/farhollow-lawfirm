@@ -256,6 +256,55 @@ CREATE TABLE IF NOT EXISTS backups (
     status TEXT NOT NULL DEFAULT 'ok',
     notes TEXT
 );
+-- Trust accounting (IOLTA / RPC 1.15A/B). Amounts are stored as INTEGER
+-- cents — never floats — to avoid rounding errors. Balances are ALWAYS
+-- computed from transactions; no balance is ever stored. Transactions are
+-- IMMUTABLE: there is no UI to edit or delete them. Corrections are made
+-- via reversing entries (a new transaction with reverses_id pointing at
+-- the original). Trust transactions are financial records: 7-year retention
+-- (retention_ok) applies; deletion is refused, period.
+CREATE TABLE IF NOT EXISTS trust_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    bank_name TEXT,
+    account_number TEXT,
+    notes TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS trust_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES trust_accounts(id),
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    case_id INTEGER REFERENCES cases(id),
+    txn_date TEXT NOT NULL,
+    txn_type TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    reference TEXT,
+    reverses_id INTEGER REFERENCES trust_transactions(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
+-- txn_type values:
+--   deposit       : money in for a client (+balance)
+--   disbursement  : money out for a client (-balance)
+--   transfer_out  : moved to another client's ledger (-balance, linked via transfer_group)
+--   transfer_in   : moved from another client's ledger (+balance, linked via transfer_group)
+--   reversal      : corrects an earlier transaction (reverses_id set; signed to offset it)
+-- Monthly reconciliation records (WSBA requires reconciliation records).
+CREATE TABLE IF NOT EXISTS trust_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES trust_accounts(id),
+    statement_date TEXT NOT NULL,
+    statement_balance_cents INTEGER NOT NULL,
+    book_balance_cents INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reconciled_by INTEGER REFERENCES users(id),
+    reconciled_at TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
 -- Tamper-evident audit log (RPC 1.6 / WSBA Op 2215): the audit trail is
 -- append-only. These triggers make UPDATE/DELETE on audit_log fail at the
 -- database level, so no code path or SQL console can alter history.
@@ -405,6 +454,95 @@ def audit(action, details=""):
         ),
     )
     db.commit()
+
+
+# ----------------------------------------------------------------------------
+# Trust accounting helpers (IOLTA / RPC 1.15A/B)
+# ----------------------------------------------------------------------------
+def dollars_to_cents(s):
+    """Parse a dollar string like '1,234.56' into integer cents. Returns None on bad input."""
+    if s is None:
+        return None
+    s = str(s).strip().replace(",", "").replace("$", "")
+    if not s:
+        return None
+    try:
+        # Reject anything that isn't a plain number with at most 2 decimals
+        if not re.match(r"^\d+(\.\d{1,2})?$", s):
+            return None
+        whole, _, frac = s.partition(".")
+        cents = int(whole) * 100 + int((frac + "00")[:2])
+        return cents
+    except (ValueError, TypeError):
+        return None
+
+
+def cents_to_str(cents):
+    """Format integer cents as a dollar string, e.g. 123456 -> '1,234.56'."""
+    cents = int(cents or 0)
+    sign = "-" if cents < 0 else ""
+    cents = abs(cents)
+    return f"{sign}{cents // 100:,}.{cents % 100:02d}"
+
+
+# Transaction types that ADD to a client's balance vs REMOVE from it.
+TRUST_CREDIT_TYPES = ("deposit", "transfer_in", "reversal_credit")
+TRUST_DEBIT_TYPES = ("disbursement", "transfer_out", "reversal_debit")
+
+
+def client_trust_balance(db, account_id, client_id):
+    """Current balance (cents) for one client in one trust account. Computed, never stored."""
+    row = db.execute(
+        "SELECT COALESCE(SUM(CASE WHEN txn_type IN ('deposit','transfer_in','reversal_credit')"
+        " THEN amount_cents ELSE -amount_cents END), 0) AS bal"
+        " FROM trust_transactions WHERE account_id = ? AND client_id = ?",
+        (account_id, client_id),
+    ).fetchone()
+    return int(row["bal"])
+
+
+def account_trust_balance(db, account_id):
+    """Total book balance (cents) of a trust account = sum of all client ledgers."""
+    row = db.execute(
+        "SELECT COALESCE(SUM(CASE WHEN txn_type IN ('deposit','transfer_in','reversal_credit')"
+        " THEN amount_cents ELSE -amount_cents END), 0) AS bal"
+        " FROM trust_transactions WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()
+    return int(row["bal"])
+
+
+def trust_client_balances(db, account_id):
+    """Per-client balances for an account: list of dicts with client info + balance cents."""
+    rows = db.execute(
+        "SELECT t.client_id, cl.first_name, cl.last_name,"
+        " COALESCE(SUM(CASE WHEN t.txn_type IN ('deposit','transfer_in','reversal_credit')"
+        " THEN t.amount_cents ELSE -t.amount_cents END), 0) AS bal"
+        " FROM trust_transactions t"
+        " JOIN clients cl ON t.client_id = cl.id"
+        " WHERE t.account_id = ?"
+        " GROUP BY t.client_id, cl.first_name, cl.last_name"
+        " ORDER BY cl.last_name, cl.first_name",
+        (account_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def log_trust_txn(db, account_id, client_id, case_id, txn_date, txn_type,
+                 amount_cents, description, reference="", reverses_id=None):
+    """Insert an immutable trust transaction. Returns the new id."""
+    now = datetime.now(timezone.utc).isoformat()
+    cur = db.execute(
+        "INSERT INTO trust_transactions (account_id, client_id, case_id, txn_date,"
+        " txn_type, amount_cents, description, reference, reverses_id, created_by,"
+        " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            account_id, client_id, case_id or None, txn_date, txn_type,
+            amount_cents, description, reference or "", reverses_id,
+            session.get("user_id"), now,
+        ),
+    )
+    return cur.lastrowid
 
 
 # ----------------------------------------------------------------------------
@@ -840,6 +978,12 @@ def can_delete(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+@app.template_filter("cents")
+def _cents_filter(value):
+    """Format integer cents as dollars in templates: {{ 123456|cents }} -> 1,234.56"""
+    return cents_to_str(value)
 
 
 @app.context_processor
@@ -2239,6 +2383,407 @@ def invoice_pdf(invoice_id):
         as_attachment=True,
         download_name=f"{inv['invoice_number']}.pdf",
     )
+
+
+# ----------------------------------------------------------------------------
+# Trust accounting (IOLTA / RPC 1.15A/B) — attorney and admin only.
+# Staff is blocked: trust funds are never visible to the staff role.
+# ----------------------------------------------------------------------------
+@app.route("/trust")
+@role_required("admin", "attorney")
+def trust_overview():
+    db = get_db()
+    accounts = db.execute(
+        "SELECT * FROM trust_accounts WHERE is_active = 1 ORDER BY name"
+    ).fetchall()
+    out = []
+    for a in accounts:
+        d = dict(a)
+        d["balance_cents"] = account_trust_balance(db, a["id"])
+        d["client_count"] = db.execute(
+            "SELECT COUNT(DISTINCT client_id) AS c FROM trust_transactions"
+            " WHERE account_id = ?", (a["id"],)
+        ).fetchone()["c"]
+        d["acct_display"] = decrypt_value(a["account_number"]) if a["account_number"] else ""
+        out.append(d)
+    return render_template("trust.html", accounts=out)
+
+
+@app.route("/trust/accounts/new", methods=["GET", "POST"])
+@role_required("admin", "attorney")
+def trust_account_new():
+    if request.method == "POST":
+        check_csrf()
+        name = request.form.get("name", "").strip()
+        if not name:
+            flash("Account name is required.", "error")
+            return render_template("trust_account_form.html")
+        db = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        acct_num = request.form.get("account_number", "").strip()
+        db.execute(
+            "INSERT INTO trust_accounts (name, bank_name, account_number, notes,"
+            " is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+            (
+                name,
+                request.form.get("bank_name", "").strip(),
+                encrypt_value(acct_num) if acct_num else "",
+                request.form.get("notes", "").strip(),
+                now,
+            ),
+        )
+        db.commit()
+        audit("trust_account_create", f"Created trust account '{name}'")
+        flash(f"Trust account '{name}' created.", "success")
+        return redirect(url_for("trust_overview"))
+    return render_template("trust_account_form.html")
+
+
+@app.route("/trust/accounts/<int:account_id>")
+@role_required("admin", "attorney")
+def trust_account_detail(account_id):
+    db = get_db()
+    acct = db.execute(
+        "SELECT * FROM trust_accounts WHERE id = ?", (account_id,)
+    ).fetchone()
+    if not acct:
+        abort(404)
+    d = dict(acct)
+    d["balance_cents"] = account_trust_balance(db, account_id)
+    d["acct_display"] = decrypt_value(acct["account_number"]) if acct["account_number"] else ""
+    client_bals = trust_client_balances(db, account_id)
+    recent = db.execute(
+        "SELECT t.*, cl.first_name, cl.last_name, u.username AS created_by_name"
+        " FROM trust_transactions t"
+        " JOIN clients cl ON t.client_id = cl.id"
+        " LEFT JOIN users u ON t.created_by = u.id"
+        " WHERE t.account_id = ? ORDER BY t.txn_date DESC, t.id DESC LIMIT 50",
+        (account_id,),
+    ).fetchall()
+    last_recon = db.execute(
+        "SELECT * FROM trust_reconciliations WHERE account_id = ?"
+        " ORDER BY statement_date DESC LIMIT 1",
+        (account_id,),
+    ).fetchone()
+    return render_template(
+        "trust_account.html", account=d, client_balances=client_bals,
+        transactions=recent, last_recon=last_recon,
+    )
+
+
+@app.route("/trust/transactions/new", methods=["GET", "POST"])
+@role_required("admin", "attorney")
+def trust_transaction_new():
+    """Record a deposit, disbursement, transfer, or reversal. Immutable once saved."""
+    db = get_db()
+    accounts = db.execute(
+        "SELECT id, name FROM trust_accounts WHERE is_active = 1 ORDER BY name"
+    ).fetchall()
+    clients = db.execute(
+        "SELECT id, first_name, last_name FROM clients ORDER BY last_name, first_name"
+    ).fetchall()
+    preset_account = request.args.get("account_id", "")
+    preset_client = request.args.get("client_id", "")
+    reverse_id = request.args.get("reverse_id", "") or request.form.get("reverse_id", "")
+    reverse_of = None
+    if reverse_id:
+        reverse_of = db.execute(
+            "SELECT t.*, cl.first_name, cl.last_name FROM trust_transactions t"
+            " JOIN clients cl ON t.client_id = cl.id WHERE t.id = ?",
+            (reverse_id,),
+        ).fetchone()
+        if not reverse_of:
+            flash("Original transaction not found.", "error")
+            return redirect(url_for("trust_overview"))
+
+    if request.method == "POST":
+        check_csrf()
+        account_id = request.form.get("account_id", "").strip()
+        client_id = request.form.get("client_id", "").strip()
+        txn_type = request.form.get("txn_type", "").strip()
+        amount = dollars_to_cents(request.form.get("amount", ""))
+        txn_date = request.form.get("txn_date", "").strip() or date.today().isoformat()
+        description = request.form.get("description", "").strip()
+        reference = request.form.get("reference", "").strip()
+        case_id = request.form.get("case_id", "").strip() or None
+        errors = []
+        if not account_id:
+            errors.append("Choose a trust account.")
+        if not client_id:
+            errors.append("Choose a client.")
+        if txn_type not in ("deposit", "disbursement", "transfer"):
+            errors.append("Choose a transaction type.")
+        if amount is None or amount <= 0:
+            errors.append("Enter a valid amount greater than $0.00.")
+        if not description:
+            errors.append("A description is required (RPC 1.15A record-keeping).")
+
+        # Validate the account and client exist
+        acct = db.execute(
+            "SELECT id FROM trust_accounts WHERE id = ?", (account_id,)
+        ).fetchone() if account_id else None
+        cli = db.execute(
+            "SELECT id FROM clients WHERE id = ?", (client_id,)
+        ).fetchone() if client_id else None
+        if account_id and not acct:
+            errors.append("Trust account not found.")
+        if client_id and not cli:
+            errors.append("Client not found.")
+
+        target_client_id = request.form.get("target_client_id", "").strip()
+        confirmed = request.form.get("confirm_transfer", "") == "yes"
+
+        if not errors and txn_type == "disbursement":
+            # HARD BLOCK: cannot disburse more than the client's balance.
+            bal = client_trust_balance(db, int(account_id), int(client_id))
+            if amount > bal:
+                errors.append(
+                    f"Insufficient trust funds: this client has ${cents_to_str(bal)}"
+                    f" available in this account. Cannot disburse ${cents_to_str(amount)}."
+                )
+        if not errors and txn_type == "transfer":
+            if not target_client_id or target_client_id == client_id:
+                errors.append("Choose a different client to transfer to.")
+            elif not confirmed:
+                errors.append(
+                    "Transfers between clients require the confirmation checkbox."
+                )
+            else:
+                bal = client_trust_balance(db, int(account_id), int(client_id))
+                if amount > bal:
+                    errors.append(
+                        f"Insufficient trust funds: source client has ${cents_to_str(bal)}"
+                        f" available. Cannot transfer ${cents_to_str(amount)}."
+                    )
+
+        cases = []
+        if not errors and client_id:
+            cases = db.execute(
+                "SELECT id, case_number, title FROM cases WHERE client_id = ?"
+                " ORDER BY date_opened DESC", (client_id,)
+            ).fetchall()
+
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template(
+                "trust_transaction_form.html", accounts=accounts, clients=clients,
+                cases=cases, preset_account=preset_account or account_id,
+                preset_client=preset_client or client_id, reverse_of=reverse_of,
+            )
+
+        # --- All validations passed: write the immutable transaction(s) ---
+        if txn_type == "transfer":
+            # Two linked entries: money out of the source client, in to the target.
+            desc_out = f"Transfer to client #{target_client_id}: {description}"
+            desc_in = f"Transfer from client #{client_id}: {description}"
+            out_id = log_trust_txn(
+                db, int(account_id), int(client_id), case_id, txn_date,
+                "transfer_out", amount, desc_out, reference)
+            in_id = log_trust_txn(
+                db, int(account_id), int(target_client_id), None, txn_date,
+                "transfer_in", amount, desc_in, reference)
+            db.commit()
+            audit("trust_transfer",
+                  f"Trust transfer ${cents_to_str(amount)} client {client_id} ->"
+                  f" client {target_client_id} (account {account_id}, txns {out_id}/{in_id})")
+            flash(f"Transfer of ${cents_to_str(amount)} recorded.", "success")
+        elif reverse_of:
+            # Reversal: create an offsetting entry linked to the original.
+            orig_type = reverse_of["txn_type"]
+            if orig_type in ("deposit", "transfer_in", "reversal_credit"):
+                rev_type = "reversal_debit"
+            else:
+                rev_type = "reversal_credit"
+            rev_id = log_trust_txn(
+                db, int(account_id), int(client_id), case_id, txn_date,
+                rev_type, amount,
+                f"REVERSAL of txn #{reverse_of['id']}: {description}",
+                reference, reverses_id=reverse_of["id"])
+            db.commit()
+            audit("trust_reversal",
+                  f"Reversed trust txn #{reverse_of['id']} with txn #{rev_id}"
+                  f" (${cents_to_str(amount)}, account {account_id})")
+            flash("Reversing entry recorded. The original transaction is unchanged.", "success")
+        else:
+            txn_id = log_trust_txn(
+                db, int(account_id), int(client_id), case_id, txn_date,
+                txn_type, amount, description, reference)
+            db.commit()
+            audit(f"trust_{txn_type}",
+                  f"Trust {txn_type} ${cents_to_str(amount)} for client {client_id}"
+                  f" (account {account_id}, txn {txn_id})")
+            flash(f"{txn_type.capitalize()} of ${cents_to_str(amount)} recorded.", "success")
+        return redirect(url_for("trust_account_detail", account_id=int(account_id)))
+
+    cases = []
+    if preset_client:
+        cases = db.execute(
+            "SELECT id, case_number, title FROM cases WHERE client_id = ?"
+            " ORDER BY date_opened DESC", (preset_client,)
+        ).fetchall()
+    return render_template(
+        "trust_transaction_form.html", accounts=accounts, clients=clients,
+        cases=cases, preset_account=preset_account,
+        preset_client=preset_client, reverse_of=reverse_of,
+    )
+
+
+@app.route("/trust/ledger/<int:client_id>")
+@role_required("admin", "attorney")
+def trust_client_ledger(client_id):
+    """Per-client trust ledger across all accounts, with date-range filter."""
+    db = get_db()
+    client = db.execute(
+        "SELECT * FROM clients WHERE id = ?", (client_id,)
+    ).fetchone()
+    if not client:
+        abort(404)
+    start = request.args.get("start", "")
+    end = request.args.get("end", "")
+    q = ("SELECT t.*, ta.name AS account_name, u.username AS created_by_name"
+         " FROM trust_transactions t"
+         " JOIN trust_accounts ta ON t.account_id = ta.id"
+         " LEFT JOIN users u ON t.created_by = u.id"
+         " WHERE t.client_id = ?")
+    params = [client_id]
+    if start:
+        q += " AND t.txn_date >= ?"
+        params.append(start)
+    if end:
+        q += " AND t.txn_date <= ?"
+        params.append(end)
+    q += " ORDER BY t.txn_date, t.id"
+    txns = db.execute(q, params).fetchall()
+    # Running balance
+    rows = []
+    bal = 0
+    for t in txns:
+        if t["txn_type"] in ("deposit", "transfer_in", "reversal_credit"):
+            bal += t["amount_cents"]
+        else:
+            bal -= t["amount_cents"]
+        d = dict(t)
+        d["running_cents"] = bal
+        rows.append(d)
+    return render_template(
+        "trust_ledger.html", client=client, transactions=rows,
+        balance_cents=bal, start=start, end=end,
+    )
+
+
+@app.route("/trust/reconcile/<int:account_id>", methods=["GET", "POST"])
+@role_required("admin", "attorney")
+def trust_reconcile(account_id):
+    """Monthly reconciliation: bank statement balance vs book balance."""
+    db = get_db()
+    acct = db.execute(
+        "SELECT * FROM trust_accounts WHERE id = ?", (account_id,)
+    ).fetchone()
+    if not acct:
+        abort(404)
+    book_cents = account_trust_balance(db, account_id)
+    history = db.execute(
+        "SELECT r.*, u.username AS reconciled_by_name FROM trust_reconciliations r"
+        " LEFT JOIN users u ON r.reconciled_by = u.id"
+        " WHERE r.account_id = ? ORDER BY r.statement_date DESC LIMIT 12",
+        (account_id,),
+    ).fetchall()
+
+    if request.method == "POST":
+        check_csrf()
+        statement_date = request.form.get("statement_date", "").strip()
+        statement_bal = dollars_to_cents(request.form.get("statement_balance", ""))
+        notes = request.form.get("notes", "").strip()
+        if not statement_date:
+            flash("Enter the bank statement date.", "error")
+            return render_template(
+                "trust_reconcile.html", account=acct, book_cents=book_cents,
+                history=history)
+        if statement_bal is None:
+            flash("Enter a valid statement ending balance.", "error")
+            return render_template(
+                "trust_reconcile.html", account=acct, book_cents=book_cents,
+                history=history)
+        now = datetime.now(timezone.utc).isoformat()
+        status = "matched" if statement_bal == book_cents else "unmatched"
+        db.execute(
+            "INSERT INTO trust_reconciliations (account_id, statement_date,"
+            " statement_balance_cents, book_balance_cents, status, reconciled_by,"
+            " reconciled_at, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (account_id, statement_date, statement_bal, book_cents, status,
+             session.get("user_id"), now, notes, now),
+        )
+        db.commit()
+        audit("trust_reconcile",
+              f"Reconciled trust account {account_id}: statement ${cents_to_str(statement_bal)}"
+              f" vs book ${cents_to_str(book_cents)} -> {status}")
+        if status == "matched":
+            flash("Reconciliation complete: statement matches book balance.", "success")
+        else:
+            flash(
+                f"Balances do NOT match: statement ${cents_to_str(statement_bal)} vs"
+                f" book ${cents_to_str(book_cents)} (difference"
+                f" ${cents_to_str(abs(statement_bal - book_cents))}). Recorded as"
+                " unmatched — investigate before month-end.", "warning")
+        return redirect(url_for("trust_reconcile", account_id=account_id))
+
+    return render_template(
+        "trust_reconcile.html", account=acct, book_cents=book_cents,
+        history=history)
+
+
+@app.route("/trust/reports/trial-balance")
+@role_required("admin", "attorney")
+def trust_trial_balance():
+    """Trial balance: every client ledger per account; totals must equal account balances."""
+    db = get_db()
+    accounts = db.execute(
+        "SELECT * FROM trust_accounts WHERE is_active = 1 ORDER BY name"
+    ).fetchall()
+    report = []
+    for a in accounts:
+        bals = trust_client_balances(db, a["id"])
+        total = sum(b["bal"] for b in bals)
+        book = account_trust_balance(db, a["id"])
+        report.append({
+            "account": dict(a),
+            "client_balances": bals,
+            "ledger_total_cents": total,
+            "book_cents": book,
+            "balanced": total == book,
+        })
+    return render_template("trust_trial_balance.html", report=report)
+
+
+@app.route("/trust/reports/three-way")
+@role_required("admin", "attorney")
+def trust_three_way():
+    """Three-way reconciliation: bank balance = book balance = sum of client ledgers."""
+    db = get_db()
+    accounts = db.execute(
+        "SELECT * FROM trust_accounts WHERE is_active = 1 ORDER BY name"
+    ).fetchall()
+    report = []
+    for a in accounts:
+        book = account_trust_balance(db, a["id"])
+        bals = trust_client_balances(db, a["id"])
+        ledger_total = sum(b["bal"] for b in bals)
+        last_recon = db.execute(
+            "SELECT * FROM trust_reconciliations WHERE account_id = ?"
+            " ORDER BY statement_date DESC LIMIT 1", (a["id"],)
+        ).fetchone()
+        bank = last_recon["statement_balance_cents"] if last_recon else None
+        report.append({
+            "account": dict(a),
+            "bank_cents": bank,
+            "book_cents": book,
+            "ledger_total_cents": ledger_total,
+            "bank_matches_book": bank is not None and bank == book,
+            "book_matches_ledgers": book == ledger_total,
+            "last_recon": dict(last_recon) if last_recon else None,
+        })
+    return render_template("trust_three_way.html", report=report)
 
 
 # ----------------------------------------------------------------------------

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Three-Way Reconciliation Report{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Three-Way Reconciliation</h1>
+  <a href="{{ url_for('trust_overview') }}" class="btn btn-link">Back to trust</a>
+</div>
+<p class="muted">The gold standard of trust accounting: <strong>bank balance = book balance = sum of client ledgers</strong>. All three must agree.</p>
+
+{% for r in report %}
+<div class="detail-card">
+  <h2>{{ r.account.name }}</h2>
+  <table class="table">
+    <tbody>
+      <tr>
+        <td><strong>1. Bank balance</strong> <span class="muted small">(latest statement)</span></td>
+        <td class="nowrap">{% if r.bank_cents is not none %}${{ r.bank_cents|cents }}{% else %}<span class="muted">no reconciliation on file</span>{% endif %}</td>
+        <td>{% if r.last_recon %}<span class="muted small">{{ r.last_recon.statement_date }}</span>{% endif %}</td>
+      </tr>
+      <tr>
+        <td><strong>2. Book balance</strong> <span class="muted small">(this software)</span></td>
+        <td class="nowrap">${{ r.book_cents|cents }}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td><strong>3. Sum of client ledgers</strong></td>
+        <td class="nowrap">${{ r.ledger_total_cents|cents }}</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    {% if r.bank_cents is not none and r.bank_matches_book and r.book_matches_ledgers %}
+    <span class="badge badge-active">Three-way match — all three agree</span>
+    {% else %}
+    <span class="badge badge-pending">Does not reconcile</span>
+    <span class="muted small">
+      {% if r.bank_cents is none %}(no bank statement recorded){% endif %}
+      {% if not r.bank_matches_book and r.bank_cents is not none %}(bank ≠ book){% endif %}
+      {% if not r.book_matches_ledgers %}(book ≠ ledgers){% endif %}
+    </span>
+    {% endif %}
+  </p>
+  <p><a href="{{ url_for('trust_reconcile', account_id=r.account.id) }}">Reconcile this account →</a></p>
+</div>
+{% endfor %}
+{% endblock %}

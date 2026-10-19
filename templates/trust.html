@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Trust Accounts — Law Office of Derek G. Medina{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Trust Accounts</h1>
+  <a href="{{ url_for('trust_account_new') }}" class="btn btn-primary">New trust account</a>
+</div>
+
+<div class="alert alert-warning">
+  <strong>Washington RPC 1.15A — client funds are sacred.</strong>
+  Never disburse before funds clear. Reconcile every account monthly — this is not optional.
+  Transactions are permanent; mistakes are fixed with reversing entries, never edits.
+</div>
+
+{% if accounts %}
+<table class="table">
+  <thead><tr><th>Account</th><th>Bank</th><th>Clients with funds</th><th>Balance</th><th></th></tr></thead>
+  <tbody>
+  {% for a in accounts %}
+    <tr>
+      <td><strong>{{ a.name }}</strong>{% if a.acct_display %}<br><span class="muted small">•••{{ a.acct_display[-4:] }}</span>{% endif %}</td>
+      <td>{{ a.bank_name or '—' }}</td>
+      <td>{{ a.client_count }}</td>
+      <td><strong>${{ a.balance_cents|cents }}</strong></td>
+      <td class="nowrap"><a href="{{ url_for('trust_account_detail', account_id=a.id) }}">Open</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<div class="report-links">
+  <a href="{{ url_for('trust_trial_balance') }}" class="btn">Trial balance report</a>
+  <a href="{{ url_for('trust_three_way') }}" class="btn">Three-way reconciliation report</a>
+</div>
+{% else %}
+<p class="muted">No trust accounts yet. Create one to start tracking client funds.</p>
+{% endif %}
+{% endblock %}

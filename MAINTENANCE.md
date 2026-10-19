@@ -866,3 +866,63 @@ The software supports three kinds of accounts. Only an **Admin** can add or mana
 - You cannot remove admin rights from yourself.
 - You cannot deactivate or demote the last remaining admin — the software will refuse and tell you why.
 - Deactivated users cannot log in, even with a correct password.
+
+## 27. Trust accounting (IOLTA) — attorney/admin only
+
+**What this is:** When a client gives you money to hold (a retainer, settlement funds, etc.), that money is NOT yours — it belongs to the client until you earn it. Washington's ethics rules (RPC 1.15A) are extremely strict about this. Mishandling client money is the #1 reason lawyers get disciplined. This part of the software helps you do it right.
+
+**Only attorneys and admins can see the Trust tab.** Assistants and paralegals (the "staff" role) cannot see trust accounts at all.
+
+**The three rules that matter most:**
+
+1. **Never disburse before funds clear.** If a client writes you a $5,000 check, do NOT pay anything out of it until your bank confirms the check cleared. The software cannot check this for you — that's on you.
+2. **Reconcile every account every month.** Compare your bank statement to what the software says. If they don't match, find out why before the month ends. This is not optional.
+3. **Transactions are permanent.** Once you record a deposit or payment, it cannot be edited or deleted. If you make a mistake, you create a *reversing entry* (the software has a "Reverse" button for this) — the original stays, and a new entry cancels it out. This is how real accounting works.
+
+**To set up a trust account:**
+
+1. Click **Trust**, then **New trust account**.
+2. Enter the account name (e.g. "IOLTA Checking"), the bank name, and the account number. The account number is stored encrypted.
+3. Click **Create account**.
+
+**To record a client deposit:**
+
+1. Click **Trust**, open the account, then **Record transaction**.
+2. Choose the client and **Deposit (money in)**.
+3. Enter the amount, date, and a clear description (e.g. "Retainer per fee agreement dated 10/1/2026"). A description is required — the bar requires complete records.
+4. Enter a check or reference number if you have one.
+5. Read the confirmation prompt carefully — this entry is permanent. Click to save.
+
+**To pay money out (disbursement):**
+
+Same steps, but choose **Disbursement (money out)**. The software will **refuse** the payment if the client doesn't have enough money in their trust balance. This is a hard block, not a warning — you cannot overdraw a client's trust funds.
+
+**To move money between clients:**
+
+Choose **Transfer to another client**, pick the receiving client, and **check the confirmation box**. The software creates two linked entries (out of one client, into the other) so the paper trail is complete.
+
+**To fix a mistake:**
+
+Find the transaction on the account page and click **Reverse**. Enter what went wrong in the description. The software creates an offsetting entry. The original is never touched.
+
+**Monthly reconciliation (do this every month):**
+
+1. Click **Trust**, open the account, then **Reconcile**.
+2. Look at your bank statement. Enter the **statement date** and the **ending balance** from the statement.
+3. Click **Save reconciliation**.
+4. If the statement matches what the software says: you're done. You'll see "Reconciliation complete."
+5. If they DON'T match: the software will tell you the difference and mark it "unmatched." Find the discrepancy (outstanding checks, deposits in transit, data entry errors) before month-end. Do not ignore an unmatched reconciliation.
+
+**Reports (for your records and any bar audit):**
+
+- **Trial balance** (from the Trust page): every client's balance per account. The totals must equal the account balance.
+- **Three-way reconciliation** (from the Trust page): the gold standard — bank statement balance = software balance = sum of all client ledgers. All three must agree. Print or save this monthly.
+- **Client ledger** (click "Ledger" next to any client): every transaction for that client with a running balance. You can filter by date range.
+
+**What NOT to do:**
+
+- Do NOT disburse funds before they clear the bank.
+- Do NOT skip monthly reconciliation.
+- Do NOT try to edit or delete a trust transaction — use a reversing entry.
+- Do NOT let staff access trust accounts (the software blocks this, but don't share your login either).
+- Do NOT commingle: client money and firm money must never mix in the same account.

@@ -30,6 +30,9 @@
     {% if user_role in ('admin', 'attorney') %}
     <a href="{{ url_for('audit_view') }}" class="{% if request.endpoint == 'audit_view' %}active{% endif %}">Audit Log</a>
     {% endif %}
+    {% if user_role in ('admin', 'attorney') %}
+    <a href="{{ url_for('trust_overview') }}" class="{% if request.endpoint and request.endpoint.startswith('trust') %}active{% endif %}">Trust</a>
+    {% endif %}
     {% if is_admin %}
     <a href="{{ url_for('user_list') }}" class="{% if request.endpoint and request.endpoint.startswith('user') %}active{% endif %}">Users</a>
     {% endif %}

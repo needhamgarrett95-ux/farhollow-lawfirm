@@ -73,6 +73,39 @@ of **7 years**.
   **refuses deletion** before 7 years with a clear warning to the user.
   `retention_ok()` fails closed: missing or unparseable dates → no deletion.
 - Invoiced time entries cannot be deleted while on an invoice.
+- **v1.5.0 (current): full trust accounting (IOLTA) ledger.** Trust account
+  handling is the #1 source of attorney discipline, so the software is
+  deliberately strict:
+  - **Multiple trust accounts** supported (e.g. IOLTA checking, retainer
+    trust). Account numbers are encrypted at rest.
+  - **Per-client sub-ledgers**: every client's balance is computed from
+    transactions, never stored. Balances cannot drift.
+  - **Integer cents**: all amounts stored as INTEGER cents — no float
+    rounding errors, ever.
+  - **Immutable transactions**: there is no edit or delete path for trust
+    transactions anywhere in the code. Corrections are reversing entries
+    (a new offsetting transaction linked to the original via `reverses_id`).
+    Trust transactions can NEVER be deleted — `retention_ok()` is not even
+    consulted because deletion is not offered.
+  - **Hard overdraft block**: a disbursement or transfer exceeding the
+    client's available balance is refused (not warned — refused).
+  - **Transfer confirmation**: moving funds between clients requires an
+    explicit confirmation checkbox.
+  - **Role-gated**: trust routes require the `admin` or `attorney` role.
+    The staff role gets 403 on every trust URL and the Trust tab is hidden
+    from the navigation.
+  - **Monthly reconciliation workflow**: record the bank statement balance;
+    the software compares it to the book balance and flags mismatches.
+    Reconciliation records are stored (WSBA requires them).
+  - **Trial balance report**: sum of all client ledgers per account, must
+    equal the account balance.
+  - **Three-way reconciliation report**: bank balance = book balance = sum
+    of client ledgers, the gold standard of trust accounting.
+  - Every trust action (account created, deposit, disbursement, transfer,
+    reversal, reconciliation) is written to the tamper-evident audit log.
+  - **What the software cannot do**: it cannot verify that funds have
+    actually cleared the bank before you disburse them. "Never disburse
+    before funds clear" remains the attorney's duty.
 
 ### RPC 1.7 / 1.9 — Conflict of interest
 
@@ -156,6 +189,7 @@ The software cannot do these things. They are operational and legal duties:
 | Document files | `instance/documents/<case_id>/` on disk | Access-controlled (login required); metadata in DB |
 | Calendar events | `calendar_events` | Access-controlled |
 | Time entries, invoices | `time_entries`, `invoices`, `invoice_items` | Access-controlled; 7-year deletion lock (RPC 1.15B) |
+| Trust accounts, transactions, reconciliations | `trust_accounts`, `trust_transactions`, `trust_reconciliations` | Attorney/admin only; immutable transactions (no edit/delete path); integer cents; encrypted account numbers; 7-year retention (RPC 1.15A/B) |
 | Backup log | `backups` | Access-controlled |
 | Audit history | `audit_log` | Append-only (DB triggers block edit/delete) |
 | Encryption key | `instance/data.key` | File permissions 0600; must be backed up offsite |

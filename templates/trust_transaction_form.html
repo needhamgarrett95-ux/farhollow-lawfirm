@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Record Trust Transaction{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{% if reverse_of %}Reverse Transaction{% else %}Record Trust Transaction{% endif %}</h1>
+</div>
+
+{% if reverse_of %}
+<div class="alert alert-warning">
+  <strong>Reversing transaction #{{ reverse_of.id }}</strong> ({{ reverse_of.txn_type.replace('_', ' ') }} of
+  ${{ reverse_of.amount_cents|cents }} for {{ reverse_of.first_name }} {{ reverse_of.last_name }} on {{ reverse_of.txn_date }}).<br>
+  This creates a new offsetting entry. The original transaction is <strong>never</strong> modified.
+</div>
+{% endif %}
+
+<div class="alert alert-danger">
+  <strong>Funds safeguards are active:</strong> disbursements and transfers cannot exceed a client's available balance.
+  Transfers between clients require explicit confirmation below.
+</div>
+
+<div class="form-card">
+  <form method="post" id="txnForm">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    {% if reverse_of %}
+    <input type="hidden" name="reverse_id" value="{{ reverse_of.id }}">
+    {% endif %}
+    <div class="form-grid">
+      <label>Trust account *
+        <select name="account_id" required>
+          <option value="">— choose —</option>
+          {% for a in accounts %}
+          <option value="{{ a.id }}" {% if preset_account and preset_account|string == a.id|string %}selected{% endif %}>{{ a.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Client *
+        <select name="client_id" id="clientSelect" required>
+          <option value="">— choose —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if (preset_client or (reverse_of and reverse_of.client_id))|string == c.id|string %}selected{% endif %}>{{ c.last_name }}, {{ c.first_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Transaction type *
+        <select name="txn_type" id="txnType" required>
+          <option value="">— choose —</option>
+          <option value="deposit" {% if reverse_of %}disabled{% endif %}>Deposit (money in)</option>
+          <option value="disbursement" {% if reverse_of %}disabled{% endif %}>Disbursement (money out)</option>
+          <option value="transfer" {% if reverse_of %}disabled{% endif %}>Transfer to another client</option>
+        </select>
+      </label>
+      <label>Amount ($) *
+        <input type="text" name="amount" required placeholder="0.00"
+               {% if reverse_of %}value="{{ reverse_of.amount_cents|cents }}"{% endif %}>
+      </label>
+      <label>Date *
+        <input type="date" name="txn_date" value="{{ reverse_of.txn_date if reverse_of else '' }}" required>
+      </label>
+      <label>Check / reference #
+        <input type="text" name="reference" placeholder="Check #, wire ref, etc.">
+      </label>
+      <label>Related case (optional)
+        <select name="case_id">
+          <option value="">— none —</option>
+          {% for cs in cases %}
+          <option value="{{ cs.id }}">{{ cs.case_number }} — {{ cs.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="span2">Description * <span class="muted small">(required by RPC 1.15A record-keeping)</span>
+        <textarea name="description" rows="2" required
+                  placeholder="e.g. Retainer deposit per fee agreement dated 10/1/2026">{% if reverse_of %}Correction of entry dated {{ reverse_of.txn_date }}: {% endif %}</textarea>
+      </label>
+      <div class="span2" id="transferFields" style="display:none;">
+        <label>Transfer to client *
+          <select name="target_client_id" id="targetClient">
+            <option value="">— choose —</option>
+            {% for c in clients %}
+            <option value="{{ c.id }}">{{ c.last_name }}, {{ c.first_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="confirm_transfer" value="yes">
+          <strong>I confirm this transfer between clients is authorized and correct.</strong>
+        </label>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary" onclick="return confirm('This transaction is PERMANENT and cannot be edited or deleted. Continue?');">
+        {% if reverse_of %}Record reversing entry{% else %}Record transaction{% endif %}
+      </button>
+      <a href="{{ url_for('trust_overview') }}" class="btn btn-link">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  var typeSel = document.getElementById('txnType');
+  var transferFields = document.getElementById('transferFields');
+  function toggle() {
+    transferFields.style.display = (typeSel.value === 'transfer') ? 'block' : 'none';
+  }
+  typeSel.addEventListener('change', toggle);
+  toggle();
+})();
+</script>
+{% endblock %}

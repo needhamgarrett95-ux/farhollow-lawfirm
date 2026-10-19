@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}New Trust Account — Law Office of Derek G. Medina{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>New Trust Account</h1>
+</div>
+
+<div class="form-card">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <div class="form-grid">
+      <label class="span2">Account name *
+        <input type="text" name="name" required placeholder="e.g. IOLTA Checking">
+      </label>
+      <label>Bank name
+        <input type="text" name="bank_name" placeholder="e.g. First Community Bank">
+      </label>
+      <label>Account number
+        <input type="text" name="account_number" placeholder="Stored encrypted">
+      </label>
+      <label class="span2">Notes
+        <textarea name="notes" rows="2"></textarea>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Create account</button>
+      <a href="{{ url_for('trust_overview') }}" class="btn btn-link">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

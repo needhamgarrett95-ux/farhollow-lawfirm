@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ account.name }} — Trust{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ account.name }}</h1>
+  <div>
+    <a href="{{ url_for('trust_transaction_new', account_id=account.id) }}" class="btn btn-primary">Record transaction</a>
+    <a href="{{ url_for('trust_reconcile', account_id=account.id) }}" class="btn">Reconcile</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Account details</h2>
+    <dl>
+      <dt>Bank</dt><dd>{{ account.bank_name or '—' }}</dd>
+      <dt>Account #</dt><dd>{% if account.acct_display %}•••{{ account.acct_display[-4:] }}{% else %}—{% endif %}</dd>
+      <dt>Book balance</dt><dd><strong>${{ account.balance_cents|cents }}</strong></dd>
+      {% if account.notes %}<dt>Notes</dt><dd>{{ account.notes }}</dd>{% endif %}
+    </dl>
+  </div>
+  <div class="detail-card">
+    <h2>Reconciliation</h2>
+    {% if last_recon %}
+    <dl>
+      <dt>Last statement</dt><dd>{{ last_recon.statement_date }}</dd>
+      <dt>Status</dt><dd><span class="badge badge-{{ 'active' if last_recon.status == 'matched' else 'pending' }}">{{ last_recon.status }}</span></dd>
+    </dl>
+    {% else %}
+    <p class="muted">Never reconciled. <strong>Reconcile monthly — this is not optional (RPC 1.15A).</strong></p>
+    {% endif %}
+    <p><a href="{{ url_for('trust_reconcile', account_id=account.id) }}">Reconcile this account →</a></p>
+  </div>
+</div>
+
+<h2>Client balances</h2>
+{% if client_balances %}
+<table class="table">
+  <thead><tr><th>Client</th><th>Balance</th><th></th></tr></thead>
+  <tbody>
+  {% for c in client_balances %}
+    <tr>
+      <td>{{ c.first_name }} {{ c.last_name }}</td>
+      <td><strong>${{ c.bal|cents }}</strong></td>
+      <td class="nowrap">
+        <a href="{{ url_for('trust_client_ledger', client_id=c.client_id) }}">Ledger</a> ·
+        <a href="{{ url_for('trust_transaction_new', account_id=account.id, client_id=c.client_id) }}">New transaction</a>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No client funds in this account yet.</p>
+{% endif %}
+
+<h2>Recent transactions</h2>
+{% if transactions %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Description</th><th>Amount</th><th>By</th><th></th></tr></thead>
+  <tbody>
+  {% for t in transactions %}
+    <tr>
+      <td class="nowrap">{{ t.txn_date }}</td>
+      <td>{{ t.first_name }} {{ t.last_name }}</td>
+      <td><span class="badge badge-{{ 'active' if t.txn_type == 'deposit' else 'pending' if t.txn_type.startswith('transfer') or t.txn_type.startswith('reversal') else 'closed' }}">{{ t.txn_type.replace('_', ' ') }}</span></td>
+      <td>{{ t.description }}{% if t.reference %}<br><span class="muted small">Ref: {{ t.reference }}</span>{% endif %}</td>
+      <td class="nowrap">${{ t.amount_cents|cents }}</td>
+      <td class="muted small">{{ t.created_by_name or '—' }}</td>
+      <td class="nowrap"><a href="{{ url_for('trust_transaction_new', account_id=account.id, client_id=t.client_id, reverse_id=t.id) }}">Reverse</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No transactions yet.</p>
+{% endif %}
+
+<p class="muted small">Transactions are permanent and cannot be edited or deleted. To correct an error, use the <strong>Reverse</strong> link to create an offsetting entry.</p>
+{% endblock %}

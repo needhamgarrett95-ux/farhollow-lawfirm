@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Trust Trial Balance{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Trust Trial Balance</h1>
+  <a href="{{ url_for('trust_overview') }}" class="btn btn-link">Back to trust</a>
+</div>
+<p class="muted">Every client's ledger balance, per account. The sum of client ledgers must equal the account's book balance.</p>
+
+{% for r in report %}
+<div class="detail-card">
+  <h2>{{ r.account.name }} — book balance: ${{ r.book_cents|cents }}</h2>
+  {% if r.client_balances %}
+  <table class="table">
+    <thead><tr><th>Client</th><th>Balance</th></tr></thead>
+    <tbody>
+    {% for c in r.client_balances %}
+      <tr><td>{{ c.first_name }} {{ c.last_name }}</td><td class="nowrap">${{ c.bal|cents }}</td></tr>
+    {% endfor %}
+    <tr>
+      <td><strong>Total of client ledgers</strong></td>
+      <td class="nowrap"><strong>${{ r.ledger_total_cents|cents }}</strong></td>
+    </tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No client funds.</p>
+  {% endif %}
+  <p>
+    {% if r.balanced %}
+    <span class="badge badge-active">Balanced — ledgers equal book balance</span>
+    {% else %}
+    <span class="badge badge-pending">OUT OF BALANCE — investigate immediately</span>
+    {% endif %}
+  </p>
+</div>
+{% endfor %}
+{% endblock %}

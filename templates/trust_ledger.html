@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Trust Ledger — {{ client.first_name }} {{ client.last_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Trust Ledger: {{ client.first_name }} {{ client.last_name }}</h1>
+</div>
+
+<form method="get" class="search-row">
+  <input type="date" name="start" value="{{ start }}" placeholder="From">
+  <input type="date" name="end" value="{{ end }}" placeholder="To">
+  <button type="submit" class="btn">Filter</button>
+  {% if start or end %}<a href="{{ url_for('trust_client_ledger', client_id=client.id) }}" class="btn btn-link">Clear</a>{% endif %}
+</form>
+
+<div class="stat-row">
+  <div class="stat">
+    <span class="stat-num">${{ balance_cents|cents }}</span>
+    <span class="stat-label">Current balance{% if start or end %} (in period){% endif %}</span>
+  </div>
+</div>
+
+{% if transactions %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Account</th><th>Type</th><th>Description</th><th>Amount</th><th>Balance</th></tr></thead>
+  <tbody>
+  {% for t in transactions %}
+    <tr>
+      <td class="nowrap">{{ t.txn_date }}</td>
+      <td>{{ t.account_name }}</td>
+      <td><span class="badge badge-{{ 'active' if t.txn_type == 'deposit' else 'pending' if t.txn_type.startswith('transfer') or t.txn_type.startswith('reversal') else 'closed' }}">{{ t.txn_type.replace('_', ' ') }}</span></td>
+      <td>{{ t.description }}{% if t.reference %}<br><span class="muted small">Ref: {{ t.reference }}</span>{% endif %}{% if t.reverses_id %}<br><span class="muted small">Reverses txn #{{ t.reverses_id }}</span>{% endif %}</td>
+      <td class="nowrap">${{ t.amount_cents|cents }}</td>
+      <td class="nowrap"><strong>${{ t.running_cents|cents }}</strong></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No trust transactions for this client in the selected period.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Reconcile {{ account.name }} — Trust{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Reconcile: {{ account.name }}</h1>
+  <a href="{{ url_for('trust_account_detail', account_id=account.id) }}" class="btn btn-link">Back to account</a>
+</div>
+
+<div class="alert alert-warning">
+  <strong>Monthly reconciliation is required by WSBA (RPC 1.15A).</strong>
+  Compare your bank statement's ending balance to the book balance below.
+  If they don't match, find the difference before month-end — do not ignore it.
+</div>
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Book balance (this software)</h2>
+    <p><span class="stat-num">${{ book_cents|cents }}</span></p>
+    <p class="muted small">Sum of all client ledgers in this account, as of right now.</p>
+  </div>
+  <div class="detail-card">
+    <h2>Record a reconciliation</h2>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+      <label>Bank statement date *
+        <input type="date" name="statement_date" required>
+      </label>
+      <label>Statement ending balance ($) *
+        <input type="text" name="statement_balance" required placeholder="0.00">
+      </label>
+      <label>Notes
+        <textarea name="notes" rows="2" placeholder="Outstanding checks, deposits in transit, etc."></textarea>
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save reconciliation</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<h2>Reconciliation history</h2>
+{% if history %}
+<table class="table">
+  <thead><tr><th>Statement date</th><th>Bank balance</th><th>Book balance</th><th>Status</th><th>By</th><th>Notes</th></tr></thead>
+  <tbody>
+  {% for r in history %}
+    <tr class="{% if r.status != 'matched' %}row-urgent{% endif %}">
+      <td class="nowrap">{{ r.statement_date }}</td>
+      <td class="nowrap">${{ r.statement_balance_cents|cents }}</td>
+      <td class="nowrap">${{ r.book_balance_cents|cents }}</td>
+      <td><span class="badge badge-{{ 'active' if r.status == 'matched' else 'closed' }}">{{ r.status }}</span></td>
+      <td class="muted small">{{ r.reconciled_by_name or '—' }}</td>
+      <td class="muted small">{{ r.notes or '—' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No reconciliations recorded yet.</p>
+{% endif %}
+{% endblock %}

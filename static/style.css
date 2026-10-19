@@ -336,3 +336,6 @@ dd { margin: 0; }
 @media (max-width: 700px) {
   .update-banner { flex-direction: column; align-items: stretch; }
 }
+
+/* Trust accounting */
+.report-links { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
