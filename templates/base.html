@@ -19,13 +19,17 @@
 {% if session.get('user_id') %}
 <header class="topbar-cf">
   <div class="nav-inner">
-    <div class="monogram">DGM</div>
-    <div class="firm-name">Law Office of Derek G. Medina<small>Port Angeles, WA</small></div>
+    <div class="nav-brand">
+      <div class="monogram">DGM</div>
+      <div class="firm-name">Law Office of Derek G. Medina<small>Port Angeles, WA</small></div>
+    </div>
+    <nav class="nav-tabs">
     {% for item in nav_items %}
     {% if perms.get(item.permission) %}
     <a class="tlink {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">{{ icon(item.icon, 17) }}<span class="tlink-label">{{ item.label }}</span>{% if item.badge and nav_deadline_count %}<span class="bdg">{{ nav_deadline_count }}</span>{% endif %}</a>
     {% endif %}
     {% endfor %}
+    </nav>
     <div class="nav-right">
       <div class="user-menu">
         <div class="avatar" id="avatarBtn" title="{{ session.get('username') }}">{{ (session.get('username') or 'U')[:2].upper() }}</div>

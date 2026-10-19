@@ -51,21 +51,21 @@ INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(INSTANCE_DIR, "lawfirm.db")
-SECRET_PATH = os.path.join(INSTANCE_DIR, "secret.key")
-
 app = Flask(__name__)
 
-# Secret key: generated once, stored on disk so sessions survive restarts.
-if os.path.exists(SECRET_PATH):
-    with open(SECRET_PATH, "r") as f:
-        app.secret_key = f.read().strip()
-else:
-    app.secret_key = secrets.token_hex(32)
-    with open(SECRET_PATH, "w") as f:
-        f.write(app.secret_key)
+# Session secret: generated fresh on EVERY server start (ephemeral, never
+# written to disk). Restarting the server — including updates — invalidates
+# all sessions, so everyone must log back in. This is intentional (security).
+# NOTE: This is NOT the data encryption key (instance/data.key, see crypto.py),
+# which must NEVER be rotated or encrypted client data becomes unrecoverable.
+app.secret_key = secrets.token_hex(32)
 
 SESSION_TIMEOUT_MINUTES = 30
+# Browser-session cookie: no explicit expiry, dies when the browser closes.
+app.config["SESSION_PERMANENT"] = False
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB upload cap
 
 CASE_TYPES = ["divorce", "custody", "support", "adoption", "other"]

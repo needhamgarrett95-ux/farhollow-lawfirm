@@ -1136,3 +1136,16 @@ synced emails stay in their cases.
 Disconnecting removes the connection. Synced emails stay attached to their
 cases. Calendar links are removed (pushed Google events stay on Google but
 won't update further).
+
+## 37. Login sessions (v2.2.1 security update)
+
+**How logins work now:**
+- When you close your browser completely, you are logged out. Opening the app again asks you to log in.
+- When the server restarts (including after a software update), **everyone** is logged out and must log back in. This is intentional — it keeps client data safe.
+- If you don't touch the app for 30 minutes, you are logged out automatically (inactivity timeout).
+
+**This is normal — don't worry if:**
+- You just updated and it asks you to log in again. That's supposed to happen.
+- You closed the browser and have to log in again. That's supposed to happen.
+
+**Your data is NOT affected.** Logging out never deletes or changes any clients, cases, documents, or settings. It only ends your login session.

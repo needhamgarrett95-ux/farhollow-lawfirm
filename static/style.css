@@ -579,6 +579,10 @@ dd { margin: 0; }
   max-width: 1280px; margin: 0 auto; padding: 0 28px;
   display: flex; align-items: center; gap: 8px; height: 66px;
 }
+/* Brand block (logo + firm name) pinned left; tabs sit immediately after it,
+   left-aligned; user menu pinned right. No dead space between brand and tabs. */
+.nav-brand { display: flex; align-items: center; flex-shrink: 0; }
+.nav-tabs { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .monogram {
   width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
   background: linear-gradient(135deg, var(--gold), var(--gold-light));
@@ -623,10 +627,10 @@ dd { margin: 0; }
 @media (max-width: 1200px) { .masonry { columns: 2; } }
 @media (max-width: 1150px) {
   .firm-name { display: none; }
-  .topbar-cf .nav-inner {
+  .nav-tabs {
     overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
   }
-  .topbar-cf .nav-inner::-webkit-scrollbar { display: none; }
+  .nav-tabs::-webkit-scrollbar { display: none; }
 }
 @media (max-width: 760px) {
   .masonry { columns: 1; }
