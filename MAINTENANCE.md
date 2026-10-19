@@ -926,3 +926,27 @@ Find the transaction on the account page and click **Reverse**. Enter what went 
 - Do NOT try to edit or delete a trust transaction — use a reversing entry.
 - Do NOT let staff access trust accounts (the software blocks this, but don't share your login either).
 - Do NOT commingle: client money and firm money must never mix in the same account.
+
+---
+
+## 28. Document templates — attorney/admin only
+
+Document templates let you generate common legal documents with client and case information filled in automatically.
+
+**How to use a template:**
+
+1. Click **Templates** in the top menu.
+2. Pick the document you need (Petition for Dissolution, Parenting Plan, Child Support Worksheet, Declaration, or Cover Letter).
+3. Choose the **client** at the top. Names, spouse, and children fill in automatically.
+4. Optionally choose a **case**. If you pick a case, the finished PDF is saved to that case's documents automatically.
+5. Fill in the remaining fields. Anything you don't know can be edited later.
+6. Click **Preview** to review what the document will say.
+7. Click **Generate PDF** to create the finished document. It downloads to your computer (and is saved to the case, if you picked one).
+
+**Important things to know:**
+
+- These are **starting drafts, not finished legal documents**. Always review every word before filing or sending anything.
+- The **Child Support Worksheet is an estimate**. It uses a simplified version of the Washington support schedule. Always verify the numbers with the official state schedule before relying on them.
+- Generated documents are saved under the case's **Documents** tab with version numbers, just like uploaded files. Generating the same template twice creates version 2, 3, and so on — nothing is overwritten.
+- Only attorneys and admins can use templates. Staff accounts do not see the Templates menu.
+- Every generated document is recorded in the audit log.

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Preview — {{ template.name }}{% endblock %}
+{% block content %}
+<h1>Preview: {{ template.name }}</h1>
+{% if client %}<p class="muted">Client: <b>{{ client.first_name }} {{ client.last_name }}</b>{% if case %} &nbsp;|&nbsp; Case: <b>{{ case.case_number }}</b>{% endif %}</p>{% endif %}
+
+<div class="detail-card">
+  <h2>Document contents</h2>
+  <dl>
+    {% for f in template.fields %}
+      {% if f.type == 'child-list' %}
+      <dt>{{ f.label }}</dt>
+      <dd>{% if children %}{{ children|map(attribute='name')|join('; ') }}{% else %}<span class="muted">None</span>{% endif %}</dd>
+      {% elif f.type != 'info' %}
+      <dt>{{ f.label }}</dt>
+      <dd class="pre">{{ values.get(f.name, '') or '—' }}</dd>
+      {% endif %}
+    {% endfor %}
+  </dl>
+  {% if support_calc %}
+  <h2>Support calculation</h2>
+  <dl>
+    <dt>Combined monthly net income</dt><dd>{{ "${:,.2f}".format(support_calc.combined) }}</dd>
+    <dt>Basic obligation (simplified)</dt><dd>{{ "${:,.2f}".format(support_calc.basic) }}</dd>
+    <dt>Total monthly obligation</dt><dd><b>{{ "${:,.2f}".format(support_calc.total) }}</b></dd>
+    <dt>{{ values.get('parent_a', 'Parent A') }}'s share</dt><dd><b>{{ "${:,.2f}".format(support_calc.share_a) }}</b></dd>
+    <dt>{{ values.get('parent_b', 'Parent B') }}'s share</dt><dd><b>{{ "${:,.2f}".format(support_calc.share_b) }}</b></dd>
+  </dl>
+  <p class="muted small">Estimate only — verify with the official WA schedule before filing.</p>
+  {% endif %}
+</div>
+
+{% if case %}
+<p class="muted">Generating will save the PDF to case <b>{{ case.case_number }}</b>'s documents ({{ template.doc_category }}) and download it.</p>
+{% else %}
+<p class="alert alert-warning">No case selected — the PDF will download but <b>not</b> be saved to any case. Go back and pick a case to auto-file it.</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('template_generate', key=template.key) }}">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+  <input type="hidden" name="client_id" value="{{ client.id if client else '' }}">
+  <input type="hidden" name="case_id" value="{{ case.id if case else '' }}">
+  {% for f in template.fields %}
+    {% if f.type not in ('info', 'child-list') %}
+    <input type="hidden" name="{{ f.name }}" value="{{ values.get(f.name, '') }}">
+    {% endif %}
+  {% endfor %}
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">Generate PDF</button>
+    <a href="{{ url_for('template_fill', key=template.key) }}{% if client %}?client_id={{ client.id }}{% endif %}{% if case %}{{ '&' if client else '?' }}case_id={{ case.id }}{% endif %}" class="btn btn-link">Back to edit</a>
+  </div>
+</form>
+{% endblock %}

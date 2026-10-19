@@ -2386,6 +2386,240 @@ def invoice_pdf(invoice_id):
 
 
 # ----------------------------------------------------------------------------
+# Document templates — attorney and admin only. Staff is blocked.
+# Templates auto-fill from client/case data and generate PDFs that are
+# saved to the case's documents with versioning.
+# ----------------------------------------------------------------------------
+from template_defs import get_template, template_list
+from template_pdf import build_template_pdf, calc_support
+
+
+def _template_party_context(client_id, case_id):
+    """Return (client_dict|None, children_list, case_row|None)."""
+    db = get_db()
+    client = None
+    children = []
+    case = None
+    if client_id:
+        row = db.execute(
+            "SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+        if row:
+            client = _decrypt_client(row)
+            children = [
+                _decrypt_child(k) for k in db.execute(
+                    "SELECT * FROM children WHERE client_id = ? ORDER BY name",
+                    (client_id,)).fetchall()
+            ]
+    if case_id:
+        case = db.execute(
+            "SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+    return client, children, case
+
+
+def _resolve_placeholders(text, client, children, case):
+    """Replace {{placeholders}} in template text from DB records."""
+    if not text:
+        return ""
+    out = str(text)
+    today = date.today().isoformat()
+    subs = {"{{today}}": today}
+    if client:
+        full = f"{client.get('first_name', '')} {client.get('last_name', '')}".strip()
+        subs["{{client.name}}"] = full
+        subs["{{client.first_name}}"] = client.get("first_name", "") or ""
+        subs["{{client.last_name}}"] = client.get("last_name", "") or ""
+        subs["{{client.spouse_name}}"] = client.get("spouse_name", "") or ""
+        subs["{{client.role}}"] = "Petitioner"
+    if children:
+        names = "; ".join(
+            f"{c.get('name', '')} (DOB: {c.get('date_of_birth') or 'unknown'})"
+            for c in children)
+        subs["{{client.children}}"] = names
+    else:
+        subs["{{client.children}}"] = ""
+    if case:
+        subs["{{case.number}}"] = case["case_number"] or ""
+        subs["{{case.title}}"] = case["title"] or ""
+    else:
+        subs["{{case.number}}"] = ""
+        subs["{{case.title}}"] = ""
+    # recipient_name is a form field, not DB — leave for later pass
+    for ph, val in subs.items():
+        out = out.replace(ph, val)
+    return out
+
+
+def _prefill_value(field, client, children, case):
+    """Compute the pre-filled value for a template field."""
+    src = field.get("source")
+    if src == "client.name" and client:
+        return f"{client.get('first_name', '')} {client.get('last_name', '')}".strip()
+    if src == "client.spouse_name" and client:
+        return client.get("spouse_name", "") or ""
+    if src == "case.number" and case:
+        return case["case_number"] or ""
+    if src == "case.title" and case:
+        return case["title"] or ""
+    default = field.get("default", "")
+    return _resolve_placeholders(default, client, children, case)
+
+
+def _gather_template_values(tmpl, form, client, children, case):
+    """Read submitted form values for a template's fields, resolving placeholders."""
+    values = {}
+    for f in tmpl["fields"]:
+        if f["type"] in ("info", "child-list"):
+            continue
+        raw = form.get(f["name"], "")
+        # Resolve any placeholders the user left in (e.g. {{today}})
+        values[f["name"]] = _resolve_placeholders(raw, client, children, case)
+        # Also resolve recipient_name-style placeholders used inside body text
+        values[f["name"]] = values[f["name"]].replace(
+            "{{recipient_name}}", form.get("recipient_name", ""))
+    # Second pass: allow {{field_name}} cross-references (e.g. body uses {{recipient_name}})
+    for f in tmpl["fields"]:
+        if f["type"] in ("info", "child-list"):
+            continue
+        v = values[f["name"]]
+        for g in tmpl["fields"]:
+            if g["type"] in ("info", "child-list"):
+                continue
+            v = v.replace("{{%s}}" % g["name"], values.get(g["name"], ""))
+        values[f["name"]] = v
+    return values
+
+
+def _save_generated_doc(case_id, original_name, pdf_bytes, category, notes):
+    """Save generated PDF bytes into a case's documents with versioning."""
+    db = get_db()
+    row = db.execute(
+        "SELECT MAX(version) AS v FROM documents"
+        " WHERE case_id = ? AND original_name = ? AND category = ?",
+        (case_id, original_name, category),
+    ).fetchone()
+    version = (row["v"] or 0) + 1
+    stored = f"{uuid.uuid4().hex}_{original_name}"
+    path = os.path.join(_case_doc_dir(case_id), stored)
+    with open(path, "wb") as fh:
+        fh.write(pdf_bytes)
+    size = os.path.getsize(path)
+    db.execute(
+        "INSERT INTO documents (case_id, original_name, stored_name,"
+        " category, file_size, version, uploaded_by, notes, uploaded_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (case_id, original_name, stored, category, size, version,
+         session.get("username"), notes,
+         datetime.now(timezone.utc).isoformat()),
+    )
+    db.commit()
+    return version
+
+
+@app.route("/templates")
+@role_required("admin", "attorney")
+def template_gallery():
+    return render_template("templates.html", templates=template_list())
+
+
+@app.route("/templates/<key>")
+@role_required("admin", "attorney")
+def template_fill(key):
+    tmpl = get_template(key)
+    if not tmpl:
+        abort(404)
+    db = get_db()
+    client_id = request.args.get("client_id", type=int)
+    case_id = request.args.get("case_id", type=int)
+    client, children, case = _template_party_context(client_id, case_id)
+    clients = db.execute(
+        "SELECT id, first_name, last_name FROM clients ORDER BY last_name, first_name"
+    ).fetchall()
+    if client_id:
+        cases = db.execute(
+            "SELECT id, case_number, title FROM cases WHERE client_id = ?"
+            " ORDER BY case_number", (client_id,)).fetchall()
+    else:
+        cases = db.execute(
+            "SELECT id, case_number, title FROM cases ORDER BY case_number"
+        ).fetchall()
+    prefill = {}
+    for f in tmpl["fields"]:
+        if f["type"] not in ("info", "child-list"):
+            prefill[f["name"]] = _prefill_value(f, client, children, case)
+    return render_template(
+        "template_fill.html", template=tmpl, clients=clients, cases=cases,
+        client=client, children=children, case=case, prefill=prefill)
+
+
+@app.route("/templates/<key>/preview", methods=["POST"])
+@role_required("admin", "attorney")
+def template_preview(key):
+    tmpl = get_template(key)
+    if not tmpl:
+        abort(404)
+    check_csrf()
+    client_id = request.form.get("client_id", type=int)
+    case_id = request.form.get("case_id", type=int)
+    client, children, case = _template_party_context(client_id, case_id)
+    values = _gather_template_values(tmpl, request.form, client, children, case)
+    support_calc = None
+    if key == "support_worksheet":
+        support_calc = calc_support(
+            values.get("parent_a_income"), values.get("parent_b_income"),
+            len(children), values.get("daycare"), values.get("health_insurance"))
+    audit("template_preview",
+          f"Previewed {tmpl['name']} for "
+          f"{client['first_name']} {client['last_name']}" if client else f"Previewed {tmpl['name']}")
+    return render_template(
+        "template_preview.html", template=tmpl, values=values,
+        client=client, children=children, case=case,
+        support_calc=support_calc)
+
+
+@app.route("/templates/<key>/generate", methods=["POST"])
+@role_required("admin", "attorney")
+def template_generate(key):
+    tmpl = get_template(key)
+    if not tmpl:
+        abort(404)
+    check_csrf()
+    client_id = request.form.get("client_id", type=int)
+    case_id = request.form.get("case_id", type=int)
+    client, children, case = _template_party_context(client_id, case_id)
+    values = _gather_template_values(tmpl, request.form, client, children, case)
+    # Enrich data for the PDF builders
+    data = dict(values)
+    data["children"] = [{"name": c.get("name", ""),
+                         "date_of_birth": c.get("date_of_birth", "")}
+                        for c in children]
+    data["case_number"] = case["case_number"] if case else ""
+    try:
+        logo_path = os.path.join(BASE_DIR, "static", "dgm-logo.png")
+        pdf_bytes = build_template_pdf(tmpl["layout"], data, logo_path=logo_path)
+    except Exception as e:
+        flash(f"Could not generate document: {e}", "error")
+        return redirect(url_for("template_fill", key=key))
+    filename = f"{tmpl['file_stem']}.pdf"
+    if case:
+        version = _save_generated_doc(
+            case["id"], filename, pdf_bytes, tmpl["doc_category"],
+            f"Generated from template: {tmpl['name']}")
+        audit("template_generate",
+              f"Generated {tmpl['name']} (v{version}) for case"
+              f" {case['case_number']} (id={case['id']})")
+    else:
+        who = f"{client['first_name']} {client['last_name']}" if client else "no client"
+        audit("template_generate",
+              f"Generated {tmpl['name']} for {who} (not filed to a case)")
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
+# ----------------------------------------------------------------------------
 # Trust accounting (IOLTA / RPC 1.15A/B) — attorney and admin only.
 # Staff is blocked: trust funds are never visible to the staff role.
 # ----------------------------------------------------------------------------

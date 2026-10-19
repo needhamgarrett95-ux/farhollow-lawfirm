@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ template.name }} — Templates{% endblock %}
+{% block content %}
+<h1>{{ template.name }}</h1>
+<p class="muted">{{ template.description }}</p>
+
+<form method="get" action="{{ url_for('template_fill', key=template.key) }}" class="form-card" style="margin-bottom:16px;">
+  <div class="form-grid">
+    <label>Client
+      <select name="client_id" onchange="this.form.submit()">
+        <option value="">— Select a client —</option>
+        {% for cl in clients %}
+        <option value="{{ cl.id }}" {% if client and client.id == cl.id %}selected{% endif %}>{{ cl.last_name }}, {{ cl.first_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Case (optional)
+      <select name="case_id" onchange="this.form.submit()">
+        <option value="">— No case —</option>
+        {% for c in cases %}
+        <option value="{{ c.id }}" {% if case and case.id == c.id %}selected{% endif %}>{{ c.case_number }} — {{ c.title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <p class="muted small">Selecting a client auto-fills names, children, and other known data. The generated PDF will be saved to the selected case's documents.</p>
+</form>
+
+<form method="post" action="{{ url_for('template_preview', key=template.key) }}" class="form-card">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+  <input type="hidden" name="client_id" value="{{ client.id if client else '' }}">
+  <input type="hidden" name="case_id" value="{{ case.id if case else '' }}">
+  <div class="form-grid">
+    {% for f in template.fields %}
+      {% if f.type == 'info' %}
+      <div class="span2 alert alert-warning">{{ f.default }}</div>
+      {% elif f.type == 'child-list' %}
+      <div class="span2">
+        <label>{{ f.label }}</label>
+        {% if children %}
+        <ul class="plain-list">
+          {% for ch in children %}
+          <li>{{ ch.name }}{% if ch.date_of_birth %} — DOB {{ ch.date_of_birth }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted small">No children on this client's record. Add children on the client page if needed.</p>
+        {% endif %}
+      </div>
+      {% elif f.type == 'textarea' %}
+      <label class="span2">{{ f.label }}{% if f.required %} *{% endif %}
+        <textarea name="{{ f.name }}" rows="{{ f.rows or 4 }}" {% if f.required %}required{% endif %}>{{ prefill.get(f.name, '') }}</textarea>
+      </label>
+      {% elif f.type == 'dropdown' %}
+      <label>{{ f.label }}{% if f.required %} *{% endif %}
+        <select name="{{ f.name }}" {% if f.required %}required{% endif %}>
+          {% for opt in f.options %}
+          <option value="{{ opt }}" {% if prefill.get(f.name) == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% elif f.type == 'date' %}
+      <label>{{ f.label }}{% if f.required %} *{% endif %}
+        <input type="date" name="{{ f.name }}" value="{{ prefill.get(f.name, '') }}" {% if f.required %}required{% endif %}>
+      </label>
+      {% elif f.type == 'currency' %}
+      <label>{{ f.label }}{% if f.required %} *{% endif %}
+        <input type="text" name="{{ f.name }}" value="{{ prefill.get(f.name, '') }}" placeholder="0.00" inputmode="decimal" {% if f.required %}required{% endif %}>
+      </label>
+      {% else %}
+      <label>{{ f.label }}{% if f.required %} *{% endif %}
+        <input type="text" name="{{ f.name }}" value="{{ prefill.get(f.name, '') }}" {% if f.required %}required{% endif %}>
+      </label>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">Preview</button>
+    <a href="{{ url_for('template_gallery') }}" class="btn btn-link">Cancel</a>
+  </div>
+</form>
+{% endblock %}

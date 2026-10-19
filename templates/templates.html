@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Document Templates — Case Management{% endblock %}
+{% block content %}
+<h1>Document Templates</h1>
+<p class="muted">Pick a template, choose a client, and generate a filled document. Generated files save to the case's documents automatically.</p>
+<div class="card-grid">
+  {% for t in templates %}
+  <div class="detail-card template-card">
+    <h2>{{ t.name }}</h2>
+    <p class="muted">{{ t.description }}</p>
+    <a href="{{ url_for('template_fill', key=t.key) }}" class="btn btn-primary">Use template</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
