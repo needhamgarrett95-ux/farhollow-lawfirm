@@ -592,15 +592,14 @@ dd { margin: 0; }
 /* Brand block (logo + firm name) pinned left; tabs sit immediately after it,
    left-aligned; user menu pinned right. No dead space between brand and tabs. */
 .nav-brand { display: flex; align-items: center; flex-shrink: 0; }
-/* Tabs fill the middle and scroll internally when there are too many to fit —
-   the scroll is clipped here so tabs can NEVER paint over the avatar. */
+/* Tabs fill the middle. Overflow is visible so dropdown menus can extend
+   below the nav bar (only 6 groups now, they fit without scrolling). */
 .nav-tabs {
   display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0;
   max-width: 100%;
-  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none;
+  overflow: visible;
   position: relative; z-index: 1;
 }
-.nav-tabs::-webkit-scrollbar { display: none; }
 /* --- Nav dropdown menus (grouped navigation) --- */
 .nav-dropdown { position: relative; flex-shrink: 0; }
 .nav-drop-btn { cursor: pointer; border: none; background: none; font: inherit; }
