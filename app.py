@@ -326,6 +326,14 @@ BEFORE DELETE ON audit_log
 BEGIN
     SELECT RAISE(ABORT, 'audit_log is append-only: deletes are not allowed');
 END;
+-- Dashboard widget customization. Each user can reorder / hide the
+-- dashboard widgets; the layout is stored as a JSON list of
+-- {"id": "<widget-id>", "visible": true} dicts in display order.
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    dashboard_layout TEXT,  -- JSON: [{"id": "deadlines", "visible": true}, ...] in display order
+    theme TEXT NOT NULL DEFAULT 'light'  -- 'light' or 'dark'
+);
 """
 
 
@@ -390,6 +398,22 @@ def init_db():
     # One-time migration: encrypt any plaintext sensitive fields written
     # before field-level encryption was enabled.
     _migrate_field_encryption(db)
+
+    # Migration for v2.0: dashboard widget customization + theme preference.
+    # SCHEMA's CREATE TABLE IF NOT EXISTS only runs at full init, so make
+    # sure existing databases get the table too. Also backfill the theme
+    # column for databases created before it was added.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id),
+            dashboard_layout TEXT,
+            theme TEXT NOT NULL DEFAULT 'light'
+        )"""
+    )
+    pcols = [r["name"] for r in db.execute("PRAGMA table_info(user_preferences)").fetchall()]
+    if "theme" not in pcols:
+        db.execute("ALTER TABLE user_preferences ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'")
+    db.commit()
 
     # Seed default admin on first run
     row = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()
@@ -1138,10 +1162,31 @@ def inject_update_info():
     """Make the app version and update status available in every template."""
     with _update_lock:
         info = dict(UPDATE_INFO)
+    # Theme preference (per-user, defaults to light)
+    theme = "light"
+    nav_deadline_count = 0
+    uid = session.get("user_id")
+    if uid:
+        try:
+            theme = get_user_theme(uid)
+        except Exception:
+            pass
+        try:
+            db = get_db()
+            soon = (date.today() + timedelta(days=7)).isoformat()
+            nav_deadline_count = db.execute(
+                "SELECT COUNT(*) AS c FROM calendar_events"
+                " WHERE completed = 0 AND event_date <= ?",
+                (soon,),
+            ).fetchone()["c"]
+        except Exception:
+            pass
     return {
         "app_version": APP_VERSION,
         "is_admin": is_admin(),
         "user_role": session.get("role", "staff"),
+        "theme": theme,
+        "nav_deadline_count": nav_deadline_count,
         # The banner is admin-only; the footer version tag is for everyone
         # (it doubles as the "server updated" notice for office computers).
         "update_available": bool(info.get("available")) and is_admin(),
@@ -1437,6 +1482,122 @@ def _count_active_admins(db):
 
 
 # ----------------------------------------------------------------------------
+# Dashboard widget customization (v2.0)
+# ----------------------------------------------------------------------------
+# The default widget order/visibility for the dashboard. Each widget dict is
+# {"id": <widget-id>, "visible": bool}. The frontend renders widgets in the
+# order of this list (or the user's saved override).
+DEFAULT_DASHBOARD_WIDGETS = [
+    {"id": "alerts", "visible": True},      # overdue + schedule alerts
+    {"id": "deadlines", "visible": True},   # filing deadlines timeline
+    {"id": "schedule", "visible": True},    # today's schedule
+    {"id": "actions", "visible": True},     # quick actions
+    {"id": "trust", "visible": True},       # trust balance (attorney/admin only)
+    {"id": "caseload", "visible": True},    # caseload donut
+    {"id": "clients", "visible": True},     # recent clients
+    {"id": "week", "visible": True},        # this week events
+    {"id": "backup", "visible": True},      # backup status (attorney/admin only)
+]
+KNOWN_DASHBOARD_WIDGETS = {w["id"] for w in DEFAULT_DASHBOARD_WIDGETS}
+
+
+def get_dashboard_layout(user_id):
+    """Return the user's dashboard widget layout: list of {id, visible} dicts
+    in display order. Falls back to DEFAULT_DASHBOARD_WIDGETS when the user
+    has not saved a customization."""
+    db = get_db()
+    row = db.execute(
+        "SELECT dashboard_layout FROM user_preferences WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    if row and row["dashboard_layout"]:
+        try:
+            saved = json.loads(row["dashboard_layout"])
+            if isinstance(saved, list) and saved:
+                cleaned = []
+                seen = set()
+                for w in saved:
+                    wid = (w or {}).get("id")
+                    if wid in KNOWN_DASHBOARD_WIDGETS and wid not in seen:
+                        cleaned.append({"id": wid, "visible": bool(w.get("visible", True))})
+                        seen.add(wid)
+                # Append any new widgets the user never saw (added since save).
+                for wid in [d["id"] for d in DEFAULT_DASHBOARD_WIDGETS]:
+                    if wid not in seen:
+                        cleaned.append({"id": wid, "visible": True})
+                if cleaned:
+                    return cleaned
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+    return [{"id": w["id"], "visible": w["visible"]} for w in DEFAULT_DASHBOARD_WIDGETS]
+
+
+def save_dashboard_layout(user_id, layout):
+    """Validate and persist a user's dashboard widget layout.
+
+    layout: list of {"id": ..., "visible": bool} dicts. Unknown widget ids
+    are rejected (ValueError). Unknowns aside, any missing known widgets are
+    appended as visible, and order follows the given list.
+    """
+    if not isinstance(layout, list) or not layout:
+        raise ValueError("layout must be a non-empty list")
+    cleaned = []
+    seen = set()
+    for w in layout:
+        if not isinstance(w, dict):
+            raise ValueError("each widget must be an object with id and visible")
+        wid = w.get("id")
+        if wid not in KNOWN_DASHBOARD_WIDGETS:
+            raise ValueError(f"unknown widget id: {wid!r}")
+        if wid in seen:
+            raise ValueError(f"duplicate widget id: {wid!r}")
+        cleaned.append({"id": wid, "visible": bool(w.get("visible", True))})
+        seen.add(wid)
+    for wid in [d["id"] for d in DEFAULT_DASHBOARD_WIDGETS]:
+        if wid not in seen:
+            cleaned.append({"id": wid, "visible": True})
+    db = get_db()
+    db.execute(
+        "INSERT INTO user_preferences (user_id, dashboard_layout)"
+        " VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET dashboard_layout = excluded.dashboard_layout",
+        (user_id, json.dumps(cleaned)),
+    )
+    db.commit()
+    return cleaned
+
+
+# ----------------------------------------------------------------------------
+# Theme preference (v2.0)
+# ----------------------------------------------------------------------------
+THEMES = ("light", "dark")
+
+
+def get_user_theme(user_id):
+    """Return the user's theme preference: 'light' or 'dark'."""
+    db = get_db()
+    row = db.execute(
+        "SELECT theme FROM user_preferences WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    theme = (row["theme"] if row and row["theme"] else "light")
+    return theme if theme in THEMES else "light"
+
+
+def set_user_theme(user_id, theme):
+    """Validate and save the user's theme ('light' or 'dark'). Only updates
+    the theme column so the saved dashboard layout is never clobbered."""
+    if theme not in THEMES:
+        raise ValueError(f"unknown theme: {theme!r}; must be 'light' or 'dark'")
+    db = get_db()
+    db.execute(
+        "INSERT INTO user_preferences (user_id, theme)"
+        " VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET theme = excluded.theme",
+        (user_id, theme),
+    )
+    db.commit()
+    return theme
+
+
+# ----------------------------------------------------------------------------
 # Dashboard
 # ----------------------------------------------------------------------------
 @app.route("/dashboard")
@@ -1468,6 +1629,7 @@ def dashboard():
     # Upcoming deadlines: not completed, due within 14 days. Anything within
     # 7 days is malpractice-critical and rendered red in the template.
     today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     soon = (date.today() + timedelta(days=14)).isoformat()
     deadlines = db.execute(
         "SELECT e.*, c.case_number, c.title FROM calendar_events e"
@@ -1483,19 +1645,137 @@ def dashboard():
         " ORDER BY e.event_date",
         (today,),
     ).fetchall()
+    # v2.0 widgets: today's schedule and the rest of this week.
+    today_events = db.execute(
+        "SELECT e.*, c.case_number, c.title FROM calendar_events e"
+        " LEFT JOIN cases c ON e.case_id = c.id"
+        " WHERE e.completed = 0 AND e.event_date = ?"
+        " ORDER BY e.event_time",
+        (today,),
+    ).fetchall()
+    week_events = db.execute(
+        "SELECT e.*, c.case_number, c.title FROM calendar_events e"
+        " LEFT JOIN cases c ON e.case_id = c.id"
+        " WHERE e.completed = 0 AND e.event_date >= ? AND e.event_date <= ?"
+        " ORDER BY e.event_date, e.event_time",
+        (tomorrow, soon),
+    ).fetchall()
     # Last backup status — shown prominently; a missing backup is a red flag.
     last_backup = db.execute(
         "SELECT * FROM backups ORDER BY id DESC LIMIT 1"
     ).fetchone()
     urgent_cutoff = (date.today() + timedelta(days=7)).isoformat()
     schedule_alert = get_clallam_schedule_alert()
+
+    # --- v2.0 widget data ------------------------------------------------
+    is_staff = session.get("role") not in ("admin", "attorney")
+
+    # Trust summary: attorney/admin only. Staff get None (no trust data at
+    # all in the template context) — the frontend must hide the widget.
+    trust_summary = None
+    if not is_staff:
+        accounts = []
+        total_cents = 0
+        for a in db.execute(
+            "SELECT id, name FROM trust_accounts WHERE is_active = 1 ORDER BY name"
+        ).fetchall():
+            bal = account_trust_balance(db, a["id"])
+            total_cents += bal
+            accounts.append({
+                "id": a["id"],
+                "name": a["name"],
+                "balance_cents": bal,
+            })
+        ledger_count = db.execute(
+            "SELECT COUNT(DISTINCT account_id || ':' || client_id) AS c"
+            " FROM trust_transactions"
+        ).fetchone()["c"]
+        trust_summary = {
+            "total_cents": total_cents,
+            "accounts": accounts,
+            "ledger_count": ledger_count,
+        }
+
+    # Caseload donut: active cases grouped by case type.
+    caseload_by_type = [
+        {"case_type": r["case_type"], "count": r["count"]}
+        for r in db.execute(
+            "SELECT case_type, COUNT(*) AS count FROM cases"
+            " WHERE status = 'active' GROUP BY case_type ORDER BY count DESC"
+        ).fetchall()
+    ]
+
+    # Recent clients widget: 8 most recently updated.
+    recent_clients = [
+        {"id": r["id"], "first_name": r["first_name"], "last_name": r["last_name"]}
+        for r in db.execute(
+            "SELECT id, first_name, last_name FROM clients"
+            " ORDER BY updated_at DESC LIMIT 8"
+        ).fetchall()
+    ]
+
+    layout = get_dashboard_layout(session["user_id"])
+    theme = get_user_theme(session["user_id"])
+
     return render_template(
         "dashboard.html", stats=stats, active_cases=active_cases,
         recent=recent, deadlines=deadlines, overdue=overdue,
         last_backup=last_backup, today=today, urgent_cutoff=urgent_cutoff,
         schedule_alert=schedule_alert,
         calendars_url=CLALLAM_CALENDARS_URL,
+        today_events=today_events, week_events=week_events,
+        trust_summary=trust_summary, caseload_by_type=caseload_by_type,
+        recent_clients=recent_clients, layout=layout, is_staff=is_staff,
+        theme=theme,
     )
+
+
+@app.route("/dashboard/customize", methods=["POST"])
+@login_required
+def dashboard_customize():
+    """Save the user's dashboard widget layout.
+
+    Accepts JSON {"widgets": [{"id": ..., "visible": bool}, ...]}.
+    Returns {"ok": true} on success, {"ok": false, "error": ...} on 400.
+    """
+    data = request.get_json(silent=True) or {}
+    widgets = data.get("widgets")
+    try:
+        save_dashboard_layout(session["user_id"], widgets)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/dashboard/customize/reset", methods=["POST"])
+@login_required
+def dashboard_customize_reset():
+    """Revert the user's dashboard layout to the default (theme untouched)."""
+    db = get_db()
+    db.execute(
+        "INSERT INTO user_preferences (user_id, dashboard_layout)"
+        " VALUES (?, NULL) ON CONFLICT(user_id) DO UPDATE SET dashboard_layout = NULL",
+        (session["user_id"],),
+    )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/dashboard/theme", methods=["POST"])
+@login_required
+def dashboard_theme():
+    """Save the user's theme preference ('light' or 'dark').
+
+    Accepts JSON {"theme": "dark"}. Returns {"ok": true} on success,
+    {"ok": false, "error": ...} on 400. Does not touch the saved
+    dashboard layout.
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        set_user_theme(session["user_id"], data.get("theme"))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True})
 
 
 # ----------------------------------------------------------------------------

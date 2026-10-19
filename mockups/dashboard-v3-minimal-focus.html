@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup 3 — Minimal Focus | Law Office of Derek G. Medina</title>
+<style>
+  :root{
+    --navy:#1a365d; --navy-dark:#122a4a;
+    --gold:#c9a227; --gold-soft:#f5edd3;
+    --bg:#ffffff; --wash:#f7f8fb;
+    --text:#1e2a3a; --muted:#8a96a8;
+    --red:#c0392b; --amber:#b97e0a;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  .wrap{max-width:860px;margin:0 auto;padding:34px 24px 60px}
+  /* Header row */
+  .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .monogram{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#e3c563);color:var(--navy-dark);font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center}
+  .brand span{font-size:13px;font-weight:700;color:var(--navy)}
+  .top-actions{display:flex;align-items:center;gap:10px}
+  .icon-btn{width:40px;height:40px;border-radius:12px;border:1px solid #e8ecf3;background:#fff;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:box-shadow .15s}
+  .icon-btn:hover{box-shadow:0 3px 10px rgba(26,54,93,.12)}
+  .avatar{width:40px;height:40px;border-radius:50%;background:var(--navy);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}
+  /* Greeting */
+  .greet{margin:34px 0 6px;font-size:34px;font-weight:800;letter-spacing:-.8px;color:var(--navy)}
+  .summary{font-size:17px;color:var(--muted);line-height:1.55;margin-bottom:26px;max-width:640px}
+  .summary b{color:var(--text);font-weight:700}
+  .summary .urgent{color:var(--red);font-weight:700}
+  /* Search */
+  .search{position:relative;margin-bottom:34px}
+  .search input{width:100%;padding:17px 20px 17px 52px;font-size:16px;border:2px solid #e8ecf3;border-radius:16px;outline:none;background:var(--wash);transition:border .15s,background .15s;color:var(--text)}
+  .search input:focus{border-color:var(--gold);background:#fff}
+  .search input::placeholder{color:var(--muted)}
+  .search .s-ico{position:absolute;left:19px;top:50%;transform:translateY(-50%);font-size:19px;color:var(--muted)}
+  .search .hint{position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--muted);background:#fff;border:1px solid #e8ecf3;border-radius:6px;padding:3px 8px}
+  /* Tiles */
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:34px}
+  .tile{background:var(--wash);border:1px solid #eef1f6;border-radius:18px;padding:24px 20px;cursor:pointer;transition:transform .14s,box-shadow .14s;text-decoration:none;color:var(--text);display:block}
+  .tile:hover{transform:translateY(-3px);box-shadow:0 10px 24px rgba(26,54,93,.10)}
+  .tile .t-ico{font-size:30px;margin-bottom:14px}
+  .tile .t-name{font-size:15.5px;font-weight:700;color:var(--navy)}
+  .tile .t-meta{font-size:13px;color:var(--muted);margin-top:5px;line-height:1.45}
+  .tile .t-meta b{color:var(--text)}
+  .tile.alert-tile{background:#fff8e6;border-color:#f0d98a}
+  /* Today strip */
+  .section-lbl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:14px}
+  .today{background:var(--navy);border-radius:18px;padding:22px;color:#fff;margin-bottom:14px}
+  .today .row{display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.12)}
+  .today .row:last-child{border-bottom:none}
+  .today .tm{font-size:13px;font-weight:700;color:var(--gold);min-width:74px}
+  .today .tt{font-size:14.5px;font-weight:600}
+  .today .ts{font-size:12.5px;color:#b9c7da}
+  .customize{margin-top:26px;text-align:center}
+  .customize button{background:none;border:1px dashed #c8d2e0;color:var(--muted);border-radius:12px;padding:12px 22px;font-size:13.5px;font-weight:600;cursor:pointer}
+  .customize button:hover{color:var(--navy);border-color:var(--navy)}
+  @media(max-width:640px){
+    .tiles{grid-template-columns:repeat(2,1fr)}
+    .greet{font-size:28px}
+    .summary{font-size:15.5px}
+    .wrap{padding:22px 16px 50px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="brand"><div class="monogram">DGM</div><span>Derek G. Medina</span></div>
+    <div class="top-actions">
+      <button class="icon-btn" title="Notifications">🔔</button>
+      <button class="icon-btn" title="Customize layout">⚙️</button>
+      <div class="avatar">DM</div>
+    </div>
+  </div>
+
+  <h1 class="greet">Good afternoon, Derek.</h1>
+  <p class="summary">You have <b>3 deadlines this week</b> and <b>2 hearings</b> on Friday's motion calendar. <span class="urgent">The Mitchell reply brief is due in 2 days.</span> Trust balance is healthy at $48,215.60.</p>
+
+  <div class="search">
+    <span class="s-ico">🔍</span>
+    <input type="text" placeholder="Search clients, cases, documents…">
+    <span class="hint">⌘K</span>
+  </div>
+
+  <div class="tiles">
+    <a class="tile alert-tile" href="#">
+      <div class="t-ico">⏱</div>
+      <div class="t-name">Deadlines</div>
+      <div class="t-meta"><b style="color:var(--red)">1 due in 2 days</b><br>2 more this week</div>
+    </a>
+    <a class="tile" href="#">
+      <div class="t-ico">📅</div>
+      <div class="t-name">Calendar</div>
+      <div class="t-meta"><b>3 events today</b><br>Next: Mitchell hearing Fri 9 AM</div>
+    </a>
+    <a class="tile" href="#">
+      <div class="t-ico">👥</div>
+      <div class="t-name">Clients</div>
+      <div class="t-meta"><b>42 active</b><br>1 new intake today</div>
+    </a>
+    <a class="tile" href="#">
+      <div class="t-ico">📁</div>
+      <div class="t-name">Cases</div>
+      <div class="t-meta"><b>18 open</b><br>9 dissolution · 5 custody</div>
+    </a>
+    <a class="tile" href="#">
+      <div class="t-ico">💰</div>
+      <div class="t-name">Trust</div>
+      <div class="t-meta"><b>$48,215.60</b><br>6 client ledgers</div>
+    </a>
+    <a class="tile" href="#">
+      <div class="t-ico">📄</div>
+      <div class="t-name">Documents</div>
+      <div class="t-meta"><b>5 templates</b><br>Generate in one tap</div>
+    </a>
+  </div>
+
+  <div class="section-lbl">Today at a glance</div>
+  <div class="today">
+    <div class="row"><span class="tm">9:00 AM</span><div><div class="tt">Motion hearing — Mitchell v. Mitchell</div><div class="ts">Judge Barnhart · Courtroom 1</div></div></div>
+    <div class="row"><span class="tm">11:30 AM</span><div><div class="tt">Client consult — J. Alvarez</div><div class="ts">New dissolution intake</div></div></div>
+    <div class="row"><span class="tm">2:00 PM</span><div><div class="tt">Settlement conference — Park</div><div class="ts">Family Court · 2.5 hrs</div></div></div>
+  </div>
+
+  <div class="customize">
+    <button>⚙️ Customize your dashboard</button>
+  </div>
+
+  <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:30px">Mockup 3 of 3 — "Minimal Focus" · Design concept only, not the live app</p>
+</div>
+</body>
+</html>

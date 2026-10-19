@@ -1,125 +1,324 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — Case Management{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Dashboard — Law Office of Derek G. Medina{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<div class="dash-wrap">
+  {% set widget_names = {'alerts': 'Alerts', 'deadlines': 'Filing Deadlines', 'schedule': "Today's Schedule", 'actions': 'Quick Actions', 'trust': 'Trust Balance', 'caseload': 'Active Caseload', 'clients': 'Recent Clients', 'week': 'This Week', 'backup': 'Backup Status'} %}
+  <div class="dash-head">
+    <div>
+      <h1>Overview</h1>
+      <p>{{ today }} · Here's what's happening at the firm</p>
+    </div>
+    <button class="customize-btn" id="customizeToggle">{{ icon('settings', 18) }} Edit layout</button>
+  </div>
 
-{% if schedule_alert %}
-<div class="alert alert-warning">
-  <strong>⚠ Clallam County court schedule:</strong> {{ schedule_alert }}
-  <div style="margin-top:8px">
-    <a href="{{ calendars_url }}" target="_blank" rel="noopener" class="btn btn-small">Review court calendars</a>
-    {% if user_role in ('admin', 'attorney') %}
-    <form method="post" action="{{ url_for('clallam_schedule_dismiss') }}" class="inline">
-      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
-      <button type="submit" class="btn btn-small">Dismiss</button>
-    </form>
+  <!-- Customize panel -->
+  <div class="customize-panel" id="customizePanel">
+    <h3>Dashboard layout</h3>
+    <p class="dash-sub" style="margin-bottom:14px">Show, hide, and reorder your widgets. Changes save automatically.</p>
+    <div id="widgetList">
+      {% for w in layout %}
+      <div class="widget-row" data-widget-id="{{ w.id }}">
+        <span class="w-name">{{ widget_names[w.id] }}</span>
+        <span class="w-controls">
+          <button class="w-btn w-up" title="Move up" aria-label="Move up">{{ icon('chevron-up', 16) }}</button>
+          <button class="w-btn w-down" title="Move down" aria-label="Move down">{{ icon('chevron-down', 16) }}</button>
+          <button class="w-btn w-toggle {{ '' if w.visible else 'off' }}" title="Show/hide" aria-label="Show or hide">
+            {{ icon('eye', 16) if w.visible else icon('eye-off', 16) }}
+          </button>
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="customize-actions">
+      <button class="btn btn-small" id="resetLayout">Reset to default</button>
+      <button class="btn btn-small btn-primary" id="doneCustomizing">Done</button>
+    </div>
+  </div>
+
+  <div class="masonry" id="dashMasonry">
+    {% for w in layout %}
+    {% if w.visible and not (w.id in ('trust', 'backup') and is_staff) %}
+
+    {% if w.id == 'alerts' and (overdue or schedule_alert) %}
+    <div class="dash-card accent-red" data-widget="alerts">
+      <h3>{{ icon('alert', 18) }} Needs attention</h3>
+      {% if overdue %}
+      <div class="mini"><div><div class="t" style="color:var(--error)">{{ overdue|length }} overdue item{{ 's' if overdue|length != 1 }}</div>
+        <div class="s">{{ overdue[0].event_date }} — {{ overdue[0].title }}</div></div>
+        <div class="r urgent">Overdue</div></div>
+      {% endif %}
+      {% if schedule_alert %}
+      <div class="mini"><div><div class="t">Court schedule changed</div>
+        <div class="s">{{ schedule_alert }}</div></div>
+        <div class="r soon">Review</div></div>
+      {% endif %}
+    </div>
     {% endif %}
+
+    {% if w.id == 'deadlines' %}
+    <div class="dash-card" data-widget="deadlines">
+      <h3>{{ icon('deadlines', 18) }} Filing Deadlines</h3>
+      {% if deadlines %}
+      <div class="htl">
+        <div class="htl-line"></div>
+        {% set dl = deadlines[:4] %}
+        {% for e in dl %}
+        {% set pct = (loop.index0 / (dl|length - 1) * 86 + 7) if dl|length > 1 else 50 %}
+        <div class="htl-pt" style="left:{{ pct }}%">
+          <div class="htl-dot" style="background:{% if e.event_date <= urgent_cutoff %}var(--error){% elif e.event_date <= today %}var(--warning){% else %}var(--navy){% endif %}"></div>
+          <div class="htl-lbl">{{ e.title[:18] }}{% if e.title|length > 18 %}…{% endif %}</div>
+          <div class="htl-dt">{{ e.event_date[5:].replace('-', '/') }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% set next_d = deadlines[0] %}
+      <div class="dash-sub" style="margin-top:14px">{{ next_d.title }} due <b style="color:{% if next_d.event_date <= urgent_cutoff %}var(--error){% else %}var(--navy){% endif %}">{{ next_d.event_date }}</b>{% if next_d.case_number %} · {{ next_d.case_number }}{% endif %}</div>
+      {% else %}
+      <p class="dash-sub">No upcoming deadlines. <a href="{{ url_for('event_new') }}">Add one</a>.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if w.id == 'schedule' %}
+    <div class="dash-card" data-widget="schedule">
+      <h3>{{ icon('calendar', 18) }} Today's Schedule</h3>
+      {% if today_events %}
+        {% for e in today_events %}
+        <div class="mini"><div><div class="t">{{ e.title }}</div>
+          <div class="s">{% if e.event_time %}{{ e.event_time }} · {% endif %}{{ e.event_type|replace('_', ' ')|capitalize }}{% if e.case_number %} · {{ e.case_number }}{% endif %}</div></div></div>
+        {% endfor %}
+      {% else %}
+      <p class="dash-sub">Nothing scheduled today.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if w.id == 'actions' %}
+    <div class="dash-card" data-widget="actions">
+      <h3>{{ icon('plus', 18) }} Quick Actions</h3>
+      <div class="act-list">
+        <a class="act" href="{{ url_for('client_new') }}">{{ icon('clients', 22) }}New client</a>
+        <a class="act" href="{{ url_for('case_new') }}">{{ icon('cases', 22) }}New case</a>
+        <a class="act" href="{{ url_for('event_new') }}">{{ icon('calendar', 22) }}New event</a>
+        <a class="act" href="{{ url_for('deadline_calculator') }}">{{ icon('deadlines', 22) }}Deadlines</a>
+        {% if not is_staff %}
+        <a class="act" href="{{ url_for('template_gallery') }}">{{ icon('templates', 22) }}Template</a>
+        <a class="act" href="{{ url_for('trust_overview') }}">{{ icon('trust', 22) }}Trust</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if w.id == 'trust' and trust_summary %}
+    <div class="dash-card" data-widget="trust">
+      <h3>{{ icon('trust', 18) }} Trust Balance</h3>
+      <div class="dash-big">{{ trust_summary.total_cents|cents }}</div>
+      <div class="dash-sub">{{ trust_summary.ledger_count }} active client ledger{{ 's' if trust_summary.ledger_count != 1 }}</div>
+      {% if trust_summary.accounts %}
+      {% set max_bal = trust_summary.accounts|map(attribute='balance_cents')|max %}
+      <div class="bars">
+        {% for a in trust_summary.accounts[:7] %}
+        <div class="bar{% if loop.last %} hl{% endif %}" style="height:{{ ((a.balance_cents / max_bal * 92) + 8)|round|int if max_bal > 0 else 8 }}%" title="{{ a.name }}: {{ a.balance_cents|cents }}"></div>
+        {% endfor %}
+      </div>
+      <div class="bar-x">{% for a in trust_summary.accounts[:7] %}<span>{{ a.name[:6] }}</span>{% endfor %}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if w.id == 'caseload' %}
+    <div class="dash-card" data-widget="caseload">
+      <h3>{{ icon('cases', 18) }} Active Caseload</h3>
+      {% set total_cases = caseload_by_type|sum(attribute='count') %}
+      <div class="donut-wrap">
+        <svg class="donut" viewBox="0 0 120 120" role="img" aria-label="{{ total_cases }} active cases">
+          {% set circ = 301.6 %}
+          {% set colors = ['var(--brand)', 'var(--gold)', 'var(--info)', 'var(--purple)', 'var(--success)'] %}
+          <circle cx="60" cy="60" r="48" fill="none" stroke="var(--surface-soft)" stroke-width="16"/>
+          {% set ns = namespace(offset=0) %}
+          {% for seg in caseload_by_type[:5] %}
+          {% set frac = seg.count / total_cases if total_cases > 0 else 0 %}
+          {% set dash = (frac * circ)|round(1) %}
+          <circle cx="60" cy="60" r="48" fill="none" stroke="{{ colors[loop.index0 % 5] }}"
+                  stroke-width="16" stroke-dasharray="{{ dash }} {{ circ }}"
+                  stroke-dashoffset="{{ -ns.offset }}" stroke-linecap="round"
+                  transform="rotate(-90 60 60)"/>
+          {% set ns.offset = ns.offset + dash %}
+          {% endfor %}
+          <text x="60" y="58" text-anchor="middle" font-size="22" font-weight="800" fill="var(--navy)">{{ total_cases }}</text>
+          <text x="60" y="76" text-anchor="middle" font-size="10" fill="var(--muted)">cases</text>
+        </svg>
+        <div class="legend">
+          {% for seg in caseload_by_type[:5] %}
+          <div><span class="sw" style="background:{{ colors[loop.index0 % 5] }}"></span>{{ seg.case_type|capitalize }} <b>{{ seg.count }}</b></div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if w.id == 'clients' %}
+    <div class="dash-card" data-widget="clients">
+      <h3>{{ icon('clients', 18) }} Recent Clients</h3>
+      {% if recent_clients %}
+      <div class="chip-row">
+        {% set avatar_colors = ['#2b6cb0', '#1e7e4e', '#8a5a2b', '#6b4fa1', '#b0492f', '#0e7490', '#9a3412', '#4d7c0f'] %}
+        {% for c in recent_clients %}
+        <a class="client-chip" href="{{ url_for('client_detail', client_id=c.id) }}">
+          <span class="c-av" style="background:{{ avatar_colors[loop.index0 % 8] }}">{{ c.first_name[:1] }}{{ c.last_name[:1] }}</span>{{ c.first_name }} {{ c.last_name }}
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="dash-sub">No clients yet. <a href="{{ url_for('client_new') }}">Add your first client</a>.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if w.id == 'week' %}
+    <div class="dash-card" data-widget="week">
+      <h3>{{ icon('clock', 18) }} This Week</h3>
+      {% if week_events %}
+        {% for e in week_events[:5] %}
+        <div class="mini"><div><div class="t">{{ e.title }}</div>
+          <div class="s">{{ e.event_date[5:].replace('-', '/') }}{% if e.event_time %} · {{ e.event_time }}{% endif %}{% if e.case_number %} · {{ e.case_number }}{% endif %}</div></div>
+          <div class="r {% if e.event_date <= urgent_cutoff %}soon{% else %}muted{% endif %}">{{ e.event_date[5:].replace('-', '/') }}</div></div>
+        {% endfor %}
+      {% else %}
+      <p class="dash-sub">Nothing scheduled this week.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if w.id == 'backup' and not is_staff %}
+    <div class="dash-card" data-widget="backup">
+      <h3>{{ icon('checkmark', 18) }} Backup Status</h3>
+      {% if last_backup and last_backup.status == 'ok' %}
+      <div class="mini"><div><div class="t">Last backup successful</div>
+        <div class="s">{{ last_backup.timestamp[:19].replace('T', ' ') }} · {{ (last_backup.size_bytes / 1024)|round(1) }} KB</div></div>
+        <div class="r" style="color:var(--success)">OK</div></div>
+      {% elif last_backup %}
+      <div class="mini"><div><div class="t" style="color:var(--error)">Last backup failed</div>
+        <div class="s">{{ last_backup.notes }}</div></div>
+        <div class="r urgent">Failed</div></div>
+      {% else %}
+      <div class="mini"><div><div class="t" style="color:var(--warning)">No backups yet</div>
+        <div class="s">Back up now to protect your data.</div></div></div>
+      {% endif %}
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <form method="post" action="{{ url_for('backup_now') }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button type="submit" class="btn btn-small">Back Up Now</button>
+        </form>
+        <a href="{{ url_for('backup_history') }}" class="btn btn-small">History</a>
+      </div>
+    </div>
+    {% endif %}
+
+    {% endif %}
+    {% endfor %}
   </div>
 </div>
-{% endif %}
 
-{% if overdue %}
-<div class="alert alert-danger">
-  <strong>⚠ {{ overdue|length }} OVERDUE item{{ 's' if overdue|length != 1 }}:</strong>
-  <ul>
-    {% for e in overdue %}
-    <li>{{ e.event_date }} — {{ e.title }}{% if e.case_number %} ({{ e.case_number }}){% endif %}</li>
-    {% endfor %}
-  </ul>
-</div>
-{% endif %}
+<script>
+(function () {
+  var panel = document.getElementById('customizePanel');
+  var toggle = document.getElementById('customizeToggle');
+  var list = document.getElementById('widgetList');
+  var masonry = document.getElementById('dashMasonry');
+  if (toggle && panel) {
+    toggle.addEventListener('click', function () { panel.classList.toggle('open'); });
+  }
+  var doneBtn = document.getElementById('doneCustomizing');
+  if (doneBtn && panel) {
+    doneBtn.addEventListener('click', function () { panel.classList.remove('open'); });
+  }
 
-{% set ns = namespace(urgent=[]) %}
+  function collectLayout() {
+    var widgets = [];
+    list.querySelectorAll('.widget-row').forEach(function (row) {
+      widgets.push({
+        id: row.getAttribute('data-widget-id'),
+        visible: !row.querySelector('.w-toggle').classList.contains('off')
+      });
+    });
+    return widgets;
+  }
 
-<div class="stat-row">
-  <div class="stat"><span class="stat-num">{{ stats.active_cases }}</span><span class="stat-label">Active cases</span></div>
-  <div class="stat"><span class="stat-num">{{ stats.pending_cases }}</span><span class="stat-label">Pending cases</span></div>
-  <div class="stat"><span class="stat-num">{{ stats.total_clients }}</span><span class="stat-label">Clients</span></div>
-  {% if user_role in ('admin', 'attorney') %}
-  <div class="stat"><span class="stat-num">{{ stats.unpaid_invoices }}</span><span class="stat-label">Unpaid invoices</span></div>
-  {% endif %}
-</div>
+  function saveLayout(widgets) {
+    var token = document.querySelector('input[name="csrf_token"]');
+    fetch('{{ url_for("dashboard_customize") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        widgets: widgets,
+        csrf_token: token ? token.value : '{{ session.get("csrf_token", "") }}'
+      })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) console.error('Layout save failed:', d.error);
+    }).catch(function (e) { console.error('Layout save failed', e); });
+  }
 
-{% if user_role in ('admin', 'attorney') %}
-<div class="detail-card">
-  <h2>Backup status</h2>
-  {% if last_backup and last_backup.status == 'ok' %}
-    <p>✅ Last backup: <strong>{{ last_backup.timestamp[:19].replace('T', ' ') }}</strong>
-    ({{ last_backup.filename }}, {{ (last_backup.size_bytes / 1024)|round(1) }} KB)</p>
-  {% elif last_backup %}
-    <p class="flash flash-error" style="margin:0">⚠ Last backup FAILED: {{ last_backup.notes }}</p>
-  {% else %}
-    <p class="flash flash-warning" style="margin:0">⚠ No backups yet. Back up now.</p>
-  {% endif %}
-  <form method="post" action="{{ url_for('backup_now') }}" class="inline" style="margin-top:8px">
-    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
-    <button type="submit" class="btn btn-small">Back Up Now</button>
-    <a href="{{ url_for('backup_history') }}" class="btn btn-small">Backup history</a>
-  </form>
-</div>
-{% endif %}
+  // Reorder + toggle handlers (event delegation)
+  if (list) {
+    list.addEventListener('click', function (e) {
+      var btn = e.target.closest('.w-btn');
+      if (!btn) return;
+      var row = btn.closest('.widget-row');
+      if (btn.classList.contains('w-up')) {
+        var prev = row.previousElementSibling;
+        if (prev) { list.insertBefore(row, prev); saveLayout(collectLayout()); applyOrder(); }
+      } else if (btn.classList.contains('w-down')) {
+        var next = row.nextElementSibling;
+        if (next) { list.insertBefore(next, row); saveLayout(collectLayout()); applyOrder(); }
+      } else if (btn.classList.contains('w-toggle')) {
+        btn.classList.toggle('off');
+        // swap eye / eye-off icon
+        var svg = btn.querySelector('svg');
+        var isOff = btn.classList.contains('off');
+        btn.innerHTML = isOff
+          ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.15em;flex:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>'
+          : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.15em;flex:none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+        saveLayout(collectLayout());
+        applyVisibility();
+      }
+    });
+  }
 
-<h2>Upcoming deadlines <span class="muted small">(next 14 days)</span></h2>
-{% if deadlines %}
-<table class="table">
-  <thead><tr><th>Date</th><th>Event</th><th>Type</th><th>Case</th><th></th></tr></thead>
-  <tbody>
-  {% for e in deadlines %}
-    <tr class="{{ 'row-urgent' if e.event_date <= urgent_cutoff else '' }}">
-      <td class="nowrap"><strong>{{ e.event_date }}</strong>{% if e.event_time %} {{ e.event_time }}{% endif %}</td>
-      <td>{{ e.title }}</td>
-      <td>{{ e.event_type|replace('_', ' ')|capitalize }}</td>
-      <td>{{ e.case_number or '—' }}</td>
-      <td>
-        <form method="post" action="{{ url_for('event_toggle', event_id=e.id) }}" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
-          <button type="submit" class="btn btn-small">Mark done</button>
-        </form>
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="muted">No upcoming deadlines. <a href="{{ url_for('event_new') }}">Add one</a>.</p>
-{% endif %}
+  // Reorder the masonry cards to match the panel order
+  function applyOrder() {
+    var order = [];
+    list.querySelectorAll('.widget-row').forEach(function (row) {
+      order.push(row.getAttribute('data-widget-id'));
+    });
+    order.forEach(function (wid) {
+      var card = masonry.querySelector('[data-widget="' + wid + '"]');
+      if (card) masonry.appendChild(card);
+    });
+  }
 
-<h2>Active cases</h2>
-{% if active_cases %}
-<table class="table">
-  <thead><tr><th>Case #</th><th>Title</th><th>Client</th><th>Type</th><th></th></tr></thead>
-  <tbody>
-  {% for c in active_cases %}
-    <tr>
-      <td>{{ c.case_number }}</td>
-      <td>{{ c.title }}</td>
-      <td>{{ c.first_name }} {{ c.last_name }}</td>
-      <td>{{ c.case_type|capitalize }}</td>
-      <td><a href="{{ url_for('case_detail', case_id=c.id) }}">Open</a></td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="muted">No active cases.</p>
-{% endif %}
+  // Show/hide masonry cards to match panel toggles
+  function applyVisibility() {
+    list.querySelectorAll('.widget-row').forEach(function (row) {
+      var wid = row.getAttribute('data-widget-id');
+      var visible = !row.querySelector('.w-toggle').classList.contains('off');
+      var card = masonry.querySelector('[data-widget="' + wid + '"]');
+      if (card) card.style.display = visible ? '' : 'none';
+    });
+  }
 
-<h2>Recent activity</h2>
-{% if recent %}
-<table class="table">
-  <thead><tr><th>When</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
-  <tbody>
-  {% for r in recent %}
-    <tr>
-      <td class="nowrap">{{ r.timestamp[:19].replace('T', ' ') }}</td>
-      <td>{{ r.username }}</td>
-      <td>{{ r.action }}</td>
-      <td>{{ r.details }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="muted">No activity yet.</p>
-{% endif %}
+  var resetBtn = document.getElementById('resetLayout');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', function () {
+      var token = document.querySelector('input[name="csrf_token"]');
+      fetch('{{ url_for("dashboard_customize_reset") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csrf_token: token ? token.value : '{{ session.get("csrf_token", "") }}' })
+      }).then(function () { window.location.reload(); });
+    });
+  }
+})();
+</script>
 {% endblock %}

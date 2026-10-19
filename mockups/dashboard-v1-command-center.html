@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup 1 — Command Center | Law Office of Derek G. Medina</title>
+<style>
+  :root{
+    --navy:#1a365d; --navy-dark:#122a4a; --navy-darker:#0d1f36;
+    --gold:#c9a227; --gold-light:#e3c563;
+    --bg:#f4f6fa; --card:#ffffff;
+    --text:#1e2a3a; --muted:#6b7a90; --line:#e6ebf2;
+    --red:#c0392b; --amber:#d4910a; --green:#1e7e4e; --blue:#2b6cb0;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
+  /* ── Sidebar ── */
+  .sidebar{width:230px;background:linear-gradient(180deg,var(--navy-darker),var(--navy-dark));color:#dbe4f0;display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:12px;padding:22px 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .monogram{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy-darker);font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center;letter-spacing:.5px}
+  .brand h1{font-size:14px;font-weight:700;line-height:1.3;color:#fff}
+  .brand small{font-size:11px;color:#9fb0c7;font-weight:400}
+  nav{flex:1;padding:14px 12px;display:flex;flex-direction:column;gap:2px}
+  .nav-item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:10px;color:#b9c7da;text-decoration:none;font-size:14px;font-weight:500;transition:background .15s,color .15s}
+  .nav-item .ico{width:20px;text-align:center;font-size:16px}
+  .nav-item:hover{background:rgba(255,255,255,.07);color:#fff}
+  .nav-item.active{background:rgba(201,162,39,.16);color:var(--gold-light)}
+  .nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;min-width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;padding:0 6px}
+  .user-chip{display:flex;align-items:center;gap:10px;padding:16px 20px;border-top:1px solid rgba(255,255,255,.08)}
+  .avatar{width:38px;height:38px;border-radius:50%;background:var(--gold);color:var(--navy-darker);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .user-chip .nm{font-size:13px;font-weight:600;color:#fff}
+  .user-chip .rl{font-size:11px;color:#9fb0c7}
+  /* ── Main ── */
+  .main{flex:1;padding:28px 32px;max-width:1280px;margin:0 auto;width:100%}
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+  .topbar h2{font-size:24px;font-weight:700;color:var(--navy)}
+  .topbar p{font-size:14px;color:var(--muted);margin-top:4px}
+  .customize-btn{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;font-weight:600;color:var(--navy);cursor:pointer;box-shadow:0 1px 3px rgba(26,54,93,.08);transition:box-shadow .15s}
+  .customize-btn:hover{box-shadow:0 3px 10px rgba(26,54,93,.15)}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+  .card{background:var(--card);border-radius:14px;padding:20px;box-shadow:0 2px 8px rgba(26,54,93,.06);border:1px solid var(--line)}
+  .card h3{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between}
+  .card h3 .link{font-size:12px;color:var(--blue);text-transform:none;letter-spacing:0;font-weight:600;text-decoration:none}
+  .span4{grid-column:span 4}.span6{grid-column:span 6}.span8{grid-column:span 8}.span12{grid-column:span 12}
+  /* Timeline */
+  .tl{position:relative;padding-left:22px}
+  .tl::before{content:"";position:absolute;left:6px;top:6px;bottom:6px;width:2px;background:var(--line)}
+  .tl-item{position:relative;padding:0 0 16px 8px}
+  .tl-item:last-child{padding-bottom:0}
+  .tl-dot{position:absolute;left:-22px;top:3px;width:12px;height:12px;border-radius:50%;background:var(--gold);border:2px solid #fff;box-shadow:0 0 0 2px var(--gold)}
+  .tl-dot.navy{background:var(--navy);box-shadow:0 0 0 2px var(--navy)}
+  .tl-dot.blue{background:var(--blue);box-shadow:0 0 0 2px var(--blue)}
+  .tl-time{font-size:12px;font-weight:700;color:var(--navy)}
+  .tl-title{font-size:14px;font-weight:600;margin:2px 0}
+  .tl-sub{font-size:12.5px;color:var(--muted)}
+  /* Deadlines */
+  .dl-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .dl-item:last-child{border-bottom:none;padding-bottom:0}
+  .dl-pill{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}
+  .pill-red{background:#fdecea;color:var(--red)}
+  .pill-amber{background:#fdf3e0;color:var(--amber)}
+  .pill-green{background:#e6f4ec;color:var(--green)}
+  .dl-body{flex:1}
+  .dl-title{font-size:14px;font-weight:600}
+  .dl-sub{font-size:12.5px;color:var(--muted)}
+  /* Trust */
+  .trust-big{font-size:34px;font-weight:800;color:var(--navy);letter-spacing:-.5px}
+  .trust-lbl{font-size:13px;color:var(--muted);margin-bottom:4px}
+  .trust-row{display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:13.5px}
+  .trust-row:first-of-type{margin-top:12px}
+  .trust-row .amt{font-weight:700;color:var(--navy)}
+  /* Clients */
+  .client-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .client-row:last-child{border-bottom:none}
+  .c-av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0}
+  .client-row .nm{font-size:14px;font-weight:600}
+  .client-row .cs{font-size:12.5px;color:var(--muted)}
+  .client-row .tag{margin-left:auto;font-size:11px;font-weight:700;background:#eef2f7;color:var(--navy);padding:4px 10px;border-radius:20px;white-space:nowrap}
+  /* Quick actions */
+  .qa-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  .qa-btn{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--navy);color:#fff;border:none;border-radius:12px;padding:20px 10px;font-size:13.5px;font-weight:600;cursor:pointer;transition:transform .12s,box-shadow .12s}
+  .qa-btn:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(26,54,93,.25)}
+  .qa-btn.gold{background:linear-gradient(135deg,var(--gold),#d9b83c);color:var(--navy-darker)}
+  .qa-btn .qico{font-size:24px}
+  /* Alert banner */
+  .alert{display:flex;gap:12px;align-items:flex-start;background:#fff8e6;border:1px solid #f0d98a;border-radius:12px;padding:14px 18px;margin-bottom:20px;font-size:13.5px}
+  .alert .a-ico{font-size:18px}
+  .alert b{color:var(--navy)}
+  @media(max-width:980px){.span4,.span6,.span8{grid-column:span 12}}
+  @media(max-width:760px){
+    body{flex-direction:column}
+    .sidebar{width:100%;height:auto;position:static}
+    nav{flex-direction:row;overflow-x:auto;padding:10px}
+    .nav-item{white-space:nowrap}
+    .brand,.user-chip{display:none}
+    .main{padding:18px 16px}
+  }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="monogram">DGM</div>
+    <div><h1>Law Office of<br>Derek G. Medina</h1><small>Port Angeles, WA</small></div>
+  </div>
+  <nav>
+    <a class="nav-item active" href="#"><span class="ico">▦</span> Dashboard</a>
+    <a class="nav-item" href="#"><span class="ico">👥</span> Clients</a>
+    <a class="nav-item" href="#"><span class="ico">📁</span> Cases</a>
+    <a class="nav-item" href="#"><span class="ico">📅</span> Calendar</a>
+    <a class="nav-item" href="#"><span class="ico">⏱</span> Deadlines <span class="nav-badge">3</span></a>
+    <a class="nav-item" href="#"><span class="ico">📄</span> Documents</a>
+    <a class="nav-item" href="#"><span class="ico">💰</span> Trust</a>
+    <a class="nav-item" href="#"><span class="ico">🧾</span> Billing</a>
+    <a class="nav-item" href="#"><span class="ico">👤</span> Users</a>
+  </nav>
+  <div class="user-chip">
+    <div class="avatar">DM</div>
+    <div><div class="nm">Derek Medina</div><div class="rl">Administrator</div></div>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <div>
+      <h2>Command Center</h2>
+      <p>Monday, October 19, 2026 · Clallam County Superior Court in session</p>
+    </div>
+    <button class="customize-btn">⚙️ Edit layout</button>
+  </div>
+
+  <div class="alert">
+    <span class="a-ico">⚠️</span>
+    <div><b>Court schedule updated.</b> The Friday judge calendar was revised 10/05/26 — 2 Fridays changed judges. <a href="#" style="color:var(--blue);font-weight:600">Review changes</a></div>
+  </div>
+
+  <div class="grid">
+    <!-- Today's schedule -->
+    <div class="card span4">
+      <h3>Today's Schedule <a class="link" href="#">Full calendar →</a></h3>
+      <div class="tl">
+        <div class="tl-item"><span class="tl-dot"></span><div class="tl-time">9:00 AM</div><div class="tl-title">Motion hearing — Mitchell</div><div class="tl-sub">Judge Barnhart · Courtroom 1 · Bench copies due noon yesterday ✓</div></div>
+        <div class="tl-item"><span class="tl-dot navy"></span><div class="tl-time">11:30 AM</div><div class="tl-title">Client consult — J. Alvarez</div><div class="tl-sub">New dissolution intake · 45 min</div></div>
+        <div class="tl-item"><span class="tl-dot blue"></span><div class="tl-time">2:00 PM</div><div class="tl-title">Settlement conference — Park</div><div class="tl-sub">Family Court · 2.5 hrs scheduled</div></div>
+      </div>
+    </div>
+
+    <!-- Upcoming deadlines -->
+    <div class="card span4">
+      <h3>Upcoming Deadlines <a class="link" href="#">Calculator →</a></h3>
+      <div class="dl-item"><span class="dl-pill pill-red">2 days</span><div class="dl-body"><div class="dl-title">Reply brief — Mitchell v. Mitchell</div><div class="dl-sub">Due Wed 10/21 · 2 court days before hearing</div></div></div>
+      <div class="dl-item"><span class="dl-pill pill-amber">5 days</span><div class="dl-body"><div class="dl-title">Responsive docs — Park custody</div><div class="dl-sub">Due Sat 10/24 · 4 court days before Friday hearing</div></div></div>
+      <div class="dl-item"><span class="dl-pill pill-green">12 days</span><div class="dl-body"><div class="dl-title">Trial brief — Alvarez dissolution</div><div class="dl-sub">Due Sat 10/31 · 7 calendar days before trial</div></div></div>
+    </div>
+
+    <!-- Trust balance -->
+    <div class="card span4">
+      <h3>Trust Account <a class="link" href="#">Ledger →</a></h3>
+      <div class="trust-lbl">IOLTA Checking ····4821</div>
+      <div class="trust-big">$48,215.60</div>
+      <div class="trust-row"><span>Mitchell, Sarah</span><span class="amt">$12,400.00</span></div>
+      <div class="trust-row"><span>Park, Daniel</span><span class="amt">$8,750.00</span></div>
+      <div class="trust-row"><span>Alvarez, Maria</span><span class="amt">$5,000.00</span></div>
+    </div>
+
+    <!-- Recent clients -->
+    <div class="card span6">
+      <h3>Recent Clients <a class="link" href="#">All clients →</a></h3>
+      <div class="client-row"><div class="c-av" style="background:#2b6cb0">SM</div><div><div class="nm">Sarah Mitchell</div><div class="cs">Mitchell v. Mitchell · Dissolution</div></div><span class="tag">Hearing Fri</span></div>
+      <div class="client-row"><div class="c-av" style="background:#1e7e4e">DP</div><div><div class="nm">Daniel Park</div><div class="cs">Park custody modification</div></div><span class="tag">Active</span></div>
+      <div class="client-row"><div class="c-av" style="background:#8a5a2b">MA</div><div><div class="nm">Maria Alvarez</div><div class="cs">Alvarez dissolution · Trial 11/7</div></div><span class="tag">Trial prep</span></div>
+      <div class="client-row"><div class="c-av" style="background:#6b4fa1">JT</div><div><div class="nm">James Thompson</div><div class="cs">Parenting plan review</div></div><span class="tag">Intake</span></div>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="card span6">
+      <h3>Quick Actions</h3>
+      <div class="qa-grid">
+        <button class="qa-btn gold"><span class="qico">＋</span>New Client</button>
+        <button class="qa-btn"><span class="qico">📁</span>New Case</button>
+        <button class="qa-btn"><span class="qico">⏱</span>Log Time</button>
+        <button class="qa-btn"><span class="qico">📅</span>Calculate Deadlines</button>
+      </div>
+    </div>
+  </div>
+
+  <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:28px">Mockup 1 of 3 — "Command Center" · Design concept only, not the live app</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup 2 — Card Flow | Law Office of Derek G. Medina</title>
+<style>
+  :root{
+    --navy:#1a365d; --navy-dark:#122a4a;
+    --gold:#c9a227; --gold-light:#e3c563;
+    --bg:#f7f8fb; --card:#ffffff;
+    --text:#1e2a3a; --muted:#6b7a90; --line:#e8ecf3;
+    --red:#c0392b; --amber:#d4910a; --green:#1e7e4e; --blue:#2b6cb0; --purple:#6b4fa1;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  /* ── Top nav ── */
+  header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+  .nav-inner{max-width:1280px;margin:0 auto;padding:0 28px;display:flex;align-items:center;gap:8px;height:66px}
+  .monogram{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--navy-dark);font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center;margin-right:6px}
+  .firm{font-size:14px;font-weight:700;color:var(--navy);margin-right:18px;white-space:nowrap}
+  .firm small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+  .tlink{padding:9px 14px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--muted);text-decoration:none;white-space:nowrap}
+  .tlink:hover{background:#f0f3f8;color:var(--navy)}
+  .tlink.active{background:var(--navy);color:#fff}
+  .tlink .bdg{background:var(--red);color:#fff;font-size:10.5px;font-weight:700;border-radius:10px;padding:1px 7px;margin-left:6px}
+  .nav-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .avatar{width:36px;height:36px;border-radius:50%;background:var(--navy);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}
+  /* ── Body ── */
+  .wrap{max-width:1280px;margin:0 auto;padding:28px}
+  .page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px}
+  .page-head h1{font-size:26px;font-weight:800;color:var(--navy);letter-spacing:-.4px}
+  .page-head p{font-size:14px;color:var(--muted);margin-top:4px}
+  .customize-btn{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;font-weight:600;color:var(--navy);cursor:pointer;box-shadow:0 1px 3px rgba(26,54,93,.08)}
+  .customize-btn:hover{box-shadow:0 3px 10px rgba(26,54,93,.15)}
+  .masonry{columns:3;column-gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:18px;break-inside:avoid;box-shadow:0 2px 10px rgba(26,54,93,.05)}
+  .card h3{font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);margin-bottom:14px}
+  .big{font-size:32px;font-weight:800;color:var(--navy);letter-spacing:-.5px}
+  .sub{font-size:13px;color:var(--muted);margin-top:4px}
+  /* Horizontal timeline viz */
+  .htl{position:relative;margin:22px 4px 8px;height:56px}
+  .htl-line{position:absolute;top:26px;left:0;right:0;height:4px;border-radius:2px;background:var(--line)}
+  .htl-fill{position:absolute;top:26px;left:0;width:62%;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--green),var(--amber))}
+  .htl-pt{position:absolute;top:18px;transform:translateX(-50%);text-align:center}
+  .htl-dot{width:16px;height:16px;border-radius:50%;margin:0 auto 6px;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+  .htl-lbl{font-size:11px;font-weight:700;color:var(--navy);white-space:nowrap}
+  .htl-dt{font-size:10.5px;color:var(--muted);white-space:nowrap}
+  /* Sparkline bars */
+  .bars{display:flex;align-items:flex-end;gap:7px;height:90px;margin-top:16px}
+  .bar{flex:1;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,#3f6ea8,var(--navy));min-height:8px;position:relative}
+  .bar.hl{background:linear-gradient(180deg,var(--gold-light),var(--gold))}
+  .bar-x{display:flex;gap:7px;margin-top:8px}
+  .bar-x span{flex:1;text-align:center;font-size:10px;color:var(--muted)}
+  /* Donut */
+  .donut-wrap{display:flex;align-items:center;gap:20px;margin-top:8px}
+  .donut{width:120px;height:120px;flex-shrink:0}
+  .legend{font-size:13px}
+  .legend div{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .sw{width:12px;height:12px;border-radius:4px}
+  .legend b{margin-left:auto;color:var(--navy)}
+  /* Action buttons */
+  .act-list{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+  .act{display:flex;align-items:center;gap:10px;background:#f2f5f9;border:1px solid var(--line);border-radius:12px;padding:14px;font-size:13.5px;font-weight:600;color:var(--navy);cursor:pointer;transition:all .15s;text-align:left}
+  .act:hover{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .act .ai{font-size:20px}
+  /* Client chips */
+  .chip-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+  .chip{display:flex;align-items:center;gap:9px;background:#f2f5f9;border:1px solid var(--line);border-radius:30px;padding:7px 15px 7px 7px;font-size:13px;font-weight:600;color:var(--navy)}
+  .chip .c-av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
+  /* Mini list */
+  .mini{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .mini:last-child{border-bottom:none}
+  .mini .t{font-weight:600}
+  .mini .s{font-size:12px;color:var(--muted)}
+  .mini .r{margin-left:auto;font-size:12px;font-weight:700;white-space:nowrap}
+  @media(max-width:1020px){.masonry{columns:2}}
+  @media(max-width:680px){
+    .masonry{columns:1}
+    .nav-inner{padding:0 16px;overflow-x:auto}
+    .tlink{padding:8px 10px}
+    .firm{display:none}
+    .wrap{padding:18px 16px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="nav-inner">
+    <div class="monogram">DGM</div>
+    <div class="firm">Law Office of Derek G. Medina<small>Port Angeles, WA</small></div>
+    <a class="tlink active" href="#">Dashboard</a>
+    <a class="tlink" href="#">Clients</a>
+    <a class="tlink" href="#">Cases</a>
+    <a class="tlink" href="#">Calendar</a>
+    <a class="tlink" href="#">Deadlines <span class="bdg">3</span></a>
+    <a class="tlink" href="#">Trust</a>
+    <div class="nav-right"><button class="customize-btn">⚙️</button><div class="avatar">DM</div></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="page-head">
+    <div><h1>Overview</h1><p>Monday, October 19 · Here's what's happening at the firm</p></div>
+    <button class="customize-btn">⚙️ Edit layout</button>
+  </div>
+
+  <div class="masonry">
+    <!-- Deadlines timeline card -->
+    <div class="card">
+      <h3>⏱ Filing Deadlines</h3>
+      <div class="htl">
+        <div class="htl-line"></div><div class="htl-fill"></div>
+        <div class="htl-pt" style="left:8%"><div class="htl-dot" style="background:var(--green)"></div><div class="htl-lbl">Filed ✓</div><div class="htl-dt">10/09</div></div>
+        <div class="htl-pt" style="left:40%"><div class="htl-dot" style="background:var(--amber)"></div><div class="htl-lbl">Reply brief</div><div class="htl-dt">10/21</div></div>
+        <div class="htl-pt" style="left:66%"><div class="htl-dot" style="background:var(--red)"></div><div class="htl-lbl">Responsive</div><div class="htl-dt">10/24</div></div>
+        <div class="htl-pt" style="left:94%"><div class="htl-dot" style="background:var(--navy)"></div><div class="htl-lbl">Trial brief</div><div class="htl-dt">10/31</div></div>
+      </div>
+      <div class="sub" style="margin-top:14px">Mitchell v. Mitchell · reply due in <b style="color:var(--red)">2 days</b></div>
+    </div>
+
+    <!-- Trust sparkline -->
+    <div class="card">
+      <h3>💰 Trust Balance — IOLTA ····4821</h3>
+      <div class="big">$48,215.60</div>
+      <div class="sub">+ $3,200 this week · 6 active client ledgers</div>
+      <div class="bars">
+        <div class="bar" style="height:35%"></div><div class="bar" style="height:48%"></div>
+        <div class="bar" style="height:42%"></div><div class="bar" style="height:60%"></div>
+        <div class="bar" style="height:55%"></div><div class="bar" style="height:72%"></div>
+        <div class="bar hl" style="height:100%"></div>
+      </div>
+      <div class="bar-x"><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="card">
+      <h3>⚡ Quick Actions</h3>
+      <div class="act-list">
+        <button class="act"><span class="ai">＋</span>New client</button>
+        <button class="act"><span class="ai">📁</span>New case</button>
+        <button class="act"><span class="ai">⏱</span>Log time</button>
+        <button class="act"><span class="ai">📅</span>Deadlines</button>
+        <button class="act"><span class="ai">📄</span>Template</button>
+        <button class="act"><span class="ai">💵</span>Trust deposit</button>
+      </div>
+    </div>
+
+    <!-- Caseload donut -->
+    <div class="card">
+      <h3>📁 Active Caseload</h3>
+      <div class="donut-wrap">
+        <svg class="donut" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#eef2f7" stroke-width="16"/>
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#1a365d" stroke-width="16" stroke-dasharray="150.8 301.6" stroke-dashoffset="75.4" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#c9a227" stroke-width="16" stroke-dasharray="75.4 301.6" stroke-dashoffset="-75.4" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+          <text x="60" y="58" text-anchor="middle" font-size="22" font-weight="800" fill="#1a365d">18</text>
+          <text x="60" y="76" text-anchor="middle" font-size="10" fill="#6b7a90">cases</text>
+        </svg>
+        <div class="legend" style="flex:1">
+          <div><span class="sw" style="background:#1a365d"></span>Dissolution <b>9</b></div>
+          <div><span class="sw" style="background:#c9a227"></span>Custody <b>5</b></div>
+          <div><span class="sw" style="background:#eef2f7"></span>Other <b>4</b></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Court alert -->
+    <div class="card" style="border-left:4px solid var(--gold)">
+      <h3>🏛 Clallam County</h3>
+      <div style="font-size:14px;font-weight:600;color:var(--navy)">Friday judge calendar updated</div>
+      <div class="sub">Revised 10/05/26 · 2 Fridays changed judges.<br><a href="#" style="color:var(--blue);font-weight:600">Review changes →</a></div>
+      <div style="margin-top:12px;font-size:13px">Next motion day: <b>Fri 10/23 · 9:00 AM</b><br><span style="color:var(--muted)">Judge Barnhart · phone confirm by Thu</span></div>
+    </div>
+
+    <!-- Active clients -->
+    <div class="card">
+      <h3>👥 Active Clients</h3>
+      <div class="chip-row">
+        <div class="chip"><span class="c-av" style="background:#2b6cb0">SM</span>Sarah Mitchell</div>
+        <div class="chip"><span class="c-av" style="background:#1e7e4e">DP</span>Daniel Park</div>
+        <div class="chip"><span class="c-av" style="background:#8a5a2b">MA</span>Maria Alvarez</div>
+        <div class="chip"><span class="c-av" style="background:#6b4fa1">JT</span>James Thompson</div>
+        <div class="chip"><span class="c-av" style="background:#b0492f">RK</span>Rachel Kim</div>
+      </div>
+    </div>
+
+    <!-- This week -->
+    <div class="card">
+      <h3>📅 This Week</h3>
+      <div class="mini"><div><div class="t">Motion hearing — Mitchell</div><div class="s">Fri 9:00 AM · Judge Barnhart</div></div><div class="r" style="color:var(--amber)">Fri</div></div>
+      <div class="mini"><div><div class="t">Settlement conf. — Park</div><div class="s">Today 2:00 PM · Family Court</div></div><div class="r" style="color:var(--red)">Today</div></div>
+      <div class="mini"><div><div class="t">Client consult — J. Alvarez</div><div class="s">Today 11:30 AM · Intake</div></div><div class="r" style="color:var(--red)">Today</div></div>
+      <div class="mini"><div><div class="t">Child support calendar</div><div class="s">Tue 11/03 · 9:00 AM</div></div><div class="r" style="color:var(--muted)">Nov 3</div></div>
+    </div>
+  </div>
+
+  <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:24px">Mockup 2 of 3 — "Card Flow" · Design concept only, not the live app</p>
+</div>
+</body>
+</html>

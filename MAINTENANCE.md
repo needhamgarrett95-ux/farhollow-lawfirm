@@ -30,6 +30,7 @@ You do not need to be technical. Follow the steps exactly as written.
 19. [Installing on the host vs. office computers](#19-installing-on-the-host-vs-office-computers)
 20. [What to do if office computers can't connect](#20-what-to-do-if-office-computers-cant-connect)
 21. [Single-computer mode (no network)](#21-single-computer-mode-no-network)
+32. [What's new in v2.0.0](#32-whats-new-in-v200--new-dashboard-dark-mode-custom-icons)
 
 ---
 
@@ -1015,3 +1016,22 @@ The deadline calculator now knows Clallam County Superior Court's local calendar
   - *Telephone confirmation of motion calendar* the day before — the court requires a confirmation call.
 - **Court schedule monitor:** once a week, the software quietly checks the county's published Friday judge calendar. If it changed (different judge assigned, holiday added), you'll see a yellow alert at the top of the dashboard: "Clallam County court schedule may have changed — review here." Click through to the county calendars page, then Dismiss the alert. Nothing in your deadlines changes automatically — you decide what to do.
 - **AI disclosure on documents:** Clallam County requires AI-use disclosure in filings (effective Sept 2025). When generating a document from a template, check the box "This document was prepared with AI assistance" and a disclosure footnote is added to the PDF. When in doubt, check with the attorney — the exact required wording should be verified against the current local rule.
+
+## 32. What's new in v2.0.0 — new dashboard, dark mode, custom icons
+
+This is a major visual update. Everything still works the same way — it just looks better and is easier to use.
+
+**New dashboard (home page):**
+- Instead of long lists, the home page now shows **cards** with charts and visual summaries: upcoming deadlines on a timeline, trust balance as a bar chart, caseload as a donut chart, today's schedule, recent clients, and quick-action buttons.
+- Click **"Edit layout"** (top-right) to customize your dashboard: show/hide any card, drag them into your preferred order with the up/down arrows. Your layout is saved — it's per-user, so each person in the office can have their own arrangement.
+- **"Reset to default"** puts everything back the way it was.
+
+**Dark mode:**
+- Click your initials (top-right) → **Dark mode** to switch to a dark theme that's easier on the eyes. Click again to switch back to Light mode.
+- Your choice is remembered — it stays the way you left it next time you log in.
+
+**New icons:** All the little pictures throughout the app (menu, buttons, warnings) are now clean matching icons instead of emojis.
+
+**Notification badge:** The Deadlines menu item now shows a red count badge when you have deadlines due within 7 days (including overdue ones). It updates automatically.
+
+**Login screen:** The sign-in page has a fresh look matching the new dashboard. Your username and password work exactly the same.
