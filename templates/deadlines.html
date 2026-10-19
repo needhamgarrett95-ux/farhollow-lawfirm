@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Deadline Calculator — Law Office of Derek G. Medina{% endblock %}
+{% block content %}
+<h1>Deadline Calculator</h1>
+<p class="muted">Enter a trigger date and get every related filing deadline under Washington Superior Court rules.</p>
+
+<div class="alert alert-warning"><strong>Disclaimer:</strong> {{ disclaimer }}</div>
+
+<div class="form-card" style="margin-bottom: 20px;">
+  <form method="get" action="{{ url_for('deadline_calculator') }}">
+    <div class="form-grid">
+      <label>Trigger type
+        <select name="trigger" required>
+          <option value="">— pick one —</option>
+          {% for key, label in trigger_choices %}
+          <option value="{{ key }}" {% if trigger_type == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Trigger date
+        <input type="date" name="date" value="{{ date_str }}" required>
+      </label>
+      <label class="span2">Case <span class="muted">(optional — preselects the case for calendar push)</span>
+        <select name="case_id">
+          <option value="">— no case —</option>
+          {% for c in cases %}
+          <option value="{{ c.id }}" {% if case_id == c.id|string %}selected{% endif %}>{{ c.case_number }} — {{ c.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Calculate deadlines</button>
+    </div>
+  </form>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+{% if results %}
+<div class="detail-card">
+  <h2>{{ rule_info.label }} — {{ trigger_date.strftime('%A, %B %d, %Y') }}</h2>
+  <p class="muted">{{ rule_info.description }}</p>
+
+  <form method="post" action="{{ url_for('deadline_push') }}" id="pushForm">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <input type="hidden" name="trigger" value="{{ trigger_type }}">
+    <input type="hidden" name="date" value="{{ date_str }}">
+
+    {% if can_push %}
+    <div class="search-row">
+      <select name="case_id" required>
+        <option value="">— pick a case to add deadlines to —</option>
+        {% for c in cases %}
+        <option value="{{ c.id }}" {% if case_id == c.id|string %}selected{% endif %}>{{ c.case_number }} — {{ c.title }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-primary nowrap">Add selected to calendar</button>
+      <button type="submit" name="add_all" value="1" class="btn nowrap" onclick="checkAllDeadlines()">Add all</button>
+    </div>
+    {% else %}
+    <p class="muted small">Only attorneys and admins can push deadlines to the calendar. Ask one to add these for you.</p>
+    {% endif %}
+
+    <table class="table">
+      <thead>
+        <tr>
+          {% if can_push %}<th></th>{% endif %}
+          <th>Deadline</th>
+          <th>Due date</th>
+          <th>Rule</th>
+          <th>Status</th>
+          {% if can_push %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        <tr {% if r.days_remaining < 0 %}class="row-urgent"{% endif %}>
+          {% if can_push %}
+          <td><input type="checkbox" name="keys" value="{{ r.key }}" class="dl-check" {% if r.days_remaining >= 0 %}checked{% endif %}></td>
+          {% endif %}
+          <td>{{ r.label }}</td>
+          <td class="nowrap"><strong>{{ r.due.strftime('%a, %b %d, %Y') }}</strong><br><span class="muted small">{{ r.unit }} days</span></td>
+          <td class="small">{{ r.basis }}</td>
+          <td>
+            {% if r.days_remaining < 0 %}
+            <span class="badge" style="background:#fee2e2;color:#b91c1c;">Passed {{ -r.days_remaining }}d ago</span>
+            {% elif r.days_remaining == 0 %}
+            <span class="badge badge-pending">Due today</span>
+            {% elif r.days_remaining <= 3 %}
+            <span class="badge badge-pending">{{ r.days_remaining }}d left</span>
+            {% else %}
+            <span class="muted small">{{ r.days_remaining }} days left</span>
+            {% endif %}
+          </td>
+          {% if can_push %}
+          <td><button type="submit" name="only" value="{{ r.key }}" class="btn btn-small">Add</button></td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
+</div>
+<script>
+function checkAllDeadlines() {
+  document.querySelectorAll('.dl-check').forEach(function(cb) { cb.checked = true; });
+}
+</script>
+{% endif %}
+{% endblock %}

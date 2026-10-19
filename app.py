@@ -29,6 +29,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 from crypto import encrypt_value, decrypt_value, looks_encrypted
+from deadlines import (
+    DEADLINE_RULES,
+    TRIGGER_CHOICES,
+    DISCLAIMER as DEADLINE_DISCLAIMER,
+    calculate_deadlines,
+)
 
 # ----------------------------------------------------------------------------
 # App setup
@@ -2074,6 +2080,127 @@ def event_delete(event_id):
     audit("event_delete", f"Deleted event '{ev['title']}' ({ev['event_date']})")
     flash("Event deleted.", "success")
     return redirect(request.referrer or url_for("calendar_view"))
+
+
+# ----------------------------------------------------------------------------
+# Court deadline calculator (WA Superior Court rules)
+# ----------------------------------------------------------------------------
+@app.route("/deadlines", methods=["GET"])
+@login_required
+def deadline_calculator():
+    """Deadline calculator form + results. All roles may calculate."""
+    db = get_db()
+    cases = db.execute(
+        "SELECT id, case_number, title FROM cases WHERE status IN"
+        " ('active','pending') ORDER BY case_number"
+    ).fetchall()
+    trigger_type = request.args.get("trigger", "")
+    date_str = request.args.get("date", "")
+    case_id = request.args.get("case_id", "")
+    results = None
+    trigger_date = None
+    rule_info = None
+    error = None
+    if trigger_type or date_str:
+        if trigger_type not in DEADLINE_RULES:
+            error = "Pick a trigger type (hearing, trial, or service date)."
+        else:
+            try:
+                trigger_date = date.fromisoformat(date_str)
+            except (ValueError, TypeError):
+                error = "Enter a valid trigger date."
+        if not error:
+            rule_info = DEADLINE_RULES[trigger_type]
+            results = calculate_deadlines(trigger_type, trigger_date)
+    can_push = session.get("role") in ("admin", "attorney")
+    return render_template(
+        "deadlines.html",
+        trigger_choices=TRIGGER_CHOICES,
+        trigger_type=trigger_type,
+        date_str=date_str,
+        case_id=case_id,
+        cases=cases,
+        results=results,
+        trigger_date=trigger_date,
+        rule_info=rule_info,
+        error=error,
+        can_push=can_push,
+        disclaimer=DEADLINE_DISCLAIMER,
+        today=date.today(),
+    )
+
+
+@app.route("/deadlines/push", methods=["POST"])
+@role_required("admin", "attorney")
+def deadline_push():
+    """Push calculated deadlines to the case calendar. Attorney/admin only."""
+    check_csrf()
+    trigger_type = request.form.get("trigger", "")
+    date_str = request.form.get("date", "")
+    case_id = request.form.get("case_id", "").strip()
+    if trigger_type not in DEADLINE_RULES:
+        flash("Invalid trigger type.", "error")
+        return redirect(url_for("deadline_calculator"))
+    try:
+        trigger_date = date.fromisoformat(date_str)
+    except (ValueError, TypeError):
+        flash("Invalid trigger date.", "error")
+        return redirect(url_for("deadline_calculator"))
+    if not case_id:
+        flash("Pick a case to add the deadlines to.", "error")
+        return redirect(url_for(
+            "deadline_calculator", trigger=trigger_type, date=date_str,
+        ))
+    db = get_db()
+    case = db.execute(
+        "SELECT id, case_number FROM cases WHERE id = ?", (case_id,)
+    ).fetchone()
+    if not case:
+        flash("Case not found.", "error")
+        return redirect(url_for("deadline_calculator"))
+    # Recompute server-side (never trust client-supplied dates)
+    computed = {r["key"]: r for r in calculate_deadlines(trigger_type, trigger_date)}
+    only = request.form.get("only", "")
+    if only:
+        keys = [only] if only in computed else []
+    else:
+        keys = [k for k in request.form.getlist("keys") if k in computed]
+    if not keys:
+        flash("Select at least one deadline to add.", "error")
+        return redirect(url_for(
+            "deadline_calculator", trigger=trigger_type, date=date_str,
+            case_id=case_id,
+        ))
+    rule_info = DEADLINE_RULES[trigger_type]
+    added = 0
+    for key in keys:
+        r = computed[key]
+        db.execute(
+            "INSERT INTO calendar_events (case_id, title, event_type,"
+            " event_date, event_time, description, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                case_id,
+                f"DEADLINE: {r['label']}",
+                "filing_deadline",
+                r["due"].isoformat(),
+                "",
+                f"{r['basis']} — {rule_info['label']} on"
+                f" {trigger_date.isoformat()}. Verify against current court"
+                " rules and case-specific orders.",
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        added += 1
+    db.commit()
+    audit(
+        "deadline_push",
+        f"Added {added} calculated deadline(s) to case"
+        f" {case['case_number']} ({rule_info['label']} on"
+        f" {trigger_date.isoformat()})",
+    )
+    flash(f"Added {added} deadline(s) to the case calendar.", "success")
+    return redirect(url_for("calendar_view"))
 
 
 # ----------------------------------------------------------------------------

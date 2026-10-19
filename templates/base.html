@@ -24,6 +24,7 @@
     <a href="{{ url_for('client_list') }}" class="{% if request.endpoint and request.endpoint.startswith('client') %}active{% endif %}">Clients</a>
     <a href="{{ url_for('case_list') }}" class="{% if request.endpoint and request.endpoint.startswith('case') %}active{% endif %}">Cases</a>
     <a href="{{ url_for('calendar_view') }}" class="{% if request.endpoint and request.endpoint.startswith('calendar') or request.endpoint and request.endpoint.startswith('event') %}active{% endif %}">Calendar</a>
+    <a href="{{ url_for('deadline_calculator') }}" class="{% if request.endpoint and request.endpoint.startswith('deadline') %}active{% endif %}">Deadlines</a>
     {% if user_role in ('admin', 'attorney') %}
     <a href="{{ url_for('template_gallery') }}" class="{% if request.endpoint and request.endpoint.startswith('template') %}active{% endif %}">Templates</a>
     {% endif %}

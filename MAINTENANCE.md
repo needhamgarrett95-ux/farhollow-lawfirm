@@ -950,3 +950,40 @@ Document templates let you generate common legal documents with client and case 
 - Generated documents are saved under the case's **Documents** tab with version numbers, just like uploaded files. Generating the same template twice creates version 2, 3, and so on — nothing is overwritten.
 - Only attorneys and admins can use templates. Staff accounts do not see the Templates menu.
 - Every generated document is recorded in the audit log.
+
+## 29. Deadline calculator
+
+The deadline calculator figures out filing deadlines under Washington Superior Court rules. You give it a trigger date (like a hearing date), and it tells you every related deadline.
+
+**How to use it:**
+
+1. Click **Deadlines** in the top menu.
+2. Pick the **trigger type**:
+   - **Motion Hearing** — deadlines for filing motions, responses, and replies before a hearing (CR 6).
+   - **Trial** — trial briefs, witness/exhibit lists, and discovery cutoff before trial.
+   - **Service of Petition (in-state)** — the 20-day response deadline after serving someone in Washington.
+   - **Service of Petition (out of state)** — the 60-day response deadline after out-of-state service.
+3. Enter the **trigger date** (the hearing date, trial date, or date of service).
+4. Optionally pick a **case** — this preselects it for the calendar step below.
+5. Click **Calculate deadlines**.
+
+**Reading the results:**
+
+- Each deadline shows the **due date**, which rule it comes from, and how many days are left.
+- **Red** means the deadline has already passed. **Yellow** means it's due within 3 days.
+- "Court days" skip weekends and Washington court holidays. "Calendar days" count every day.
+
+**Adding deadlines to the calendar (attorneys and admins only):**
+
+1. After calculating, pick the **case** in the dropdown above the results.
+2. Check the boxes next to the deadlines you want (or click **Add all**).
+3. Click **Add selected to calendar**. Each deadline becomes a calendar event on the case, marked as a filing deadline.
+4. To add just one, click the **Add** button on its row.
+
+Staff accounts can use the calculator but cannot add deadlines to the calendar — they'll see a note saying to ask an attorney.
+
+**Important things to know:**
+
+- These calculations use **standard** Washington Superior Court rules. Your judge's scheduling order or a case-specific order can change them. **Always double-check before relying on a calculated deadline.**
+- If a deadline looks wrong, don't use it — verify it by hand or ask the attorney. This tool does not replace legal judgment.
+- Every deadline added to the calendar is recorded in the audit log.
