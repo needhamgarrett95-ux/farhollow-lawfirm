@@ -255,102 +255,170 @@
 
 <script>
 (function () {
+  'use strict';
   var panel = document.getElementById('customizePanel');
   var toggle = document.getElementById('customizeToggle');
   var list = document.getElementById('widgetList');
   var masonry = document.getElementById('dashMasonry');
-  if (toggle && panel) {
-    toggle.addEventListener('click', function () { panel.classList.toggle('open'); });
+
+  // If any core element is missing, bail out loudly (visible in console).
+  if (!panel || !toggle || !list || !masonry) {
+    console.error('Dashboard customize: missing element(s)', {
+      panel: !!panel, toggle: !!toggle, list: !!list, masonry: !!masonry
+    });
+    return;
   }
+
+  // --- Saved indicator (subtle pill, appears briefly after each persist) ---
+  var savedPill = document.createElement('span');
+  savedPill.className = 'layout-saved-pill';
+  savedPill.textContent = 'Saved';
+  savedPill.setAttribute('aria-live', 'polite');
+  var dashHead = document.querySelector('.dash-head > div');
+  if (dashHead) dashHead.appendChild(savedPill);
+  var pillTimer = null;
+  function flashSaved() {
+    savedPill.classList.add('show');
+    if (pillTimer) clearTimeout(pillTimer);
+    pillTimer = setTimeout(function () { savedPill.classList.remove('show'); }, 1200);
+  }
+  function flashError() {
+    savedPill.textContent = 'Save failed';
+    savedPill.classList.add('show', 'err');
+    if (pillTimer) clearTimeout(pillTimer);
+    pillTimer = setTimeout(function () {
+      savedPill.classList.remove('show', 'err');
+      savedPill.textContent = 'Saved';
+    }, 2500);
+  }
+
+  toggle.addEventListener('click', function () { panel.classList.toggle('open'); });
   var doneBtn = document.getElementById('doneCustomizing');
-  if (doneBtn && panel) {
+  if (doneBtn) {
     doneBtn.addEventListener('click', function () { panel.classList.remove('open'); });
+  }
+
+  function rowToggle(row) {
+    return row ? row.querySelector('.w-toggle') : null;
   }
 
   function collectLayout() {
     var widgets = [];
-    list.querySelectorAll('.widget-row').forEach(function (row) {
+    var rows = list.querySelectorAll('.widget-row');
+    for (var i = 0; i < rows.length; i++) {
+      var tgl = rowToggle(rows[i]);
       widgets.push({
-        id: row.getAttribute('data-widget-id'),
-        visible: !row.querySelector('.w-toggle').classList.contains('off')
+        id: rows[i].getAttribute('data-widget-id'),
+        visible: tgl ? !tgl.classList.contains('off') : true
       });
-    });
+    }
     return widgets;
   }
 
-  function saveLayout(widgets) {
-    var token = document.querySelector('input[name="csrf_token"]');
-    fetch('{{ url_for("dashboard_customize") }}', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        widgets: widgets,
-        csrf_token: token ? token.value : '{{ session.get("csrf_token", "") }}'
-      })
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (!d.ok) console.error('Layout save failed:', d.error);
-    }).catch(function (e) { console.error('Layout save failed', e); });
+  // Debounced background save: persists silently, flashes "Saved".
+  var saveTimer = null;
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      var tokenEl = document.querySelector('input[name="csrf_token"]');
+      var payload = {
+        widgets: collectLayout(),
+        csrf_token: tokenEl ? tokenEl.value : '{{ session.get("csrf_token", "") }}'
+      };
+      fetch('{{ url_for("dashboard_customize") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (d) {
+        if (d && d.ok) { flashSaved(); }
+        else { console.error('Layout save rejected:', d); flashError(); }
+      }).catch(function (e) { console.error('Layout save failed:', e); flashError(); });
+    }, 400);
   }
 
-  // Reorder + toggle handlers (event delegation)
-  if (list) {
-    list.addEventListener('click', function (e) {
-      var btn = e.target.closest('.w-btn');
-      if (!btn) return;
-      var row = btn.closest('.widget-row');
-      if (btn.classList.contains('w-up')) {
-        var prev = row.previousElementSibling;
-        if (prev) { list.insertBefore(row, prev); saveLayout(collectLayout()); applyOrder(); }
-      } else if (btn.classList.contains('w-down')) {
-        var next = row.nextElementSibling;
-        if (next) { list.insertBefore(next, row); saveLayout(collectLayout()); applyOrder(); }
-      } else if (btn.classList.contains('w-toggle')) {
-        btn.classList.toggle('off');
-        // swap eye / eye-off icon
-        var svg = btn.querySelector('svg');
-        var isOff = btn.classList.contains('off');
-        btn.innerHTML = isOff
-          ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.15em;flex:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>'
-          : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.15em;flex:none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-        saveLayout(collectLayout());
-        applyVisibility();
-      }
-    });
-  }
+  var EYE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.15em;flex:none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var EYE_OFF_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.15em;flex:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>';
 
-  // Reorder the masonry cards to match the panel order
+  // Reorder the masonry cards to match the panel order (immediate).
   function applyOrder() {
-    var order = [];
-    list.querySelectorAll('.widget-row').forEach(function (row) {
-      order.push(row.getAttribute('data-widget-id'));
-    });
-    order.forEach(function (wid) {
-      var card = masonry.querySelector('[data-widget="' + wid + '"]');
+    var rows = list.querySelectorAll('.widget-row');
+    for (var i = 0; i < rows.length; i++) {
+      var wid = rows[i].getAttribute('data-widget-id');
+      var card = wid && masonry.querySelector('[data-widget="' + wid + '"]');
       if (card) masonry.appendChild(card);
-    });
+    }
   }
 
-  // Show/hide masonry cards to match panel toggles
+  // Show/hide masonry cards to match panel toggles (immediate).
   function applyVisibility() {
-    list.querySelectorAll('.widget-row').forEach(function (row) {
-      var wid = row.getAttribute('data-widget-id');
-      var visible = !row.querySelector('.w-toggle').classList.contains('off');
-      var card = masonry.querySelector('[data-widget="' + wid + '"]');
+    var rows = list.querySelectorAll('.widget-row');
+    for (var i = 0; i < rows.length; i++) {
+      var wid = rows[i].getAttribute('data-widget-id');
+      var tgl = rowToggle(rows[i]);
+      var visible = tgl ? !tgl.classList.contains('off') : true;
+      var card = wid && masonry.querySelector('[data-widget="' + wid + '"]');
       if (card) card.style.display = visible ? '' : 'none';
-    });
+    }
+  }
+
+  // Direct per-button handlers (no delegation — each row is wired explicitly).
+  var rows = list.querySelectorAll('.widget-row');
+  for (var i = 0; i < rows.length; i++) {
+    (function (row) {
+      var upBtn = row.querySelector('.w-up');
+      var downBtn = row.querySelector('.w-down');
+      var tglBtn = row.querySelector('.w-toggle');
+
+      if (upBtn) upBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var prev = row.previousElementSibling;
+        if (prev) {
+          list.insertBefore(row, prev);
+          applyOrder();       // dashboard reorders instantly
+          scheduleSave();     // persist silently in background
+        }
+      });
+
+      if (downBtn) downBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var next = row.nextElementSibling;
+        if (next) {
+          list.insertBefore(next, row);
+          applyOrder();
+          scheduleSave();
+        }
+      });
+
+      if (tglBtn) tglBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        tglBtn.classList.toggle('off');
+        var isOff = tglBtn.classList.contains('off');
+        tglBtn.innerHTML = isOff ? EYE_OFF_SVG : EYE_SVG;
+        tglBtn.setAttribute('aria-pressed', isOff ? 'false' : 'true');
+        applyVisibility();    // widget appears/disappears instantly
+        scheduleSave();       // persist silently in background
+      });
+    })(rows[i]);
   }
 
   var resetBtn = document.getElementById('resetLayout');
   if (resetBtn) {
     resetBtn.addEventListener('click', function () {
-      var token = document.querySelector('input[name="csrf_token"]');
+      var tokenEl = document.querySelector('input[name="csrf_token"]');
       fetch('{{ url_for("dashboard_customize_reset") }}', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csrf_token: token ? token.value : '{{ session.get("csrf_token", "") }}' })
-      }).then(function () { window.location.reload(); });
+        body: JSON.stringify({ csrf_token: tokenEl ? tokenEl.value : '{{ session.get("csrf_token", "") }}' })
+      }).then(function () { window.location.reload(); })
+        .catch(function (e) { console.error('Layout reset failed:', e); flashError(); });
     });
   }
+
+  // Apply the server-rendered visibility state on load (in case of mismatch).
+  applyVisibility();
 })();
 </script>
 {% endblock %}

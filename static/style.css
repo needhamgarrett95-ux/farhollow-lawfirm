@@ -570,14 +570,24 @@ dd { margin: 0; }
 .w-btn.off { color: var(--muted); opacity: .5; }
 .customize-actions { display: flex; gap: 10px; margin-top: 14px; }
 
+/* Subtle "Saved" pill that flashes after layout auto-save */
+.layout-saved-pill {
+  display: inline-block; margin-left: 12px; padding: 3px 12px;
+  border-radius: 20px; font-size: 12px; font-weight: 600;
+  background: #e6f4ea; color: #1a7f37; opacity: 0;
+  transition: opacity .25s ease; vertical-align: middle;
+}
+.layout-saved-pill.show { opacity: 1; }
+.layout-saved-pill.err { background: #fdecea; color: #b3261e; }
+
 /* Top nav — Card Flow style (light) */
 .topbar-cf {
   background: var(--card); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 10;
 }
 .topbar-cf .nav-inner {
-  max-width: 1280px; margin: 0 auto; padding: 0 28px;
-  display: flex; align-items: center; gap: 8px; height: 66px;
+  max-width: 1600px; margin: 0 auto; padding: 0 20px;
+  display: flex; align-items: center; gap: 6px; height: 62px;
 }
 /* Brand block (logo + firm name) pinned left; tabs sit immediately after it,
    left-aligned; user menu pinned right. No dead space between brand and tabs. */
@@ -585,8 +595,10 @@ dd { margin: 0; }
 /* Tabs fill the middle and scroll internally when there are too many to fit —
    the scroll is clipped here so tabs can NEVER paint over the avatar. */
 .nav-tabs {
-  display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
-  overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+  display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0;
+  max-width: 100%;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none;
+  position: relative; z-index: 1;
 }
 .nav-tabs::-webkit-scrollbar { display: none; }
 .monogram {
@@ -598,15 +610,15 @@ dd { margin: 0; }
 .firm-name { font-size: 14px; font-weight: 700; color: var(--navy); margin-right: 2px; white-space: nowrap; line-height: 1.3; }
 .firm-name small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
 .tlink {
-  display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
-  padding: 9px 14px; border-radius: 9px; font-size: 13.5px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 7px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
   color: var(--muted); text-decoration: none; white-space: nowrap;
 }
-.tlink svg { width: 17px; height: 17px; }
+.tlink svg { width: 15px; height: 15px; }
 .tlink:hover { background: var(--surface-hover); color: var(--navy); }
 .tlink.active { background: var(--brand); color: #fff; }
 .tlink .bdg { background: #c0392b; color: #fff; font-size: 10.5px; font-weight: 700; border-radius: 10px; padding: 1px 7px; }
-.nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-shrink: 0; position: relative; z-index: 2; background: var(--card); padding-left: 8px; }
 .avatar {
   width: 36px; height: 36px; border-radius: 50%; background: var(--brand); color: #fff;
   font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 13px;
