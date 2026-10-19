@@ -8,8 +8,10 @@
 ;  Output: installer\output\LawFirmHostSetup.exe
 ; ============================================================
 
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0"
+#endif
 #define MyAppName "Law Firm Case Management"
-#define MyAppVersion "1.0"
 #define MyAppPublisher "Farhollow"
 #define MyAppExeName "LawFirmServer.exe"
 #define BuildDir "..\dist\LawFirmServer"

@@ -7,23 +7,32 @@ local network through their browser.
 > ⚠️ **Office network only.** This software is designed for your office LAN.
 > Do NOT expose port 5000 to the internet.
 
-## Installation
+## Installation (easiest — download the installer)
 
-There are two roles: **host** (one computer runs the server) and **client**
-(other computers connect via browser).
+**You don't need the command line or Python for this.**
 
-### Host computer (easiest: use the installer)
+1. Go to the **Releases** page:
+   https://github.com/needhamgarrett95-ux/farhollow-lawfirm/releases
+2. Download the latest release's files:
+   - **Host computer** (the one in the office that runs everything):
+     download **`LawFirmHostSetup.exe`** and run it. Follow the prompts —
+     it installs the server, opens the Windows Firewall, and can start
+     automatically when Windows starts.
+   - **Office computers / laptops**: download **`LawFirmClientSetup.exe`**
+     and run it. Enter the host computer's IP address when asked, and a
+     "Law Firm" icon appears on the desktop. (Prefer the simple route?
+     `LawFirmClientFiles.zip` contains `client-setup.bat` — same result,
+     no installer.)
+3. On the host, double-click the desktop shortcut. A window opens showing
+   the address other computers use, e.g. `http://192.168.1.100:5000`.
+   **Leave this window open** while the office needs access.
 
-1. Run `LawFirmHostSetup.exe` (built from `installer/host-setup.iss`).
-2. Follow the prompts:
-   - Allow office computers to connect (opens Windows Firewall for port 5000).
-   - Optionally start the server automatically when Windows starts.
-3. Double-click the **Law Firm Case Management** desktop shortcut.
-4. A window opens showing the address other computers use, e.g.
-   `http://192.168.1.100:5000`. **Leave this window open** while the office
-   needs access.
+New releases are built automatically — every version tag (e.g. `v1.0.0`)
+produces fresh installers on the Releases page.
 
-### Host computer (manual: from source)
+### Manual install from source (advanced)
+
+If you'd rather run from Python directly:
 
 1. Install **Python 3.11 or newer** from https://www.python.org/downloads/
    - During install, check **"Add python.exe to PATH"**.
@@ -42,17 +51,6 @@ There are two roles: **host** (one computer runs the server) and **client**
 5. Note the LAN address printed on startup. Other computers use that address.
 
 For single-computer mode (no network access): `python app.py --local-only`
-
-### Office computers / laptops (clients)
-
-No software to install — just a browser.
-
-1. Run `installer\client-setup.bat`.
-2. Enter the host computer's IP address when asked.
-3. A **Law Firm** icon appears on the desktop. Double-click it.
-
-If the shortcut stops working, the host's IP may have changed — run
-`client-setup.bat` again with the new address.
 
 ## First login
 
@@ -86,22 +84,27 @@ the database. If the key is lost, encrypted fields cannot be recovered.
 
 The `instance/` folder (database + keys) is never committed to git.
 
-## Building the installers (for Garrett)
+## Building the installers
 
-**Host exe** (on Windows):
+Installers are built automatically by GitHub Actions — see
+`.github/workflows/build-installer.yml`. Every push to `main` produces
+installer artifacts; every version tag produces a GitHub Release.
+
+**Cutting a release:**
 ```
-installer\build-exe.bat
+git tag v1.0.0
+git push origin v1.0.0
 ```
-Produces `dist\LawFirmServer\`. Requires Python + `pip install pyinstaller`.
+The tag name becomes the installer version. Download from the Releases page.
 
-**Host installer** (on Windows):
-1. Install Inno Setup 6 from https://jrsoftware.org/isinfo.php
-2. Run `installer\build-exe.bat` first
-3. Open `installer\host-setup.iss` in Inno Setup → Compile (Ctrl+F9)
-4. Output: `installer\output\LawFirmHostSetup.exe`
-
-**Client installer** (optional): open `installer\client-setup.iss` in
-Inno Setup → Compile. Or just distribute `installer\client-setup.bat`.
+**Manual build** (advanced, on Windows only):
+1. `installer\build-exe.bat` — produces `dist\LawFirmServer\`
+   (requires Python + `pip install pyinstaller`)
+2. Install Inno Setup 6 from https://jrsoftware.org/isinfo.php
+3. Open `installer\host-setup.iss` → Compile (Ctrl+F9)
+   → `installer\output\LawFirmHostSetup.exe`
+4. Client installer (optional): open `installer\client-setup.iss` → Compile,
+   or just distribute `installer\client-setup.bat`.
 
 ## Security notes
 

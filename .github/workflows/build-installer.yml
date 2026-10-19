@@ -1,0 +1,127 @@
+# ============================================================
+#  Build Windows installers for Law Firm Case Management
+#
+#  Triggers:
+#    - Every push to main          -> builds installers, uploads as artifacts
+#    - Manual dispatch             -> same, on demand
+#    - Version tags (v1.2.3)       -> builds installers AND creates a
+#                                     GitHub Release with the files attached
+#
+#  Cutting a release:
+#    git tag v1.0.0
+#    git push origin v1.0.0
+#
+#  Garrett downloads installers from:
+#    https://github.com/needhamgarrett95-ux/farhollow-lawfirm/releases
+# ============================================================
+
+name: Build Windows installers
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create GitHub Releases on tags
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Determine version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF -replace '^refs/tags/v', ''
+          } else {
+            $v = "1.0-dev+$($env:GITHUB_SHA.Substring(0,7))"
+          }
+          "APP_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Building version: $v"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build server exe with PyInstaller
+        run: pyinstaller installer/lawfirm.spec
+
+      - name: Stage maintenance manual for installer
+        # host-setup.iss creates a Start Menu shortcut to {app}\MAINTENANCE.txt,
+        # so the file must exist inside the packaged folder before compiling.
+        shell: pwsh
+        run: Copy-Item MAINTENANCE.md dist\LawFirmServer\MAINTENANCE.txt
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile host installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DMyAppVersion="$env:APP_VERSION" `
+            installer\host-setup.iss
+
+      - name: Compile client installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DMyAppVersion="$env:APP_VERSION" `
+            installer\client-setup.iss
+
+      - name: Package client batch file (no-install fallback)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path installer\client-setup.bat `
+            -DestinationPath installer\output\LawFirmClientFiles.zip -Force
+
+      - name: List outputs
+        shell: pwsh
+        run: Get-ChildItem installer\output\ | Format-Table Name, Length
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lawfirm-installers-${{ env.APP_VERSION }}
+          path: |
+            installer/output/LawFirmHostSetup.exe
+            installer/output/LawFirmClientSetup.exe
+            installer/output/LawFirmClientFiles.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Law Firm Case Management ${{ env.APP_VERSION }}
+          body: |
+            ## Law Firm Case Management v${{ env.APP_VERSION }}
+
+            **Host computer:** download and run `LawFirmHostSetup.exe`.
+            It installs the server, opens the firewall, and can start
+            automatically with Windows. No Python needed.
+
+            **Office computers:** download `LawFirmClientSetup.exe`
+            (or the `LawFirmClientFiles.zip` fallback), enter the host
+            computer's IP address, and a "Law Firm" shortcut appears
+            on the desktop.
+
+            > Office network only — do not expose port 5000 to the internet.
+            > See MAINTENANCE.md in the repo for the full manual.
+          files: |
+            installer/output/LawFirmHostSetup.exe
+            installer/output/LawFirmClientSetup.exe
+            installer/output/LawFirmClientFiles.zip

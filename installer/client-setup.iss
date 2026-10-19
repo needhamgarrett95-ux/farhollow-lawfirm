@@ -10,8 +10,10 @@
 ;  Output: installer\output\LawFirmClientSetup.exe
 ; ============================================================
 
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0"
+#endif
 #define MyAppName "Law Firm Case Management (Client)"
-#define MyAppVersion "1.0"
 
 [Setup]
 AppId={{B4C3D9E2-8E5F-4B1C-9D2E-3F6A7B8C9D1E}}
