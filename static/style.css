@@ -33,7 +33,8 @@ body {
   height: 56px;
   gap: 24px;
 }
-.brand { font-weight: 700; font-size: 17px; letter-spacing: 0.3px; white-space: nowrap; }
+.brand { font-weight: 700; font-size: 17px; letter-spacing: 0.3px; white-space: nowrap; display: flex; align-items: center; gap: 10px; }
+.brand-logo { height: 32px; width: auto; }
 .topbar nav { display: flex; gap: 4px; flex: 1; }
 .topbar nav a {
   color: #cdd8e4; text-decoration: none; padding: 8px 14px; border-radius: 6px;
@@ -175,6 +176,8 @@ dd { margin: 0; }
 .login-page { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--navy-dark); }
 .login-card { background: #fff; border-radius: 10px; padding: 36px; width: 380px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
 .login-card h1 { text-align: center; color: var(--navy); }
+.login-logo { text-align: center; margin-bottom: 12px; }
+.login-logo img { max-width: 200px; height: auto; }
 .login-card .muted { text-align: center; }
 .login-card label { margin-bottom: 12px; }
 .login-card .btn-block { margin-top: 8px; }
