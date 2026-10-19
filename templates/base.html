@@ -21,37 +21,11 @@
   <div class="nav-inner">
     <div class="monogram">DGM</div>
     <div class="firm-name">Law Office of Derek G. Medina<small>Port Angeles, WA</small></div>
-    <a class="tlink {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">{{ icon('dashboard', 17) }}<span class="tlink-label">Dashboard</span></a>
-    {% if perms.get('view_clients') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('client') %}active{% endif %}" href="{{ url_for('client_list') }}">{{ icon('clients', 17) }}<span class="tlink-label">Clients</span></a>
+    {% for item in nav_items %}
+    {% if perms.get(item.permission) %}
+    <a class="tlink {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">{{ icon(item.icon, 17) }}<span class="tlink-label">{{ item.label }}</span>{% if item.badge and nav_deadline_count %}<span class="bdg">{{ nav_deadline_count }}</span>{% endif %}</a>
     {% endif %}
-    {% if perms.get('view_cases') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('case') %}active{% endif %}" href="{{ url_for('case_list') }}">{{ icon('cases', 17) }}<span class="tlink-label">Cases</span></a>
-    {% endif %}
-    {% if perms.get('view_calendar') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('calendar') or request.endpoint and request.endpoint.startswith('event') %}active{% endif %}" href="{{ url_for('calendar_view') }}">{{ icon('calendar', 17) }}<span class="tlink-label">Calendar</span></a>
-    {% endif %}
-    {% if perms.get('calculate_deadlines') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('deadline') %}active{% endif %}" href="{{ url_for('deadline_calculator') }}">{{ icon('deadlines', 17) }}<span class="tlink-label">Deadlines</span>{% if nav_deadline_count %}<span class="bdg">{{ nav_deadline_count }}</span>{% endif %}</a>
-    {% endif %}
-    {% if perms.get('use_templates') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('template') %}active{% endif %}" href="{{ url_for('template_gallery') }}">{{ icon('templates', 17) }}<span class="tlink-label">Templates</span></a>
-    {% endif %}
-    {% if perms.get('view_billing') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('invoice') %}active{% endif %}" href="{{ url_for('invoice_list') }}">{{ icon('billing', 17) }}<span class="tlink-label">Billing</span></a>
-    {% endif %}
-    {% if perms.get('view_trust') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('trust') %}active{% endif %}" href="{{ url_for('trust_overview') }}">{{ icon('trust', 17) }}<span class="tlink-label">Trust</span></a>
-    {% endif %}
-    {% if perms.get('view_accounting') %}
-    <a class="tlink {% if request.endpoint and (request.endpoint.startswith('accounting') or request.endpoint.startswith('op_') or request.endpoint.startswith('employee') or request.endpoint.startswith('payroll') or request.endpoint.startswith('timeclock') or request.endpoint.startswith('report_') or request.endpoint.startswith('coa_') or request.endpoint.startswith('tax_')) %}active{% endif %}" href="{{ url_for('accounting_overview') }}">{{ icon('billing', 17) }}<span class="tlink-label">Accounting</span></a>
-    {% endif %}
-    {% if perms.get('view_audit_log') %}
-    <a class="tlink {% if request.endpoint == 'audit_view' %}active{% endif %}" href="{{ url_for('audit_view') }}">{{ icon('documents', 17) }}<span class="tlink-label">Audit Log</span></a>
-    {% endif %}
-    {% if perms.get('manage_users') %}
-    <a class="tlink {% if request.endpoint and request.endpoint.startswith('user') %}active{% endif %}" href="{{ url_for('user_list') }}">{{ icon('users', 17) }}<span class="tlink-label">Users</span></a>
-    {% endif %}
+    {% endfor %}
     <div class="nav-right">
       <div class="user-menu">
         <div class="avatar" id="avatarBtn" title="{{ session.get('username') }}">{{ (session.get('username') or 'U')[:2].upper() }}</div>

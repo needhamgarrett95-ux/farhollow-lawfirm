@@ -1487,6 +1487,48 @@ def expand_permissions(raw):
     return perms
 
 
+# ----------------------------------------------------------------------------
+# Navigation — SINGLE SOURCE OF TRUTH. Every tab maps 1:1 to a permission.
+# If the user has the permission, the tab shows; the tab's target route
+# checks that same permission. No tab may lead to a 403.
+# ----------------------------------------------------------------------------
+NAV_ITEMS = [
+    {"label": "Dashboard", "icon": "dashboard", "endpoint": "dashboard",
+     "permission": "view_dashboard", "active_prefixes": ["dashboard"]},
+    {"label": "Clients", "icon": "clients", "endpoint": "client_list",
+     "permission": "view_clients", "active_prefixes": ["client"]},
+    {"label": "Cases", "icon": "cases", "endpoint": "case_list",
+     "permission": "view_cases", "active_prefixes": ["case"]},
+    {"label": "Calendar", "icon": "calendar", "endpoint": "calendar_view",
+     "permission": "view_calendar", "active_prefixes": ["calendar", "event"]},
+    {"label": "Deadlines", "icon": "deadlines", "endpoint": "deadline_calculator",
+     "permission": "calculate_deadlines", "active_prefixes": ["deadline", "clallam"],
+     "badge": "nav_deadline_count"},
+    {"label": "Templates", "icon": "templates", "endpoint": "template_gallery",
+     "permission": "use_templates", "active_prefixes": ["template"]},
+    {"label": "Billing", "icon": "billing", "endpoint": "invoice_list",
+     "permission": "view_billing", "active_prefixes": ["invoice", "time"]},
+    {"label": "Trust", "icon": "trust", "endpoint": "trust_overview",
+     "permission": "view_trust", "active_prefixes": ["trust"]},
+    {"label": "Accounting", "icon": "billing", "endpoint": "accounting_overview",
+     "permission": "view_accounting",
+     "active_prefixes": ["accounting", "op_", "employee", "payroll", "timeclock",
+                         "report_", "coa_", "tax_"]},
+    {"label": "Audit Log", "icon": "documents", "endpoint": "audit_view",
+     "permission": "view_audit_log", "active_prefixes": ["audit"]},
+    {"label": "Users", "icon": "users", "endpoint": "user_list",
+     "permission": "manage_users", "active_prefixes": ["user"]},
+]
+
+
+def first_allowed_endpoint(user_perms):
+    """First nav tab the user can access (for post-login redirect)."""
+    for item in NAV_ITEMS:
+        if user_has_perm(user_perms, item["permission"]):
+            return item["endpoint"]
+    return "dashboard"  # fallback; will 403 only if admin revoked everything
+
+
 def get_user_permissions(db, user_id):
     """Load and expand a user's permission dict. Falls back to role preset."""
     row = db.execute(
@@ -1572,11 +1614,20 @@ def inject_update_info():
             ).fetchone()["c"]
         except Exception:
             pass
+    # Build nav items with active flags (single source of truth: NAV_ITEMS)
+    endpoint = request.endpoint or ""
+    nav_items = []
+    for item in NAV_ITEMS:
+        nav_items.append({
+            **item,
+            "active": any(endpoint.startswith(p) for p in item["active_prefixes"]),
+        })
     return {
         "app_version": APP_VERSION,
         "is_admin": is_admin(),
         "user_role": session.get("role", "staff"),
         "perms": session.get("permissions", {}),
+        "nav_items": nav_items,
         "theme": theme,
         "nav_deadline_count": nav_deadline_count,
         # The banner is admin-only; the footer version tag is for everyone
@@ -1645,7 +1696,8 @@ def login():
             if user["must_change_password"]:
                 flash("Please change your password before continuing.", "warning")
                 return redirect(url_for("change_password"))
-            return redirect(url_for("dashboard"))
+            session["permissions"] = get_user_permissions(db, user["id"])
+            return redirect(url_for(first_allowed_endpoint(session["permissions"])))
         flash("Invalid username or password.", "error")
     return render_template("login.html")
 
@@ -2028,7 +2080,7 @@ def set_user_theme(user_id, theme):
 # Dashboard
 # ----------------------------------------------------------------------------
 @app.route("/dashboard")
-@login_required
+@permission_required("view_dashboard")
 def dashboard():
     db = get_db()
     active_cases = db.execute(
