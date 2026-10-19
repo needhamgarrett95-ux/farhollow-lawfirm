@@ -713,3 +713,58 @@ html[data-theme="dark"] .login-bg::after {
 @media (prefers-reduced-motion: reduce) {
   .modal-overlay, .modal-card { transition: none; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Integrations (v2.2)                                                 */
+/* ------------------------------------------------------------------ */
+.integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 18px; }
+.integration-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.integration-icon { width: 46px; height: 46px; border-radius: 12px; background: var(--navy); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+html[data-theme="dark"] .integration-icon { background: var(--gold); color: var(--navy-dark); }
+.status-pill { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; padding: 3px 10px; border-radius: 20px; margin-top: 4px; }
+.status-connected { background: #e6f4ea; color: #1e7e4e; }
+.status-disconnected { background: var(--surface-soft); color: var(--muted); }
+.status-needs_reauth { background: #fef3e2; color: #b26a00; }
+html[data-theme="dark"] .status-connected { background: rgba(30,126,78,.25); color: #7ddba3; }
+html[data-theme="dark"] .status-disconnected { background: rgba(255,255,255,.08); color: var(--muted); }
+html[data-theme="dark"] .status-needs_reauth { background: rgba(210,145,10,.22); color: #f0c96a; }
+.notice { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--navy); border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+.notice-warning { border-left-color: var(--warning, #d4910a); }
+.notice p { margin: 4px 0; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.stacked-form label { display: block; margin-bottom: 10px; font-weight: 600; font-size: 13px; }
+.stacked-form input { display: block; width: 100%; margin-top: 4px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--card); color: var(--text); }
+.check-row { display: flex; align-items: center; gap: 8px; font-weight: 500 !important; }
+.tab-badge { background: var(--navy); color: #fff; font-size: 11px; font-weight: 700; border-radius: 10px; padding: 1px 8px; margin-left: 4px; }
+html[data-theme="dark"] .tab-badge { background: var(--gold); color: var(--navy-dark); }
+.tabs .tab svg { vertical-align: -2px; margin-right: 2px; }
+
+/* Email list on case detail */
+.email-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.email-item { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--card); }
+.email-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.email-subject { font-size: 14px; }
+.email-date { margin-left: auto; }
+.email-meta { margin-top: 2px; }
+.email-snippet { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.email-direction { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 2px 8px; border-radius: 12px; }
+.email-inbound { background: #e8f0fe; color: #2b6cb0; }
+.email-outbound { background: #e6f4ea; color: #1e7e4e; }
+html[data-theme="dark"] .email-inbound { background: rgba(43,108,176,.25); color: #8ab8f0; }
+html[data-theme="dark"] .email-outbound { background: rgba(30,126,78,.25); color: #7ddba3; }
+.email-body { margin-top: 8px; }
+.email-body summary { cursor: pointer; color: var(--navy); font-weight: 600; font-size: 13px; }
+html[data-theme="dark"] .email-body summary { color: var(--gold); }
+.email-unlinked { opacity: .92; }
+
+/* Compose */
+.compose-card { max-width: 720px; }
+.compose-row { display: grid; grid-template-columns: 90px 1fr; gap: 12px; align-items: start; margin-bottom: 12px; }
+.compose-row label { font-weight: 600; font-size: 13px; padding-top: 9px; }
+.compose-row input, .compose-row select, .compose-row textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--card); color: var(--text); font-family: inherit; }
+.compose-row textarea { resize: vertical; min-height: 220px; }
+@media (max-width: 560px) {
+  .compose-row { grid-template-columns: 1fr; }
+  .compose-row label { padding-top: 0; }
+  .integration-grid { grid-template-columns: 1fr; }
+}

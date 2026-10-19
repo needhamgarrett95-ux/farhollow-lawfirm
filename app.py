@@ -225,6 +225,8 @@ CREATE TABLE IF NOT EXISTS calendar_events (
     event_time TEXT,
     description TEXT,
     completed INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'app',
+    external_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 -- Time entries (billable hours). Financial records: RPC 1.15B requires
@@ -431,6 +433,53 @@ CREATE TABLE IF NOT EXISTS tax_rates (
     value TEXT NOT NULL,
     help TEXT,
     effective_year INTEGER NOT NULL DEFAULT 2026,
+    updated_at TEXT NOT NULL
+);
+-- Integrations (v2.2): OAuth-connected email + calendar providers.
+-- Tokens are Fernet-encrypted at rest (see crypto.py). Firm-wide connection.
+CREATE TABLE IF NOT EXISTS integrations (
+    provider TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'disconnected',
+    client_id TEXT NOT NULL DEFAULT '',
+    client_secret_enc TEXT NOT NULL DEFAULT '',
+    tokens_enc TEXT NOT NULL DEFAULT '',
+    settings TEXT NOT NULL DEFAULT '{}',
+    last_sync_at TEXT,
+    last_error TEXT,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+-- Synced email messages. case links live in email_case_links (many-to-many:
+-- one email can relate to several cases for the same client).
+CREATE TABLE IF NOT EXISTS synced_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    thread_id TEXT,
+    subject TEXT NOT NULL DEFAULT '',
+    from_addr TEXT NOT NULL DEFAULT '',
+    to_addr TEXT NOT NULL DEFAULT '',
+    sent_at TEXT,
+    snippet TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    direction TEXT NOT NULL DEFAULT 'inbound',
+    synced_at TEXT NOT NULL,
+    UNIQUE(provider, external_id)
+);
+CREATE TABLE IF NOT EXISTS email_case_links (
+    email_id INTEGER NOT NULL REFERENCES synced_emails(id) ON DELETE CASCADE,
+    case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    link_type TEXT NOT NULL DEFAULT 'auto',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (email_id, case_id)
+);
+-- Maps app calendar events to their Google Calendar counterparts so the
+-- two-way sync can update/delete instead of duplicating.
+CREATE TABLE IF NOT EXISTS calendar_sync_map (
+    app_event_id INTEGER PRIMARY KEY REFERENCES calendar_events(id)
+        ON DELETE CASCADE,
+    google_event_id TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 """
@@ -690,6 +739,46 @@ def init_db():
 
     _seed_coa(db)
     _seed_tax_rates(db)
+
+    # Migration for v2.2: integrations tables. CREATE TABLE IF NOT EXISTS in
+    # SCHEMA handles fresh installs; ensure existing DBs get them too.
+    # Also add source/external tracking columns to calendar_events for the
+    # Google Calendar two-way sync.
+    for _ddl in (
+        """CREATE TABLE IF NOT EXISTS integrations (
+            provider TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'disconnected',
+            client_id TEXT NOT NULL DEFAULT '', client_secret_enc TEXT NOT NULL DEFAULT '',
+            tokens_enc TEXT NOT NULL DEFAULT '', settings TEXT NOT NULL DEFAULT '{}',
+            last_sync_at TEXT, last_error TEXT, fail_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS synced_emails (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL,
+            external_id TEXT NOT NULL, thread_id TEXT,
+            subject TEXT NOT NULL DEFAULT '', from_addr TEXT NOT NULL DEFAULT '',
+            to_addr TEXT NOT NULL DEFAULT '', sent_at TEXT,
+            snippet TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+            direction TEXT NOT NULL DEFAULT 'inbound', synced_at TEXT NOT NULL,
+            UNIQUE(provider, external_id))""",
+        """CREATE TABLE IF NOT EXISTS email_case_links (
+            email_id INTEGER NOT NULL REFERENCES synced_emails(id) ON DELETE CASCADE,
+            case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            link_type TEXT NOT NULL DEFAULT 'auto', created_at TEXT NOT NULL,
+            PRIMARY KEY (email_id, case_id))""",
+        """CREATE TABLE IF NOT EXISTS calendar_sync_map (
+            app_event_id INTEGER PRIMARY KEY REFERENCES calendar_events(id)
+                ON DELETE CASCADE,
+            google_event_id TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+    ):
+        db.execute(_ddl)
+    _ce_cols = [r["name"] for r in
+                db.execute("PRAGMA table_info(calendar_events)").fetchall()]
+    if "source" not in _ce_cols:
+        db.execute("ALTER TABLE calendar_events ADD COLUMN source TEXT"
+                   " NOT NULL DEFAULT 'app'")
+    if "external_id" not in _ce_cols:
+        db.execute("ALTER TABLE calendar_events ADD COLUMN external_id TEXT"
+                   " NOT NULL DEFAULT ''")
+    db.commit()
 
     # Seed default admin on first run
     row = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()
@@ -1518,6 +1607,8 @@ NAV_ITEMS = [
      "permission": "view_audit_log", "active_prefixes": ["audit"]},
     {"label": "Users", "icon": "users", "endpoint": "user_list",
      "permission": "manage_users", "active_prefixes": ["user"]},
+    {"label": "Integrations", "icon": "plug", "endpoint": "integration_list",
+     "permission": "manage_users", "active_prefixes": ["integration"]},
 ]
 
 
@@ -2659,10 +2750,27 @@ def case_detail(case_id):
         " FROM time_entries WHERE case_id = ?",
         (case_id,),
     ).fetchone()
+    emails = db.execute(
+        "SELECT e.* FROM synced_emails e"
+        " JOIN email_case_links l ON l.email_id = e.id"
+        " WHERE l.case_id = ?"
+        " ORDER BY e.sent_at DESC, e.id DESC LIMIT 30",
+        (case_id,)).fetchall()
+    unlinked = db.execute(
+        "SELECT e.* FROM synced_emails e WHERE NOT EXISTS"
+        " (SELECT 1 FROM email_case_links l WHERE l.email_id = e.id"
+        "  AND l.case_id = ?)"
+        " ORDER BY e.sent_at DESC, e.id DESC LIMIT 20",
+        (case_id,)).fetchall()
+    email_connected = db.execute(
+        "SELECT COUNT(*) AS c FROM integrations WHERE status = 'connected'"
+        " AND provider IN ('gmail', 'outlook')").fetchone()["c"] > 0
     audit("case_view", f"Viewed case {case['case_number']} (id={case_id})")
     return render_template("case_detail.html", case=case, parties=parties,
                            doc_count=doc_count, upcoming=upcoming,
-                           time_totals=time_totals)
+                           time_totals=time_totals, emails=emails,
+                           unlinked=unlinked,
+                           email_connected=email_connected)
 
 
 @app.route("/cases/<int:case_id>/edit", methods=["GET", "POST"])
@@ -5176,6 +5284,559 @@ def audit_view():
 # ----------------------------------------------------------------------------
 # Error pages
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Integrations: email sync (Gmail/Outlook) + calendar sync (Google Calendar)
+# ----------------------------------------------------------------------------
+import integrations as integ
+
+
+def _get_integration(db, provider):
+    row = db.execute(
+        "SELECT * FROM integrations WHERE provider = ?", (provider,)
+    ).fetchone()
+    if not row:
+        now = integ.now_iso()
+        db.execute(
+            "INSERT INTO integrations (provider, status, created_at,"
+            " updated_at) VALUES (?, 'disconnected', ?, ?)",
+            (provider, now, now),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM integrations WHERE provider = ?", (provider,)
+        ).fetchone()
+    return row
+
+
+def _integration_settings(row):
+    try:
+        return json.loads(row["settings"] or "{}")
+    except (ValueError, TypeError):
+        return {}
+
+
+def _save_integration(db, provider, **fields):
+    fields["updated_at"] = integ.now_iso()
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    db.execute(f"UPDATE integrations SET {sets} WHERE provider = ?",
+               (*fields.values(), provider))
+    db.commit()
+
+
+def _integration_access_token(db, provider):
+    """Return a valid access token, refreshing if needed.
+
+    Raises integ.IntegrationAuthError when the admin must reconnect.
+    """
+    row = _get_integration(db, provider)
+    tokens = integ.unpack_tokens(row["tokens_enc"])
+    if not tokens.get("refresh_token"):
+        raise integ.IntegrationAuthError("Not connected")
+    if not tokens.get("access_token") or integ.tokens_expired(tokens):
+        data = integ.refresh_access_token(
+            provider, row["client_id"],
+            decrypt_value(row["client_secret_enc"]),
+            tokens["refresh_token"])
+        merged = {
+            "access_token": data["access_token"],
+            "refresh_token": data.get("refresh_token")
+                             or tokens["refresh_token"],
+            "expires_at": int(__import__("time").time())
+                           + int(data.get("expires_in", 3600)),
+        }
+        _save_integration(
+            db, provider,
+            tokens_enc=encrypt_value(json.dumps(merged)),
+            status="connected", last_error="", fail_count=0)
+        return merged["access_token"]
+    return tokens["access_token"]
+
+
+def _mark_integration_error(db, provider, message, auth_broken=False):
+    """Record a sync failure. Auth failures flip status to needs_reauth."""
+    row = _get_integration(db, provider)
+    status = "needs_reauth" if auth_broken else row["status"]
+    if row["status"] == "connected" and not auth_broken:
+        status = "connected"  # transient error; stay connected
+    _save_integration(db, provider, status=status, last_error=message[:500],
+                      fail_count=(row["fail_count"] or 0) + 1)
+
+
+@app.route("/integrations")
+@permission_required("manage_users")
+def integration_list():
+    db = get_db()
+    cards = []
+    for key, cfg in integ.PROVIDERS.items():
+        row = _get_integration(db, key)
+        email_count = 0
+        if cfg["kind"] == "email":
+            email_count = db.execute(
+                "SELECT COUNT(*) AS c FROM synced_emails WHERE provider = ?",
+                (key,)).fetchone()["c"]
+        cards.append({
+            "provider": key, "label": cfg["label"], "kind": cfg["kind"],
+            "icon": cfg["icon"], "description": cfg["description"],
+            "status": row["status"], "last_sync_at": row["last_sync_at"],
+            "last_error": row["last_error"],
+            "has_credentials": bool(row["client_id"]),
+            "settings": _integration_settings(row),
+            "email_count": email_count,
+        })
+    return render_template("integrations.html", cards=cards,
+                           redirect_uri=integ.redirect_uri())
+
+
+@app.route("/integrations/<provider>/credentials", methods=["POST"])
+@permission_required("manage_users")
+def integration_credentials(provider):
+    if provider not in integ.PROVIDERS:
+        abort(404)
+    check_csrf()
+    db = get_db()
+    client_id = request.form.get("client_id", "").strip()
+    client_secret = request.form.get("client_secret", "").strip()
+    if not client_id or not client_secret:
+        flash("Client ID and client secret are both required.", "error")
+        return redirect(url_for("integration_list"))
+    _save_integration(db, provider, client_id=client_id,
+                      client_secret_enc=encrypt_value(client_secret))
+    audit("integration_credentials",
+          f"Saved OAuth credentials for {integ.PROVIDERS[provider]['label']}")
+    flash("Credentials saved. Click Connect to authorize.", "success")
+    return redirect(url_for("integration_list"))
+
+
+@app.route("/integrations/<provider>/connect")
+@permission_required("manage_users")
+def integration_connect(provider):
+    if provider not in integ.PROVIDERS:
+        abort(404)
+    db = get_db()
+    row = _get_integration(db, provider)
+    if not row["client_id"]:
+        flash("Save your OAuth client ID and secret first.", "error")
+        return redirect(url_for("integration_list"))
+    state = json.dumps({"provider": provider,
+                        "nonce": os.urandom(8).hex()})
+    session["oauth_state"] = state
+    url = integ.build_authorize_url(provider, row["client_id"], state)
+    return redirect(url)
+
+
+@app.route("/integrations/oauth/callback")
+def integration_callback():
+    # OAuth must complete from the server machine (http://localhost).
+    if request.host.split(":")[0] not in ("localhost", "127.0.0.1"):
+        return render_template(
+            "error.html", code=400,
+            message="OAuth must be completed from the server computer itself"
+                    " (open http://localhost:5000/integrations in a browser"
+                    " on that machine)."), 400
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+    if not user_has_perm(session.get("permissions", {}), "manage_users"):
+        abort(403)
+    state_raw = request.args.get("state", "")
+    if not state_raw or state_raw != session.pop("oauth_state", None):
+        flash("OAuth state mismatch — please try connecting again.", "error")
+        return redirect(url_for("integration_list"))
+    try:
+        provider = json.loads(state_raw)["provider"]
+    except (ValueError, KeyError):
+        flash("Invalid OAuth state.", "error")
+        return redirect(url_for("integration_list"))
+    if request.args.get("error"):
+        flash(f"Authorization declined: {request.args.get('error')}", "error")
+        return redirect(url_for("integration_list"))
+    code = request.args.get("code", "")
+    if not code:
+        flash("No authorization code received.", "error")
+        return redirect(url_for("integration_list"))
+    db = get_db()
+    row = _get_integration(db, provider)
+    try:
+        data = integ.exchange_code(
+            provider, row["client_id"],
+            decrypt_value(row["client_secret_enc"]), code)
+    except integ.IntegrationError as e:
+        flash(str(e), "error")
+        return redirect(url_for("integration_list"))
+    _save_integration(
+        db, provider,
+        tokens_enc=integ.pack_tokens(data["access_token"],
+                                     data.get("refresh_token", ""),
+                                     data.get("expires_in", 3600)),
+        status="connected", last_error="", fail_count=0,
+        last_sync_at=integ.now_iso())
+    audit("integration_connected",
+          f"Connected {integ.PROVIDERS[provider]['label']}")
+    flash(f"{integ.PROVIDERS[provider]['label']} connected.", "success")
+    # Kick off an immediate sync so the UI populates right away.
+    try:
+        _sync_provider(provider)
+    except Exception as e:  # noqa: BLE001 — first sync failure is non-fatal
+        print(f"  [integrations] initial sync failed: {e}")
+    return redirect(url_for("integration_list"))
+
+
+@app.route("/integrations/<provider>/disconnect", methods=["POST"])
+@permission_required("manage_users")
+def integration_disconnect(provider):
+    if provider not in integ.PROVIDERS:
+        abort(404)
+    check_csrf()
+    db = get_db()
+    if integ.PROVIDERS[provider]["kind"] == "email":
+        db.execute("DELETE FROM email_case_links WHERE email_id IN"
+                   " (SELECT id FROM synced_emails WHERE provider = ?)",
+                   (provider,))
+        db.execute("DELETE FROM synced_emails WHERE provider = ?",
+                   (provider,))
+    if integ.PROVIDERS[provider]["kind"] == "calendar":
+        db.execute("DELETE FROM calendar_sync_map")
+        # Imported Google events stay in the calendar but are marked app-side;
+        # the mapping is gone so they will not be pushed back on reconnect.
+    _save_integration(db, provider, status="disconnected", tokens_enc="",
+                      last_error="", fail_count=0)
+    audit("integration_disconnected",
+          f"Disconnected {integ.PROVIDERS[provider]['label']}")
+    flash(f"{integ.PROVIDERS[provider]['label']} disconnected.", "success")
+    return redirect(url_for("integration_list"))
+
+
+@app.route("/integrations/<provider>/sync", methods=["POST"])
+@permission_required("manage_users")
+def integration_sync_now(provider):
+    if provider not in integ.PROVIDERS:
+        abort(404)
+    check_csrf()
+    try:
+        count = _sync_provider(provider)
+    except integ.IntegrationAuthError as e:
+        flash(f"Reconnection needed: {e}", "warning")
+        return redirect(url_for("integration_list"))
+    except integ.IntegrationError as e:
+        flash(f"Sync failed: {e}", "error")
+        return redirect(url_for("integration_list"))
+    flash(f"Sync complete ({count} items).", "success")
+    return redirect(url_for("integration_list"))
+
+
+@app.route("/integrations/<provider>/settings", methods=["POST"])
+@permission_required("manage_users")
+def integration_settings(provider):
+    if provider not in integ.PROVIDERS:
+        abort(404)
+    check_csrf()
+    db = get_db()
+    row = _get_integration(db, provider)
+    settings = _integration_settings(row)
+    # Only known toggles are accepted.
+    if integ.PROVIDERS[provider]["kind"] == "calendar":
+        settings["import_enabled"] = \
+            request.form.get("import_enabled") == "on"
+    _save_integration(db, provider, settings=json.dumps(settings))
+    flash("Settings saved.", "success")
+    return redirect(url_for("integration_list"))
+
+
+# ----------------------------------------------------------------------------
+# Sync engine
+# ----------------------------------------------------------------------------
+
+def _sync_provider(provider):
+    """Run one sync for a provider. Returns items synced. Runs inside an
+    app context (works from the background thread too)."""
+    with app.app_context():
+        db = get_db()
+        kind = integ.PROVIDERS[provider]["kind"]
+        try:
+            token = _integration_access_token(db, provider)
+        except integ.IntegrationAuthError as e:
+            _mark_integration_error(db, provider, str(e), auth_broken=True)
+            raise
+        try:
+            if kind == "email":
+                count = _sync_emails(db, provider, token)
+            else:
+                count = _sync_calendar(db, provider, token)
+        except integ.IntegrationAuthError as e:
+            _mark_integration_error(db, provider, str(e), auth_broken=True)
+            raise
+        except integ.IntegrationError as e:
+            _mark_integration_error(db, provider, str(e))
+            raise
+        _save_integration(db, provider, status="connected", last_error="",
+                          fail_count=0, last_sync_at=integ.now_iso())
+        return count
+
+
+def _sync_emails(db, provider, token):
+    """Pull recent messages, store them, auto-link to cases."""
+    now = integ.now_iso()
+    new_count = 0
+    if provider == "gmail":
+        listing = integ.gmail_list_messages(token, max_results=25)
+        ids = [m["id"] for m in listing.get("messages", [])]
+        fetch = lambda mid: integ.gmail_get_message(token, mid)  # noqa: E731
+    else:  # outlook
+        listing = integ.graph_list_messages(token, max_results=25)
+        fetched = {m["id"]: integ.graph_normalize(m)
+                   for m in listing.get("value", [])}
+        ids = list(fetched.keys())
+        fetch = fetched.get
+    for mid in ids:
+        exists = db.execute(
+            "SELECT id FROM synced_emails WHERE provider = ? AND"
+            " external_id = ?", (provider, mid)).fetchone()
+        if exists:
+            continue
+        try:
+            msg = fetch(mid)
+        except integ.IntegrationError:
+            continue
+        cur = db.execute(
+            "INSERT INTO synced_emails (provider, external_id, thread_id,"
+            " subject, from_addr, to_addr, sent_at, snippet, body,"
+            " direction, synced_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (provider, msg["external_id"], msg.get("thread_id", ""),
+             msg["subject"][:300], msg["from_addr"][:200],
+             msg["to_addr"][:500], msg.get("sent_at", "")[:60],
+             msg.get("snippet", "")[:500], msg.get("body", "")[:8000],
+             "inbound", now))
+        email_id = cur.lastrowid
+        for case_id in integ.match_email_to_cases(
+                db, msg["from_addr"], msg["to_addr"], msg["subject"]):
+            db.execute(
+                "INSERT OR IGNORE INTO email_case_links"
+                " (email_id, case_id, link_type, created_at)"
+                " VALUES (?,?, 'auto', ?)", (email_id, case_id, now))
+        new_count += 1
+    db.commit()
+    return new_count
+
+
+def _event_to_gcal_dt(event_date, event_time):
+    """App event -> ISO datetime for Google Calendar (assumes local day)."""
+    t = (event_time or "09:00").strip() or "09:00"
+    if len(t) == 5:
+        t += ":00"
+    return f"{event_date}T{t}"
+
+
+def _sync_calendar(db, provider, token):
+    """Two-way sync with Google Calendar. Returns items changed."""
+    from datetime import timedelta
+    changed = 0
+    settings = _integration_settings(_get_integration(db, provider))
+
+    # --- App -> Google: push upcoming app events -------------------------
+    upcoming = db.execute(
+        "SELECT * FROM calendar_events WHERE completed = 0 AND source = 'app'"
+        " AND event_date >= ? ORDER BY event_date LIMIT 100",
+        (date.today().isoformat(),)).fetchall()
+    for ev in upcoming:
+        mapped = db.execute(
+            "SELECT google_event_id FROM calendar_sync_map"
+            " WHERE app_event_id = ?", (ev["id"],)).fetchone()
+        case = db.execute("SELECT case_number FROM cases WHERE id = ?",
+                          (ev["case_id"],)).fetchone() if ev["case_id"] else None
+        title = ev["title"]
+        if case:
+            title = f"[{case['case_number']}] {title}"
+        desc = (ev["description"] or "") + "\n\n— synced from Law Office app"
+        start = _event_to_gcal_dt(ev["event_date"], ev["event_time"])
+        try:
+            if mapped:
+                integ.gcal_update_event(token, mapped["google_event_id"],
+                                        title, start, start, desc)
+            else:
+                gid = integ.gcal_insert_event(token, title, start, start,
+                                              desc, app_event_id=ev["id"])
+                db.execute(
+                    "INSERT INTO calendar_sync_map (app_event_id,"
+                    " google_event_id, updated_at) VALUES (?,?,?)",
+                    (ev["id"], gid, integ.now_iso()))
+            changed += 1
+        except integ.IntegrationError:
+            continue  # one bad event must not kill the whole sync
+
+    # --- Google -> App: import (only when the toggle is on) --------------
+    if settings.get("import_enabled"):
+        now = datetime.now(timezone.utc)
+        tmin = now.isoformat()
+        tmax = (now + timedelta(days=60)).isoformat()
+        try:
+            listing = integ.gcal_list_events(token, time_min=tmin,
+                                             time_max=tmax, max_results=50)
+        except integ.IntegrationError:
+            listing = {"items": []}
+        for item in listing.get("items", []):
+            norm = integ.gcal_normalize(item)
+            if norm["app_event_id"]:
+                continue  # it came from us; skip
+            exists = db.execute(
+                "SELECT id FROM calendar_events WHERE source = 'google'"
+                " AND external_id = ?", (norm["external_id"],)).fetchone()
+            if exists:
+                continue
+            start = norm["start"][:10]
+            if not start:
+                continue
+            db.execute(
+                "INSERT INTO calendar_events (case_id, title, event_type,"
+                " event_date, event_time, description, completed, source,"
+                " external_id, created_at) VALUES (NULL,?, 'reminder', ?, ?,"
+                " ?, 0, 'google', ?, ?)",
+                (norm["title"][:200], start,
+                 norm["start"][11:16] if len(norm["start"]) > 12 else "",
+                 (norm["description"] or "")[:1000], norm["external_id"],
+                 integ.now_iso()))
+            changed += 1
+    db.commit()
+    return changed
+
+
+def integration_scheduler():
+    """Background loop: sync every connected provider every 15 minutes."""
+    import time as _time
+    while True:
+        _time.sleep(15 * 60)
+        try:
+            with app.app_context():
+                db = get_db()
+                rows = db.execute(
+                    "SELECT provider FROM integrations"
+                    " WHERE status = 'connected'").fetchall()
+            for r in rows:
+                try:
+                    _sync_provider(r["provider"])
+                except Exception as e:  # noqa: BLE001 — never kill scheduler
+                    print(f"  [integrations] sync error"
+                          f" ({r['provider']}): {e}")
+        except Exception as e:  # noqa: BLE001
+            print(f"  [integrations] scheduler error: {e}")
+
+
+def start_integration_scheduler():
+    import threading as _th
+    t = _th.Thread(target=integration_scheduler, daemon=True,
+                   name="integration-scheduler")
+    t.start()
+
+
+# ----------------------------------------------------------------------------
+# Case email views: list, manual link/unlink, compose
+# ----------------------------------------------------------------------------
+
+@app.route("/cases/<int:case_id>/emails")
+@permission_required("view_cases")
+def case_emails(case_id):
+    # Emails live as a tab on the case detail page.
+    return redirect(url_for("case_detail", case_id=case_id, tab="emails"))
+
+
+@app.route("/cases/<int:case_id>/emails/<int:email_id>/link",
+           methods=["POST"])
+@permission_required("manage_cases")
+def case_email_link(case_id, email_id):
+    check_csrf()
+    db = get_db()
+    if not db.execute("SELECT id FROM cases WHERE id = ?",
+                      (case_id,)).fetchone():
+        abort(404)
+    if not db.execute("SELECT id FROM synced_emails WHERE id = ?",
+                      (email_id,)).fetchone():
+        abort(404)
+    db.execute(
+        "INSERT OR IGNORE INTO email_case_links"
+        " (email_id, case_id, link_type, created_at) VALUES (?,?, 'manual', ?)",
+        (email_id, case_id, integ.now_iso()))
+    db.commit()
+    audit("email_link", f"Manually linked email {email_id} to case {case_id}")
+    flash("Email linked to this case.", "success")
+    return redirect(url_for("case_detail", case_id=case_id, tab="emails"))
+
+
+@app.route("/cases/<int:case_id>/emails/<int:email_id>/unlink",
+           methods=["POST"])
+@permission_required("manage_cases")
+def case_email_unlink(case_id, email_id):
+    check_csrf()
+    db = get_db()
+    db.execute("DELETE FROM email_case_links WHERE email_id = ? AND"
+               " case_id = ?", (email_id, case_id))
+    db.commit()
+    audit("email_unlink",
+          f"Unlinked email {email_id} from case {case_id}")
+    flash("Email unlinked.", "success")
+    return redirect(url_for("case_detail", case_id=case_id, tab="emails"))
+
+
+@app.route("/cases/<int:case_id>/compose", methods=["GET", "POST"])
+@permission_required("manage_cases")
+def case_compose(case_id):
+    db = get_db()
+    case = db.execute(
+        "SELECT c.*, cl.first_name, cl.last_name, cl.email FROM cases c"
+        " LEFT JOIN clients cl ON c.client_id = cl.id WHERE c.id = ?",
+        (case_id,)).fetchone()
+    if not case:
+        abort(404)
+    connected = [r["provider"] for r in db.execute(
+        "SELECT provider FROM integrations WHERE status = 'connected'"
+    ).fetchall()]
+    email_providers = [p for p in connected
+                       if integ.PROVIDERS[p]["kind"] == "email"]
+    if request.method == "POST":
+        check_csrf()
+        provider = request.form.get("provider", "")
+        to_addr = request.form.get("to", "").strip()
+        subject = request.form.get("subject", "").strip()
+        body = request.form.get("body", "").strip()
+        if provider not in email_providers:
+            flash("Select a connected email account.", "error")
+            return redirect(url_for("case_compose", case_id=case_id))
+        if not to_addr or not subject or not body:
+            flash("To, subject, and message are all required.", "error")
+            return redirect(url_for("case_compose", case_id=case_id))
+        try:
+            token = _integration_access_token(db, provider)
+            if provider == "gmail":
+                integ.gmail_send(token, to_addr, subject, body)
+            else:
+                integ.graph_send(token, to_addr, subject, body)
+        except integ.IntegrationAuthError as e:
+            flash(f"Email account needs reconnecting: {e}", "warning")
+            return redirect(url_for("integration_list"))
+        except integ.IntegrationError as e:
+            flash(f"Send failed: {e}", "error")
+            return redirect(url_for("case_compose", case_id=case_id))
+        # Log the sent message to the case
+        now = integ.now_iso()
+        cur = db.execute(
+            "INSERT INTO synced_emails (provider, external_id, subject,"
+            " from_addr, to_addr, sent_at, snippet, body, direction,"
+            " synced_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (provider, f"sent-{now}-{os.urandom(4).hex()}",
+             subject[:300], "me", to_addr[:500], now, body[:500],
+             body[:8000], "outbound", now))
+        db.execute(
+            "INSERT OR IGNORE INTO email_case_links"
+            " (email_id, case_id, link_type, created_at) VALUES (?,?,?,?)",
+            (cur.lastrowid, case_id, "sent", now))
+        db.commit()
+        audit("email_send",
+              f"Sent email via {provider} for case {case['case_number']}")
+        flash("Email sent and logged to this case.", "success")
+        return redirect(url_for("case_detail", case_id=case_id, tab="emails"))
+    default_subject = f"Re: {case['case_number']} — {case['title']}"
+    return render_template("email_compose.html", case=case,
+                           email_providers=email_providers,
+                           default_subject=default_subject)
+
+
 @app.errorhandler(404)
 def not_found(e):
     return render_template("error.html", code=404,
@@ -5222,6 +5883,7 @@ if __name__ == "__main__":
     start_backup_scheduler()
     start_update_checker()
     start_clallam_schedule_monitor()
+    start_integration_scheduler()
 
     if args.local_only:
         host = "127.0.0.1"

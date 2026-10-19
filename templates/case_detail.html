@@ -1,11 +1,87 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ case.case_number }} — Case Management{% endblock %}
 {% block content %}
+{% set active_tab = request.args.get('tab', 'overview') %}
 <div class="page-head">
   <h1>{{ case.case_number }} — {{ case.title }}</h1>
-  <a href="{{ url_for('case_edit', case_id=case.id) }}" class="btn">Edit</a>
+  <div style="display:flex;gap:10px;">
+    {% if perms.get('manage_cases') %}
+    <a href="{{ url_for('case_compose', case_id=case.id) }}" class="btn btn-primary">{{ icon('send', 16) }} Send email</a>
+    {% endif %}
+    <a href="{{ url_for('case_edit', case_id=case.id) }}" class="btn">Edit</a>
+  </div>
 </div>
 
+<div class="tabs">
+  <a href="{{ url_for('case_detail', case_id=case.id) }}" class="tab {% if active_tab == 'overview' %}active{% endif %}">Overview</a>
+  <a href="{{ url_for('case_detail', case_id=case.id, tab='emails') }}" class="tab {% if active_tab == 'emails' %}active{% endif %}">
+    {{ icon('mail', 15) }} Emails
+    {% if emails %}<span class="tab-badge">{{ emails|length }}</span>{% endif %}
+  </a>
+</div>
+
+{% if active_tab == 'emails' %}
+<div class="detail-card">
+  <h2>{{ icon('mail', 18) }} Case emails</h2>
+  {% if not email_connected %}
+  <div class="notice">
+    <p><strong>No email account connected.</strong></p>
+    <p class="muted">Connect Gmail or Outlook on the
+      {% if perms.get('manage_users') %}<a href="{{ url_for('integration_list') }}">Integrations page</a>{% else %}Integrations page (admin){% endif %}
+      to sync email into cases.</p>
+  </div>
+  {% endif %}
+  {% if emails %}
+  <div class="email-list">
+    {% for e in emails %}
+    <div class="email-item">
+      <div class="email-head">
+        <span class="email-direction email-{{ e.direction }}">{{ 'Sent' if e.direction == 'outbound' else 'Received' }}</span>
+        <strong class="email-subject">{{ e.subject }}</strong>
+        <span class="email-date muted small">{{ e.sent_at[:16] if e.sent_at else '' }}</span>
+      </div>
+      <div class="email-meta muted small">
+        {{ 'To' if e.direction == 'outbound' else 'From' }}: {{ e.to_addr if e.direction == 'outbound' else e.from_addr }}
+        <span class="muted">· via {{ e.provider|capitalize }}</span>
+      </div>
+      {% if e.snippet %}<p class="email-snippet">{{ e.snippet }}</p>{% endif %}
+      {% if e.body %}
+      <details class="email-body"><summary>Read message</summary><p class="pre">{{ e.body }}</p></details>
+      {% endif %}
+      {% if perms.get('manage_cases') %}
+      <form method="post" action="{{ url_for('case_email_unlink', case_id=case.id, email_id=e.id) }}" class="inline"
+            onsubmit="return modalConfirmSubmit(this, 'Unlink this email from the case?', {title: 'Unlink email', confirmText: 'Unlink'});">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="btn btn-small">Unlink</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">No emails linked to this case yet. New messages matching the client's address or this case number will appear here automatically.</p>
+  {% endif %}
+  {% if unlinked and perms.get('manage_cases') %}
+  <h3>Link an email manually</h3>
+  <div class="email-list">
+    {% for e in unlinked %}
+    <div class="email-item email-unlinked">
+      <div class="email-head">
+        <strong class="email-subject">{{ e.subject }}</strong>
+        <span class="email-date muted small">{{ e.sent_at[:16] if e.sent_at else '' }}</span>
+      </div>
+      <div class="email-meta muted small">From: {{ e.from_addr }} <span class="muted">· via {{ e.provider|capitalize }}</span></div>
+      <form method="post" action="{{ url_for('case_email_link', case_id=case.id, email_id=e.id) }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="btn btn-small btn-primary">{{ icon('link', 14) }} Link to this case</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% else %}
 <div class="detail-grid">
   <div class="detail-card">
     <h2>Details</h2>
@@ -45,6 +121,7 @@
     <a href="{{ url_for('document_list', case_id=case.id) }}" class="btn btn-small">Documents ({{ doc_count }})</a>
     <a href="{{ url_for('time_list', case_id=case.id) }}" class="btn btn-small">Time entries ({{ '%.1f'|format(time_totals.h) }}h)</a>
     <a href="{{ url_for('event_new', case_id=case.id) }}" class="btn btn-small">Add calendar event</a>
+    <a href="{{ url_for('case_detail', case_id=case.id, tab='emails') }}" class="btn btn-small">{{ icon('mail', 14) }} Emails{% if emails %} ({{ emails|length }}){% endif %}</a>
   </p>
   {% if upcoming %}
   <h3>Upcoming events</h3>
@@ -89,4 +166,5 @@
   <h2>Notes</h2>
   <p class="pre">{{ case.notes or '—' }}</p>
 </div>
+{% endif %}
 {% endblock %}

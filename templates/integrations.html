@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Integrations — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('plug', 22) }} Integrations</h1>
+</div>
+<p class="muted" style="max-width:640px">Connect the firm's email and calendar so messages attach to cases automatically and deadlines appear on your phone. Connections are firm-wide and stored encrypted on this server.</p>
+
+<div class="integration-grid">
+  {% for c in cards %}
+  <div class="detail-card integration-card">
+    <div class="integration-head">
+      <span class="integration-icon">{{ icon(c.icon, 22) }}</span>
+      <div>
+        <h2 style="margin:0">{{ c.label }}</h2>
+        <span class="status-pill status-{{ c.status }}">{{ c.status|replace('_', ' ')|capitalize }}</span>
+      </div>
+    </div>
+    <p class="muted small">{{ c.description }}</p>
+
+    {% if c.status == 'connected' %}
+    <dl class="compact">
+      <dt>Last sync</dt><dd>{{ c.last_sync_at[:16].replace('T', ' ') if c.last_sync_at else '—' }}</dd>
+      {% if c.kind == 'email' %}<dt>Messages synced</dt><dd>{{ c.email_count }}</dd>{% endif %}
+    </dl>
+    {% if c.status == 'needs_reauth' %}
+    <div class="notice notice-warning">
+      <p><strong>Reconnect needed.</strong> {{ c.last_error or 'The authorization expired.' }}</p>
+    </div>
+    {% elif c.last_error %}
+    <p class="muted small">Last sync note: {{ c.last_error }}</p>
+    {% endif %}
+    {% if c.kind == 'calendar' %}
+    <form method="post" action="{{ url_for('integration_settings', provider=c.provider) }}" class="child-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <label class="check-row">
+        <input type="checkbox" name="import_enabled" {% if c.settings.get('import_enabled') %}checked{% endif %}>
+        <span>Import Google Calendar events into the app calendar</span>
+      </label>
+      <button type="submit" class="btn btn-small">Save</button>
+    </form>
+    {% endif %}
+    <div class="btn-row">
+      <form method="post" action="{{ url_for('integration_sync_now', provider=c.provider) }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="btn btn-small">{{ icon('sync', 14) }} Sync now</button>
+      </form>
+      {% if c.status == 'needs_reauth' %}
+      <a href="{{ url_for('integration_connect', provider=c.provider) }}" class="btn btn-small btn-primary">Reconnect</a>
+      {% endif %}
+      <form method="post" action="{{ url_for('integration_disconnect', provider=c.provider) }}" class="inline"
+            onsubmit="return modalConfirmSubmit(this, 'Disconnect {{ c.label }}? Synced emails stay in cases; calendar links are removed.', {title: 'Disconnect {{ c.label }}', confirmText: 'Disconnect', danger: true});">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="btn btn-small btn-danger">Disconnect</button>
+      </form>
+    </div>
+    {% else %}
+    {# not connected — credentials then connect #}
+    {% if not c.has_credentials %}
+    <div class="notice">
+      <p class="small"><strong>Setup needed (one time).</strong></p>
+      <ol class="small muted" style="margin:6px 0 12px 18px">
+        {% if c.provider in ('gmail', 'gcal') %}
+        <li>At <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a>, create an OAuth client (Web application).</li>
+        <li>Add this exact redirect URI: <code>{{ redirect_uri }}</code></li>
+        <li>Enable the Gmail API{% if c.provider == 'gcal' %} and Google Calendar API{% endif %} for the project.</li>
+        {% else %}
+        <li>At <a href="https://portal.azure.com" target="_blank" rel="noopener">portal.azure.com</a>, register an app and add a Web redirect URI.</li>
+        <li>Add this exact redirect URI: <code>{{ redirect_uri }}</code></li>
+        <li>Grant the <code>Mail.Read</code> and <code>Mail.Send</code> delegated permissions.</li>
+        {% endif %}
+        <li>Paste the client ID and secret below, then click Connect.</li>
+      </ol>
+      <p class="small muted">{{ icon('link', 13) }} OAuth must be completed from this server computer itself — open <code>http://localhost:5000/integrations</code> in a browser on that machine. Google and Microsoft only allow <code>http://localhost</code> without HTTPS.</p>
+    </div>
+    <form method="post" action="{{ url_for('integration_credentials', provider=c.provider) }}" class="stacked-form">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <label>Client ID<input name="client_id" value="{{ '' }}" autocomplete="off" required></label>
+      <label>Client secret<input name="client_secret" type="password" autocomplete="off" required></label>
+      <button type="submit" class="btn btn-primary">Save credentials</button>
+    </form>
+    {% else %}
+    <div class="btn-row">
+      <a href="{{ url_for('integration_connect', provider=c.provider) }}" class="btn btn-primary">{{ icon('plug', 15) }} Connect {{ c.label }}</a>
+    </div>
+    <p class="muted small">You'll be sent to {{ c.label }} to approve access, then returned here.</p>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="detail-card">
+  <h2>How syncing works</h2>
+  <ul class="plain-list small">
+    <li><strong>Email:</strong> every 15 minutes the app pulls recent messages. They're matched to cases by the client's email address or a case number (like <code>2026-001</code>) in the subject. Anything unmatched can be linked by hand from the case's Emails tab.</li>
+    <li><strong>Calendar:</strong> upcoming deadlines and hearings are pushed to Google Calendar with the case number in the title. With import on, Google events come back into the app calendar.</li>
+    <li><strong>Sending:</strong> the "Send email" button on a case sends through the connected account and logs the message to that case automatically.</li>
+  </ul>
+</div>
+{% endblock %}

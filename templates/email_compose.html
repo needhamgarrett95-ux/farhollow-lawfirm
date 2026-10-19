@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Compose email — {{ case.case_number }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('send', 20) }} Compose email</h1>
+  <a href="{{ url_for('case_detail', case_id=case.id, tab='emails') }}" class="btn">Back to case</a>
+</div>
+
+{% if not email_providers %}
+<div class="notice notice-warning">
+  <p><strong>No email account connected.</strong> Connect Gmail or Outlook on the
+    <a href="{{ url_for('integration_list') }}">Integrations page</a> first.</p>
+</div>
+{% else %}
+<div class="detail-card compose-card">
+  <form method="post" action="{{ url_for('case_compose', case_id=case.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <div class="compose-row">
+      <label for="c-provider">Send via</label>
+      <select id="c-provider" name="provider" required>
+        {% for p in email_providers %}
+        <option value="{{ p }}">{{ p|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="compose-row">
+      <label for="c-to">To</label>
+      <input id="c-to" name="to" type="email" required
+             value="{{ case.email or '' }}" placeholder="client@example.com">
+    </div>
+    <div class="compose-row">
+      <label for="c-subject">Subject</label>
+      <input id="c-subject" name="subject" required value="{{ default_subject }}">
+    </div>
+    <div class="compose-row">
+      <label for="c-body">Message</label>
+      <textarea id="c-body" name="body" rows="12" required
+                placeholder="Write your message…"></textarea>
+    </div>
+    <p class="muted small">{{ icon('link', 13) }} This message will be sent through the connected account and automatically logged to case {{ case.case_number }}.</p>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">{{ icon('send', 15) }} Send email</button>
+      <a href="{{ url_for('case_detail', case_id=case.id, tab='emails') }}" class="btn">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

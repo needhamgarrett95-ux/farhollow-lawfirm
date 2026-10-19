@@ -1092,3 +1092,47 @@ assistant print paystubs while they're covering for a sick accountant.
 
 **"Reset to role defaults"** restores the checkboxes to the selected role's preset.
 Changes take effect immediately — no re-login needed.
+
+## 36. Integrations — email & calendar sync (v2.2.0, admin only)
+
+The app can connect to the firm's Gmail and/or Outlook account, plus Google
+Calendar. Once connected:
+
+- **Email sync:** every 15 minutes the app pulls recent messages. They are
+  automatically attached to cases — matched by the client's email address,
+  or by a case number (like 2026-001) in the subject line. Anything the app
+  can't match can be linked by hand from the case's Emails tab.
+- **Send email from a case:** the "Send email" button on any case sends
+  through the connected account and logs the message to that case.
+- **Calendar sync:** upcoming deadlines and hearings are pushed to Google
+  Calendar (with the case number in the title), so they show up on your
+  phone. You can also turn on importing Google events back into the app.
+
+### One-time setup (per provider)
+
+1. **Get OAuth credentials:**
+   - *Gmail / Google Calendar:* go to console.cloud.google.com, create a
+     project, create an OAuth client (type: Web application), and add this
+     exact redirect URI: `http://localhost:5000/integrations`. Enable the
+     Gmail API (for Gmail) and/or the Google Calendar API.
+   - *Outlook:* go to portal.azure.com, register an application, add a Web
+     redirect URI of `http://localhost:5000/integrations`, and grant the
+     `Mail.Read` and `Mail.Send` delegated permissions.
+2. On the **Integrations** page (admin only), paste the client ID and client
+   secret, click Save, then click **Connect**.
+3. **Important:** the Connect step must be done from the server computer
+   itself — open `http://localhost:5000/integrations` in a browser on that
+   machine. Google and Microsoft only allow `http://localhost` addresses
+   without HTTPS.
+
+### If a connection breaks
+
+The Integrations page will show an amber "Needs reauth" badge with a
+**Reconnect** button. Click it and approve access again — nothing is lost;
+synced emails stay in their cases.
+
+### Disconnecting
+
+Disconnecting removes the connection. Synced emails stay attached to their
+cases. Calendar links are removed (pushed Google events stay on Google but
+won't update further).
