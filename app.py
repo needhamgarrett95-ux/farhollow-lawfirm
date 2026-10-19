@@ -265,9 +265,13 @@ END;
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        g.db = sqlite3.connect(DB_PATH, timeout=30)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        # WAL mode: better concurrent read/write for multi-machine office use.
+        # (Solo firm, 2-4 machines — SQLite + WAL is fine here.)
+        g.db.execute("PRAGMA journal_mode = WAL")
+        g.db.execute("PRAGMA synchronous = NORMAL")
     return g.db
 
 
@@ -1711,12 +1715,56 @@ def bad_request(e):
 
 
 if __name__ == "__main__":
+    import argparse
+    import socket
+
+    parser = argparse.ArgumentParser(
+        description="Farhollow Law Firm - Case Management Server")
+    parser.add_argument(
+        "--local-only", "--host-only", dest="local_only",
+        action="store_true",
+        help="Bind to 127.0.0.1 only (this computer). "
+             "Default is network mode: other office computers can connect.")
+    parser.add_argument(
+        "--port", type=int, default=5000,
+        help="Port to listen on (default: 5000).")
+    args = parser.parse_args()
+
+    def get_lan_ip():
+        """Best-effort LAN IP of this machine for the startup banner."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # No traffic is sent; this just asks the OS which interface
+            # would route outward.
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except OSError:
+            return "127.0.0.1"
+
     with app.app_context():
         init_db()
     start_backup_scheduler()
-    print("\n  Farhollow Law Firm - Case Management")
-    print("  Open your browser to:  http://localhost:5000\n")
-    # Bind to localhost only by default — the app is meant for this machine.
-    # Change host to "0.0.0.0" only if you need office-network access and
-    # understand the security implications.
-    app.run(host="127.0.0.1", port=5000, debug=False)
+
+    if args.local_only:
+        host = "127.0.0.1"
+        print("\n  Farhollow Law Firm - Case Management")
+        print("  LOCAL-ONLY mode: this computer only.")
+        print("  Open your browser to:  http://localhost:%d\n" % args.port)
+    else:
+        host = "0.0.0.0"
+        lan_ip = get_lan_ip()
+        print("\n" + "=" * 60)
+        print("  Farhollow Law Firm - Case Management")
+        print("  NETWORK mode: office computers can connect.")
+        print("")
+        print("  This computer:        http://localhost:%d" % args.port)
+        print("  Other office computers can connect at:")
+        print("      http://%s:%d" % (lan_ip, args.port))
+        print("")
+        print("  WARNING: office network ONLY. Do NOT expose port %d" % args.port)
+        print("  to the internet. See MAINTENANCE.md for firewall guidance.")
+        print("=" * 60 + "\n")
+
+    app.run(host=host, port=args.port, debug=False, threaded=True)

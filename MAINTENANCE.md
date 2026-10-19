@@ -26,6 +26,10 @@ You do not need to be technical. Follow the steps exactly as written.
 15. [Conflict checking: what the red warning means](#15-conflict-checking-what-the-red-warning-means)
 16. [Billing: time entries and invoices](#16-billing-time-entries-and-invoices)
 17. [Automated backups: how they work](#17-automated-backups-how-they-work)
+18. [Network setup: host computer and office computers](#18-network-setup-host-computer-and-office-computers)
+19. [Installing on the host vs. office computers](#19-installing-on-the-host-vs-office-computers)
+20. [What to do if office computers can't connect](#20-what-to-do-if-office-computers-cant-connect)
+21. [Single-computer mode (no network)](#21-single-computer-mode-no-network)
 
 ---
 
@@ -661,3 +665,99 @@ or after entering a large amount of data.
 
 **Backup history:** Click **Backup history** on the dashboard to see every backup
 the app has taken, when, and whether it succeeded.
+
+---
+
+## 18. Network setup: host computer and office computers
+
+The system is designed so **one computer** (the "host") runs the server, and
+**other office computers** connect to it through their web browser. Everyone
+sees the same live data.
+
+**Which computer is the host?** Pick one computer that stays in the office
+and is turned on during work hours. It should be reliable — if the host is
+off, nobody can connect.
+
+**Finding the host's address:** When the server starts, it prints a message
+like this:
+
+```
+Other office computers can connect at:
+    http://192.168.1.100:5000
+```
+
+That address (the numbers) is what office computers type into their browser.
+**Write it down and keep it near the host computer.** If the host's address
+changes (for example, after a router restart), start the server again and
+check the new address.
+
+**Firewall:** The first time the server runs in network mode, Windows may ask
+"Allow this app through the firewall?" Click **Allow**. If you installed with
+the host installer, this was handled during setup.
+
+> ⚠️ **IMPORTANT:** This software is for your **office network only**.
+> Never expose port 5000 to the internet (no port forwarding on your router,
+> no public IP). Client data must stay inside the office.
+
+---
+
+## 19. Installing on the host vs. office computers
+
+**Host computer (one time):**
+1. Run `LawFirmHostSetup.exe` (from Garrett).
+2. Follow the prompts. Check the box for "Allow office computers to connect"
+   (opens the Windows Firewall for port 5000).
+3. Optionally check "Start the server automatically when Windows starts" —
+   recommended, so nobody has to remember to start it.
+4. A "Law Firm Case Management" shortcut appears on the desktop and Start Menu.
+   Double-click it to start the server. A black window opens showing the
+   address other computers use — **leave this window open** while the office
+   needs access. Closing it stops the server.
+
+**Office computers / laptops (each one):**
+- No software to install. Just run `client-setup.bat` (from Garrett).
+- Type in the host computer's IP address when asked.
+- A "Law Firm" icon appears on the desktop. Double-click it — the system
+  opens in your browser.
+- If the shortcut stops working, the host's IP address may have changed.
+  Run `client-setup.bat` again with the new address (see Section 18).
+
+---
+
+## 20. What to do if office computers can't connect
+
+Work through these in order:
+
+1. **Is the host computer on, and is the server running?** Look for the black
+   server window on the host. If it's closed, double-click the desktop shortcut
+   to start it again.
+2. **Is the IP address correct?** Compare the address in the browser with the
+   address shown in the host's server window. If they don't match, update the
+   shortcut (run `client-setup.bat` again).
+3. **Are both computers on the same network?** Both must be on the office Wi-Fi
+   (or plugged into the office network). A laptop on a phone hotspot will NOT
+   connect.
+4. **Firewall:** On the host, open Windows Settings → Privacy & Security →
+   Windows Security → Firewall → Allow an app. Make sure the Law Firm Server
+   (or Python, if running from source) is allowed on **Private** networks.
+5. **Try the host itself:** On the host computer, open `http://localhost:5000`.
+   If that works but other computers can't connect, it's a network/firewall
+   issue (steps 2–4). If localhost doesn't work either, the server isn't
+   running properly — see Section 8.
+6. **Still stuck?** Call Garrett. Tell him: the host's IP address, what error
+   the browser shows (take a photo), and whether localhost works on the host.
+
+---
+
+## 21. Single-computer mode (no network)
+
+If you ever want the system to run on **one computer only** (no office
+network access), start it with the `--local-only` flag:
+
+```
+python app.py --local-only
+```
+
+Or with the installed exe, create a shortcut and add `--local-only` after
+the program path in the shortcut's Target field. In this mode, other
+computers cannot connect even if they know the address.
