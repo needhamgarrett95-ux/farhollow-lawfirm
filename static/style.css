@@ -33,7 +33,7 @@ body {
   height: 56px;
   gap: 24px;
 }
-.brand { font-weight: 700; font-size: 17px; letter-spacing: 0.3px; white-space: nowrap; display: flex; align-items: center; gap: 10px; }
+.brand { font-weight: 700; font-size: 15px; letter-spacing: 0.3px; white-space: nowrap; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .brand-logo { height: 32px; width: auto; }
 .topbar nav { display: flex; gap: 4px; flex: 1; }
 .topbar nav a {
@@ -218,6 +218,7 @@ dd { margin: 0; }
   .topbar nav a { padding: 12px 14px; font-size: 16px; min-height: 48px; display: flex; align-items: center; }
   .userbox { margin-left: auto; font-size: 12px; gap: 8px; }
   .userbox span { display: none; } /* hide username text, keep links */
+  .brand-text { display: none; } /* logo alone on phones */
 
   /* Page head stacks */
   .page-head { flex-direction: column; align-items: flex-start; gap: 10px; }

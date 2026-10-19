@@ -7,18 +7,18 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Law Firm">
+<meta name="apple-mobile-web-app-title" content="DGM Law">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
 <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icon-192.png') }}">
-<title>{% block title %}Law Firm Case Management{% endblock %}</title>
+<title>{% block title %}Law Office of Derek G. Medina{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 {% if session.get('user_id') %}
 <header class="topbar" id="topbar">
   <button class="nav-toggle" id="navToggle" aria-label="Menu" aria-expanded="false">&#9776;</button>
-  <div class="brand"><img src="{{ url_for('static', filename='dgm-logo.png') }}" alt="DGM" class="brand-logo">Case Management</div>
+  <div class="brand"><img src="{{ url_for('static', filename='dgm-logo.png') }}" alt="DGM" class="brand-logo"><span class="brand-text">Law Office of Derek G. Medina</span></div>
   <nav>
     <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
     <a href="{{ url_for('client_list') }}" class="{% if request.endpoint and request.endpoint.startswith('client') %}active{% endif %}">Clients</a>

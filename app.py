@@ -6,6 +6,8 @@ Run:  python app.py
 Then open: http://localhost:5000
 """
 import os
+import re
+import io
 import json
 import sqlite3
 import secrets
@@ -237,6 +239,7 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE TABLE IF NOT EXISTS invoice_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    entry_date TEXT,
     description TEXT NOT NULL,
     hours REAL NOT NULL DEFAULT 0,
     rate REAL NOT NULL DEFAULT 0,
@@ -295,6 +298,22 @@ def init_db():
     cols = [r["name"] for r in db.execute("PRAGMA table_info(clients)").fetchall()]
     if "ssn" not in cols:
         db.execute("ALTER TABLE clients ADD COLUMN ssn TEXT DEFAULT ''")
+        db.commit()
+
+    # Ensure entry_date exists on invoice_items (for PDF line-item dates).
+    # Backfill: time-entry items had the date baked into the description
+    # as "YYYY-MM-DD — description"; split it out.
+    icols = [r["name"] for r in db.execute("PRAGMA table_info(invoice_items)").fetchall()]
+    if "entry_date" not in icols:
+        db.execute("ALTER TABLE invoice_items ADD COLUMN entry_date TEXT")
+        for row in db.execute("SELECT id, description FROM invoice_items").fetchall():
+            desc = row["description"] or ""
+            m = re.match(r"^(\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.*)$", desc, re.DOTALL)
+            if m:
+                db.execute(
+                    "UPDATE invoice_items SET entry_date = ?, description = ? WHERE id = ?",
+                    (m.group(1), m.group(2), row["id"]),
+                )
         db.commit()
 
     # One-time migration: encrypt any plaintext sensitive fields written
@@ -1821,11 +1840,12 @@ def invoice_new():
             if e and str(e["client_id"]) == str(client_id) and not e["invoiced"]:
                 amount = e["hours"] * e["rate"]
                 db.execute(
-                    "INSERT INTO invoice_items (invoice_id, description, hours,"
-                    " rate, amount) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO invoice_items (invoice_id, entry_date, description,"
+                    " hours, rate, amount) VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         invoice_id,
-                        f"{e['entry_date']} — {e['description']}",
+                        e["entry_date"],
+                        e["description"],
                         e["hours"], e["rate"], amount,
                     ),
                 )
@@ -1836,17 +1856,19 @@ def invoice_new():
         # Manual line items
         descs = request.form.getlist("item_desc")
         amounts = request.form.getlist("item_amount")
-        for desc, amt in zip(descs, amounts):
+        item_dates = request.form.getlist("item_date")
+        for idx, (desc, amt) in enumerate(zip(descs, amounts)):
             desc, amt = desc.strip(), amt.strip()
             if desc and amt:
                 try:
                     amount = float(amt)
                 except ValueError:
                     continue
+                entry_date = item_dates[idx].strip() if idx < len(item_dates) else ""
                 db.execute(
-                    "INSERT INTO invoice_items (invoice_id, description, hours,"
-                    " rate, amount) VALUES (?, ?, 0, 0, ?)",
-                    (invoice_id, desc, amount),
+                    "INSERT INTO invoice_items (invoice_id, entry_date, description,"
+                    " hours, rate, amount) VALUES (?, ?, ?, 0, 0, ?)",
+                    (invoice_id, entry_date or None, desc, amount),
                 )
         db.commit()
         audit("invoice_create", f"Created invoice {inv_no} (id={invoice_id})")
@@ -1930,6 +1952,40 @@ def invoice_delete(invoice_id):
     audit("invoice_delete", f"Deleted invoice {inv['invoice_number']}")
     flash("Invoice deleted.", "success")
     return redirect(url_for("invoice_list"))
+
+
+@app.route("/invoices/<int:invoice_id>/pdf")
+@login_required
+def invoice_pdf(invoice_id):
+    """Download a professionally formatted PDF of the invoice."""
+    db = get_db()
+    inv = db.execute(
+        "SELECT i.*, cl.first_name, cl.last_name, cl.email, cl.phone, cl.address"
+        " FROM invoices i JOIN clients cl ON i.client_id = cl.id"
+        " WHERE i.id = ?", (invoice_id,),
+    ).fetchone()
+    if not inv:
+        abort(404)
+    items = db.execute(
+        "SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id",
+        (invoice_id,),
+    ).fetchall()
+    total = sum(i["amount"] for i in items)
+    try:
+        from invoice_pdf import build_invoice_pdf
+        logo_path = os.path.join(BASE_DIR, "static", "dgm-logo.png")
+        pdf_bytes = build_invoice_pdf(inv, items, total, logo_path=logo_path)
+    except Exception as e:
+        flash(f"Could not generate PDF: {e}", "error")
+        return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+    audit("invoice_pdf",
+          f"Generated PDF for invoice {inv['invoice_number']} (id={invoice_id})")
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"{inv['invoice_number']}.pdf",
+    )
 
 
 # ----------------------------------------------------------------------------

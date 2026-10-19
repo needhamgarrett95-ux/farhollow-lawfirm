@@ -824,3 +824,16 @@ You can open the case management system on your phone when connected to the offi
 **If the update check itself isn't working** (it says it can't check, or never finds updates):
 - The host computer needs internet access for the check. If the office computer is offline, the check just waits and tries again later — the software works fine without it.
 - You can always check manually at the Releases page link above.
+
+## 25. Printing invoices as PDF
+
+Every invoice page has a **Print / PDF** button at the top. Clicking it downloads a professionally formatted PDF invoice with the firm's DGM logo, invoice details, line items, and totals — ready to email or print for the client.
+
+**What's on the PDF:**
+- DGM logo and "Law Office of Derek G. Medina" header
+- Invoice number, issue date, due date, and status
+- Bill-to block with the client's name, address, email, and phone
+- Line items table: date, description, hours, rate, amount
+- Total due, any notes, and payment terms in the footer
+
+**Line-item dates:** When you add time entries to an invoice, their dates carry over automatically. For manual line items, you can enter a date when creating the invoice (optional — leave blank if it doesn't apply).

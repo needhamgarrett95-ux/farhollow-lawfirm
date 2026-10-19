@@ -3,7 +3,10 @@
 {% block content %}
 <div class="page-head">
   <h1>Invoice {{ invoice.invoice_number }}</h1>
-  <a href="{{ url_for('invoice_list') }}" class="btn">All invoices</a>
+  <div>
+    <a href="{{ url_for('invoice_pdf', invoice_id=invoice.id) }}" class="btn btn-primary">Print / PDF</a>
+    <a href="{{ url_for('invoice_list') }}" class="btn">All invoices</a>
+  </div>
 </div>
 
 <div class="detail-grid">
@@ -28,17 +31,18 @@
 <h2>Line items</h2>
 {% if items %}
 <table class="table">
-  <thead><tr><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead>
+  <thead><tr><th>Date</th><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead>
   <tbody>
   {% for i in items %}
     <tr>
+      <td class="nowrap">{{ i.entry_date or '—' }}</td>
       <td>{{ i.description }}</td>
       <td>{{ '%.1f'|format(i.hours) if i.hours else '—' }}</td>
       <td>{{ '$%.2f'|format(i.rate) if i.rate else '—' }}</td>
       <td>${{ '%.2f'|format(i.amount) }}</td>
     </tr>
   {% endfor %}
-    <tr><td colspan="3" style="text-align:right"><strong>Total</strong></td><td><strong>${{ '%.2f'|format(total) }}</strong></td></tr>
+    <tr><td colspan="4" style="text-align:right"><strong>Total</strong></td><td><strong>${{ '%.2f'|format(total) }}</strong></td></tr>
   </tbody>
 </table>
 {% else %}

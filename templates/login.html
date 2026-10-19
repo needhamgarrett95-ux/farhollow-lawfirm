@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Law Firm">
+<meta name="apple-mobile-web-app-title" content="DGM Law">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
 <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icon-192.png') }}">
@@ -17,8 +17,8 @@
 <body class="login-page">
 <div class="login-card">
   <div class="login-logo"><img src="{{ url_for('static', filename='dgm-logo.png') }}" alt="DGM"></div>
-  <h1>Case Management</h1>
-  <p class="muted">Sign in to continue.</p>
+  <h1>Law Office of Derek G. Medina</h1>
+  <p class="muted">Case Management — sign in to continue.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
