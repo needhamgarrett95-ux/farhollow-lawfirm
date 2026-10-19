@@ -1507,6 +1507,7 @@ PERMISSIONS = [
     ("run_payroll", "Payroll", "Manage employees and run payroll"),
     ("view_paystubs", "Payroll", "View and print paystubs"),
     ("use_timeclock", "Timeclock", "Clock in and out"),
+    ("view_all_timeclocks", "Timeclock", "See everyone's timeclock entries"),
     ("view_audit_log", "Audit Log", "View the audit log"),
     ("manage_backups", "Backups", "Run and view backups"),
     ("manage_users", "Users", "Manage users and permissions"),
@@ -1601,8 +1602,10 @@ NAV_ITEMS = [
      "permission": "view_trust", "active_prefixes": ["trust"]},
     {"label": "Accounting", "icon": "billing", "endpoint": "accounting_overview",
      "permission": "view_accounting",
-     "active_prefixes": ["accounting", "op_", "employee", "payroll", "timeclock",
+     "active_prefixes": ["accounting", "op_", "employee", "payroll",
                          "report_", "coa_", "tax_"]},
+    {"label": "Timeclock", "icon": "alarm", "endpoint": "timeclock",
+     "permission": "use_timeclock", "active_prefixes": ["timeclock"]},
     {"label": "Audit Log", "icon": "documents", "endpoint": "audit_view",
      "permission": "view_audit_log", "active_prefixes": ["audit"]},
     {"label": "Users", "icon": "users", "endpoint": "user_list",
@@ -2067,6 +2070,7 @@ DEFAULT_DASHBOARD_WIDGETS = [
     {"id": "clients", "visible": True},     # recent clients
     {"id": "week", "visible": True},        # this week events
     {"id": "backup", "visible": True},      # backup status (attorney/admin only)
+    {"id": "timeclock", "visible": True},    # clock in/out (use_timeclock only)
 ]
 KNOWN_DASHBOARD_WIDGETS = {w["id"] for w in DEFAULT_DASHBOARD_WIDGETS}
 
@@ -2286,6 +2290,28 @@ def dashboard():
         ).fetchall()
     ]
 
+    # Timeclock widget (v2.3): current user's clock status. Only loaded for
+    # users with use_timeclock; shows own status only (never others').
+    timeclock_status = None
+    if user_has_perm(_perms, "use_timeclock"):
+        my_emp = db.execute(
+            "SELECT id, full_name FROM employees WHERE user_id = ? AND is_active = 1",
+            (session.get("user_id"),),
+        ).fetchone()
+        if my_emp:
+            open_entry = db.execute(
+                "SELECT id, clock_in FROM timeclock_entries"
+                " WHERE employee_id = ? AND clock_out IS NULL AND manual_hours IS NULL",
+                (my_emp["id"],),
+            ).fetchone()
+            timeclock_status = {
+                "employee_id": my_emp["id"],
+                "full_name": my_emp["full_name"],
+                "clocked_in": bool(open_entry),
+                "entry_id": open_entry["id"] if open_entry else None,
+                "clock_in": open_entry["clock_in"] if open_entry else None,
+            }
+
     layout = get_dashboard_layout(session["user_id"])
     theme = get_user_theme(session["user_id"])
 
@@ -2298,7 +2324,7 @@ def dashboard():
         today_events=today_events, week_events=week_events,
         trust_summary=trust_summary, caseload_by_type=caseload_by_type,
         recent_clients=recent_clients, layout=layout,
-        theme=theme,
+        theme=theme, timeclock_status=timeclock_status,
     )
 
 
@@ -4850,11 +4876,24 @@ def employee_toggle(employee_id):
     return redirect(url_for("employee_list"))
 
 
-# --- Timeclock ---
-@app.route("/accounting/timeclock", methods=["GET", "POST"])
+# --- Timeclock (standalone section, v2.3) ---
+def _my_employee_id(db):
+    """Employee record linked to the current session user, or None."""
+    row = db.execute("SELECT id FROM employees WHERE user_id = ? AND is_active = 1",
+                     (session.get("user_id"),)).fetchone()
+    return row["id"] if row else None
+
+
+def _can_view_all_timeclocks():
+    return user_has_perm(session.get("permissions", {}), "view_all_timeclocks")
+
+
+@app.route("/timeclock", methods=["GET", "POST"])
 @permission_required("use_timeclock")
 def timeclock():
     db = get_db()
+    can_view_all = _can_view_all_timeclocks()
+    my_employee_id = _my_employee_id(db)
     if request.method == "POST":
         # Manual entry requires payroll permission
         if not user_has_perm(session.get("permissions", {}), "run_payroll"):
@@ -4882,20 +4921,41 @@ def timeclock():
             audit("timeclock_manual", f"Manual time entry: employee {employee_id}, {hours}h on {entry_date}")
             flash("Hours recorded.", "success")
         return redirect(url_for("timeclock"))
-    employees = [_employee_dict(r) for r in db.execute(
-        "SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name"
-    ).fetchall()]
-    open_entries = db.execute(
-        """SELECT t.id, t.clock_in, e.full_name AS employee_name
-           FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
-           WHERE t.clock_out IS NULL AND t.manual_hours IS NULL
-           ORDER BY t.clock_in"""
-    ).fetchall()
-    recent = db.execute(
-        """SELECT t.*, e.full_name AS employee_name
-           FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
-           ORDER BY t.entry_date DESC, t.id DESC LIMIT 30"""
-    ).fetchall()
+    if can_view_all:
+        employees = [_employee_dict(r) for r in db.execute(
+            "SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name"
+        ).fetchall()]
+        open_entries = db.execute(
+            """SELECT t.id, t.clock_in, t.employee_id, e.full_name AS employee_name
+               FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
+               WHERE t.clock_out IS NULL AND t.manual_hours IS NULL
+               ORDER BY t.clock_in"""
+        ).fetchall()
+        recent = db.execute(
+            """SELECT t.*, e.full_name AS employee_name
+               FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
+               ORDER BY t.entry_date DESC, t.id DESC LIMIT 30"""
+        ).fetchall()
+    else:
+        # Privacy: staff/accountant see ONLY their own punches.
+        employees = ([_employee_dict(r)] if (r := db.execute(
+            "SELECT * FROM employees WHERE id = ? AND is_active = 1",
+            (my_employee_id,)).fetchone()) else [])
+        open_entries = db.execute(
+            """SELECT t.id, t.clock_in, t.employee_id, e.full_name AS employee_name
+               FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
+               WHERE t.clock_out IS NULL AND t.manual_hours IS NULL
+               AND t.employee_id = ?
+               ORDER BY t.clock_in""",
+            (my_employee_id,),
+        ).fetchall() if my_employee_id else []
+        recent = db.execute(
+            """SELECT t.*, e.full_name AS employee_name
+               FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
+               WHERE t.employee_id = ?
+               ORDER BY t.entry_date DESC, t.id DESC LIMIT 30""",
+            (my_employee_id,),
+        ).fetchall() if my_employee_id else []
     recent_list = []
     for r in recent:
         d = dict(r)
@@ -4903,15 +4963,20 @@ def timeclock():
         recent_list.append(d)
     return render_template(
         "timeclock.html", employees=employees, open_entries=open_entries,
-        recent=recent_list, today=date.today().isoformat(), active_tab="timeclock",
+        recent=recent_list, today=date.today().isoformat(),
+        can_view_all=can_view_all, my_employee_id=my_employee_id,
     )
 
 
-@app.route("/accounting/timeclock/clock-in/<int:employee_id>", methods=["POST"])
+@app.route("/timeclock/clock-in/<int:employee_id>", methods=["POST"])
 @permission_required("use_timeclock")
 def timeclock_clockin(employee_id):
     check_csrf()
     db = get_db()
+    # Privacy: without view_all_timeclocks you may only clock in yourself.
+    if not _can_view_all_timeclocks():
+        if employee_id != _my_employee_id(db):
+            abort(403)
     emp = db.execute("SELECT * FROM employees WHERE id = ? AND is_active = 1",
                      (employee_id,)).fetchone()
     if not emp:
@@ -4938,7 +5003,7 @@ def timeclock_clockin(employee_id):
     return redirect(url_for("timeclock"))
 
 
-@app.route("/accounting/timeclock/clock-out/<int:entry_id>", methods=["POST"])
+@app.route("/timeclock/clock-out/<int:entry_id>", methods=["POST"])
 @permission_required("use_timeclock")
 def timeclock_clockout(entry_id):
     check_csrf()
@@ -4950,6 +5015,10 @@ def timeclock_clockout(entry_id):
     ).fetchone()
     if not entry or entry["clock_out"]:
         abort(404)
+    # Privacy: without view_all_timeclocks you may only clock out yourself.
+    if not _can_view_all_timeclocks():
+        if entry["employee_id"] != _my_employee_id(db):
+            abort(403)
     now = datetime.now(timezone.utc).isoformat()
     db.execute("UPDATE timeclock_entries SET clock_out = ? WHERE id = ?", (now, entry_id))
     db.commit()
@@ -4959,7 +5028,7 @@ def timeclock_clockout(entry_id):
     return redirect(url_for("timeclock"))
 
 
-@app.route("/accounting/timeclock/manual", methods=["POST"])
+@app.route("/timeclock/manual", methods=["POST"])
 @permission_required("run_payroll")
 def timeclock_manual():
     # Alias that posts back to the timeclock view's manual-entry handler

@@ -1149,3 +1149,21 @@ won't update further).
 - You closed the browser and have to log in again. That's supposed to happen.
 
 **Your data is NOT affected.** Logging out never deletes or changes any clients, cases, documents, or settings. It only ends your login session.
+
+## 38. Timeclock (v2.3.0)
+
+**The Timeclock is now its own section** — it has its own tab in the top bar (alarm clock icon), separate from Accounting. Payroll stays under Accounting.
+
+**Clocking in and out:**
+- Open the Timeclock tab (or use the Timeclock widget on your dashboard for one-click access).
+- Click **Clock in** when you start work, **Clock out** when you finish. That's it.
+- The dashboard widget shows your current status at a glance.
+
+**Who sees what:**
+- **Regular staff:** you only see YOUR OWN time entries. You cannot see anyone else's hours.
+- **Admins and attorneys:** see everyone's entries, plus a "Who's at work now" view.
+- If your login isn't linked to an employee record, ask an admin to link it on the Employees page (Accounting → Employees).
+
+**For admins — permissions:**
+- `use_timeclock` — lets someone clock in/out (all roles have this by default).
+- `view_all_timeclocks` — lets someone see everyone's entries (admins and attorneys only by default). Grant it in Users → edit user → Permissions if needed.

@@ -1,6 +1,6 @@
 {# Shared tab bar for the Accounting module.
    Set `active_tab` before including. Values: overview, transactions, coa,
-   reports, reconcile, employees, timeclock, payroll, tax. #}
+   reports, reconcile, employees, payroll, tax. #}
 {% set _rc = none %}
 {% if account is defined and account and account.id is defined %}{% set _rc = account.id %}
 {% elif unreconciled is defined and unreconciled %}{% set _rc = unreconciled[0].id %}{% endif %}
@@ -15,7 +15,6 @@
   <a href="{{ url_for('coa_list') }}" class="{% if active_tab == 'reconcile' %}active{% endif %}">Reconcile</a>
   {% endif %}
   <a href="{{ url_for('employee_list') }}" class="{% if active_tab == 'employees' %}active{% endif %}">Employees</a>
-  <a href="{{ url_for('timeclock') }}" class="{% if active_tab == 'timeclock' %}active{% endif %}">Timeclock</a>
   <a href="{{ url_for('payroll_run') }}" class="{% if active_tab == 'payroll' %}active{% endif %}">Payroll</a>
   <a href="{{ url_for('tax_settings') }}" class="{% if active_tab == 'tax' %}active{% endif %}">Tax Settings</a>
 </div>

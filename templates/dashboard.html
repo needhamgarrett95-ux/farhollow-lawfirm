@@ -3,7 +3,7 @@
 {% block title %}Dashboard — Law Office of Derek G. Medina{% endblock %}
 {% block content %}
 <div class="dash-wrap">
-  {% set widget_names = {'alerts': 'Alerts', 'deadlines': 'Filing Deadlines', 'schedule': "Today's Schedule", 'actions': 'Quick Actions', 'trust': 'Trust Balance', 'caseload': 'Active Caseload', 'clients': 'Recent Clients', 'week': 'This Week', 'backup': 'Backup Status'} %}
+  {% set widget_names = {'alerts': 'Alerts', 'deadlines': 'Filing Deadlines', 'schedule': "Today's Schedule", 'actions': 'Quick Actions', 'trust': 'Trust Balance', 'caseload': 'Active Caseload', 'clients': 'Recent Clients', 'week': 'This Week', 'backup': 'Backup Status', 'timeclock': 'Timeclock'} %}
   <div class="dash-head">
     <div>
       <h1>Overview</h1>
@@ -38,7 +38,7 @@
 
   <div class="masonry" id="dashMasonry">
     {% for w in layout %}
-    {% if w.visible and not (w.id == 'trust' and not perms.get('view_trust')) and not (w.id == 'backup' and not perms.get('manage_backups')) %}
+    {% if w.visible and not (w.id == 'trust' and not perms.get('view_trust')) and not (w.id == 'backup' and not perms.get('manage_backups')) and not (w.id == 'timeclock' and not perms.get('use_timeclock')) %}
 
     {% if w.id == 'alerts' and (overdue or schedule_alert) %}
     <div class="dash-card accent-red" data-widget="alerts">
@@ -117,6 +117,28 @@
         <a class="act" href="{{ url_for('trust_overview') }}">{{ icon('trust', 22) }}Trust</a>
         {% endif %}
       </div>
+    </div>
+    {% endif %}
+
+    {% if w.id == 'timeclock' and timeclock_status %}
+    <div class="dash-card" data-widget="timeclock">
+      <h3>{{ icon('alarm', 18) }} Timeclock</h3>
+      {% if timeclock_status.clocked_in %}
+      <div class="dash-big" style="color:var(--green)">Clocked in</div>
+      <div class="dash-sub">Since {{ timeclock_status.clock_in[:16].replace('T', ' ') }}</div>
+      <form method="post" action="{{ url_for('timeclock_clockout', entry_id=timeclock_status.entry_id) }}" style="margin-top:12px">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+        <button type="submit" class="btn btn-danger btn-block">{{ icon('alarm', 16) }} Clock out</button>
+      </form>
+      {% else %}
+      <div class="dash-big">Clocked out</div>
+      <div class="dash-sub">{{ timeclock_status.full_name }}</div>
+      <form method="post" action="{{ url_for('timeclock_clockin', employee_id=timeclock_status.employee_id) }}" style="margin-top:12px">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+        <button type="submit" class="btn btn-primary btn-block">{{ icon('alarm', 16) }} Clock in</button>
+      </form>
+      {% endif %}
+      <div style="margin-top:10px"><a href="{{ url_for('timeclock') }}" class="dash-sub" style="font-weight:600">View time entries →</a></div>
     </div>
     {% endif %}
 

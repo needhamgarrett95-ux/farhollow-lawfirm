@@ -1,40 +1,61 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Timeclock — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Timeclock</h1>
+  <h1>{{ icon('alarm', 22) }} Timeclock</h1>
+  {% if can_view_all %}
+  <p class="dash-sub">Who's at work and full time history</p>
+  {% else %}
+  <p class="dash-sub">Your time entries</p>
+  {% endif %}
 </div>
-{% set active_tab = 'timeclock' %}
-{% include "_accounting_tabs.html" %}
+
+{% if not employees %}
+<div class="empty-state">
+  <h3>No employee record linked</h3>
+  <p class="muted">Your login isn't linked to an employee record yet. Ask an admin to link your account on the Employees page.</p>
+</div>
+{% else %}
 
 <h2>Clock in / out</h2>
-{% if employees %}
 <div class="detail-grid">
 {% for e in employees %}
   {% set ns = namespace(open=none) %}
-  {% for o in open_entries %}{% if o.employee_name == e.full_name %}{% set ns.open = o %}{% endif %}{% endfor %}
+  {% for o in open_entries %}{% if o.employee_id == e.id %}{% set ns.open = o %}{% endif %}{% endfor %}
   <div class="detail-card">
     <h2>{{ e.full_name }}</h2>
     {% if ns.open %}
-    <p class="muted small">Clocked in at {{ ns.open.clock_in }}</p>
+    <p class="muted small">Clocked in at {{ ns.open.clock_in[:16].replace('T', ' ') }}</p>
     <form method="post" action="{{ url_for('timeclock_clockout', entry_id=ns.open.id) }}">
       <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
-      <button type="submit" class="btn btn-danger btn-block">Clock out</button>
+      <button type="submit" class="btn btn-danger btn-block">{{ icon('alarm', 15) }} Clock out</button>
     </form>
     {% else %}
     <p class="muted small">Not currently clocked in.</p>
     <form method="post" action="{{ url_for('timeclock_clockin', employee_id=e.id) }}">
       <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
-      <button type="submit" class="btn btn-primary btn-block">{{ icon('clock', 15) }} Clock in</button>
+      <button type="submit" class="btn btn-primary btn-block">{{ icon('alarm', 15) }} Clock in</button>
     </form>
     {% endif %}
   </div>
 {% endfor %}
 </div>
+
+{% if can_view_all %}
+<h2>Who's at work now</h2>
+{% if open_entries %}
+<div class="chip-row">
+  {% for o in open_entries %}
+  <div class="chip"><span class="c-av" style="background:var(--green)">{{ o.employee_name[:2].upper() }}</span>{{ o.employee_name }} <span class="muted small">since {{ o.clock_in[:16].replace('T', ' ') }}</span></div>
+  {% endfor %}
+</div>
 {% else %}
-<p class="muted">No employees yet. <a href="{{ url_for('employee_new') }}">Add one first</a>.</p>
+<p class="muted">Nobody is clocked in right now.</p>
+{% endif %}
 {% endif %}
 
+{% if perms.get('run_payroll') %}
 <h2>Manual entry</h2>
 <div class="form-card" style="margin-bottom:18px;">
   <form method="post" action="{{ url_for('timeclock_manual') }}">
@@ -49,7 +70,7 @@
         </select>
       </label>
       <label>Date *
-        <input type="date" name="work_date" value="{{ today }}" required>
+        <input type="date" name="entry_date" value="{{ today }}" required>
       </label>
       <label>Hours *
         <input type="number" name="hours" required placeholder="0.00" step="0.01" min="0.01" inputmode="decimal">
@@ -63,23 +84,26 @@
     </div>
   </form>
 </div>
+{% endif %}
 
 <h2>Recent entries</h2>
 {% if recent %}
 <table class="table">
-  <thead><tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th>Hours</th></tr></thead>
+  <thead><tr>{% if can_view_all %}<th>Employee</th>{% endif %}<th>Clock in</th><th>Clock out</th><th>Hours</th><th>Notes</th></tr></thead>
   <tbody>
   {% for r in recent %}
     <tr>
-      <td>{{ r.employee_name }}</td>
-      <td class="nowrap">{{ r.clock_in }}</td>
-      <td class="nowrap">{{ r.clock_out or '— still out' }}</td>
+      {% if can_view_all %}<td>{{ r.employee_name }}</td>{% endif %}
+      <td class="nowrap">{{ r.clock_in[:16].replace('T', ' ') if r.clock_in else '—' }}</td>
+      <td class="nowrap">{{ r.clock_out[:16].replace('T', ' ') if r.clock_out else '— still out' }}</td>
       <td class="nowrap">{{ r.hours }}</td>
+      <td>{{ r.notes or '' }}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}
 <p class="muted">No time entries yet.</p>
+{% endif %}
 {% endif %}
 {% endblock %}
