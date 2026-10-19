@@ -463,6 +463,8 @@ def backup_scheduler():
                 if row and row["timestamp"]:
                     try:
                         last = datetime.fromisoformat(row["timestamp"])
+                        if last.tzinfo is None:
+                            last = last.replace(tzinfo=timezone.utc)
                         needs_backup = (
                             datetime.now(timezone.utc) - last > timedelta(hours=24)
                         )
@@ -708,7 +710,10 @@ def login_required(f):
         # Inactivity timeout
         last = session.get("last_activity")
         if last:
-            idle = datetime.now(timezone.utc) - datetime.fromisoformat(last)
+            last_dt = datetime.fromisoformat(last)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            idle = datetime.now(timezone.utc) - last_dt
             if idle > timedelta(minutes=SESSION_TIMEOUT_MINUTES):
                 session.clear()
                 flash("You were logged out due to inactivity.", "warning")
