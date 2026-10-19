@@ -23,7 +23,7 @@ from functools import wraps
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, g, flash, abort, send_file,
+    session, g, flash, abort, send_file, jsonify,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -813,6 +813,13 @@ def service_worker():
 @app.route("/offline.html")
 def offline_page():
     return send_file("static/offline.html")
+
+
+@app.route("/api/version")
+def api_version():
+    """Return the running server version. No login required — the desktop
+    launcher polls this to detect available updates."""
+    return jsonify({"version": APP_VERSION})
 
 
 # ----------------------------------------------------------------------------
