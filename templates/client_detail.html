@@ -30,7 +30,7 @@
       <li>{{ k.name }}{% if k.date_of_birth %} (DOB: {{ k.date_of_birth }}){% endif %}
         {% if user_role in ('admin', 'attorney') %}
         <form method="post" action="{{ url_for('child_delete', child_id=k.id) }}" class="inline"
-              onsubmit="return confirm('Remove this child?');">
+              onsubmit="return modalConfirmSubmit(this, 'Remove this child?', {title: 'Remove child', confirmText: 'Remove', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
           <button type="submit" class="btn btn-link btn-small">Remove</button>
         </form>

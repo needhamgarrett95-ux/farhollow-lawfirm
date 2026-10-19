@@ -84,6 +84,7 @@
   <span class="version-tag" title="Server software version">Server v{{ app_version }}</span>
   <span class="lan-warning" title="This software is designed for your office network only. Do not expose port 5000 to the internet.">Office network only — do not expose to the internet.</span>
 </footer>
+<script src="{{ url_for('static', filename='modal.js') }}"></script>
 <script>
 // Theme toggle — persists per-user via /dashboard/theme
 (function () {

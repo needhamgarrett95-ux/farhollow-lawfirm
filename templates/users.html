@@ -26,12 +26,12 @@
         <a href="{{ url_for('user_edit', user_id=u.id) }}" class="btn btn-small">Edit</a>
         {% if u.is_active %}
         <form method="post" action="{{ url_for('user_reset_password', user_id=u.id) }}" class="inline"
-              onsubmit="return confirm('Reset the password for {{ u.username }}? They will get a temporary password and must change it on next login.');">
+              onsubmit="return modalConfirmSubmit(this, 'Reset the password for {{ u.username }}? They will get a temporary password and must change it on next login.', {title: 'Reset password', confirmText: 'Reset', danger: false});">
           <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
           <button type="submit" class="btn btn-small">Reset password</button>
         </form>
         <form method="post" action="{{ url_for('user_deactivate', user_id=u.id) }}" class="inline"
-              onsubmit="return confirm('Deactivate {{ u.username }}? They will not be able to log in. This can be undone.');">
+              onsubmit="return modalConfirmSubmit(this, 'Deactivate {{ u.username }}? They will not be able to log in. This can be undone.', {title: 'Deactivate user', confirmText: 'Deactivate', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
           <button type="submit" class="btn btn-small btn-danger">Deactivate</button>
         </form>

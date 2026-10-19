@@ -63,7 +63,7 @@
 </div>
 
 <div class="danger-zone">
-  <form method="post" action="{{ url_for('invoice_delete', invoice_id=invoice.id) }}" class="inline" onsubmit="return confirm('Delete this invoice? Financial records are normally retained 7 years.');">
+  <form method="post" action="{{ url_for('invoice_delete', invoice_id=invoice.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this invoice? Financial records are normally retained 7 years.', {title: 'Delete invoice', confirmText: 'Delete', danger: true});">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
     <button type="submit" class="btn btn-danger">Delete invoice</button>
   </form>

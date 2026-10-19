@@ -55,7 +55,7 @@ function setHours(h) {
       <td>{{ 'Invoiced' if e.invoiced else 'Unbilled' }}</td>
       <td>
         {% if not e.invoiced %}
-        <form method="post" action="{{ url_for('time_delete', entry_id=e.id) }}" class="inline" onsubmit="return confirm('Delete this time entry? Financial records are normally retained 7 years.');">
+        <form method="post" action="{{ url_for('time_delete', entry_id=e.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this time entry? Financial records are normally retained 7 years.', {title: 'Delete time entry', confirmText: 'Delete', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
           <button type="submit" class="btn btn-small btn-danger">Delete</button>
         </form>

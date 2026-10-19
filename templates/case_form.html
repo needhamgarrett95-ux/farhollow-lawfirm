@@ -55,7 +55,7 @@
 {% if case %}
 {% if user_role in ('admin', 'attorney') %}
 <form method="post" action="{{ url_for('case_delete', case_id=case.id) }}" class="danger-zone"
-      onsubmit="return confirm('Delete this case? This cannot be undone.');">
+      onsubmit="return modalConfirmSubmit(this, 'Delete this case? This cannot be undone.', {title: 'Delete case', confirmText: 'Delete', danger: true});">
   <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
   <button type="submit" class="btn btn-danger">Delete case</button>
 </form>

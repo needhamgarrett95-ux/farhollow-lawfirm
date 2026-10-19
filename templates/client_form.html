@@ -45,7 +45,7 @@
 {% if client %}
 {% if user_role in ('admin', 'attorney') %}
 <form method="post" action="{{ url_for('client_delete', client_id=client.id) }}" class="danger-zone"
-      onsubmit="return confirm('Delete this client? This cannot be undone.');">
+      onsubmit="return modalConfirmSubmit(this, 'Delete this client? This cannot be undone.', {title: 'Delete client', confirmText: 'Delete', danger: true});">
   <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
   <button type="submit" class="btn btn-danger">Delete client</button>
 </form>

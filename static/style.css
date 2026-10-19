@@ -628,3 +628,71 @@ html[data-theme="dark"] .login-card {
 html[data-theme="dark"] .login-bg::after {
   background-image: radial-gradient(rgba(212,175,55,.08) 1px, transparent 1px);
 }
+
+/* ── Custom modal dialogs (replaces native confirm/alert/prompt) ── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.5);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.18s ease, visibility 0.18s ease;
+}
+.modal-overlay.modal-open { opacity: 1; visibility: visible; }
+
+.modal-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 12px 48px rgba(15, 23, 42, 0.22);
+  width: 100%; max-width: 420px;
+  padding: 28px;
+  text-align: center;
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.18s ease;
+}
+.modal-overlay.modal-open .modal-card { transform: scale(1) translateY(0); }
+
+/* Icon in colored circle — matches dashboard widget icon treatment */
+.modal-icon {
+  width: 56px; height: 56px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.modal-icon-info    { background: var(--info-bg);   color: var(--info); }
+.modal-icon-danger  { background: var(--error-bg);  color: var(--error); }
+.modal-icon-success { background: var(--success-bg); color: var(--success); }
+.modal-icon-warning { background: var(--warning-bg); color: var(--warning-text); }
+
+.modal-title {
+  font-size: 18px; font-weight: 700; color: var(--text);
+  margin: 0 0 8px; letter-spacing: -0.2px;
+}
+.modal-message {
+  font-size: 14px; line-height: 1.55; color: var(--muted);
+  margin: 0 0 4px;
+}
+.modal-input-wrap { margin-top: 16px; text-align: left; }
+.modal-input {
+  width: 100%; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--card); color: var(--text); font-size: 14px;
+}
+.modal-input:focus { outline: 2px solid var(--navy); border-color: var(--navy); }
+
+.modal-actions {
+  display: flex; gap: 10px; justify-content: center;
+  margin-top: 22px;
+}
+.modal-actions .btn { min-width: 110px; padding: 10px 20px; border-radius: 10px; font-weight: 600; }
+
+/* Filled red confirm for destructive actions */
+.btn-modal-danger {
+  background: var(--error); border-color: var(--error); color: #fff;
+}
+.btn-modal-danger:hover { filter: brightness(0.92); }
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay, .modal-card { transition: none; }
+}

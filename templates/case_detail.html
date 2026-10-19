@@ -65,7 +65,7 @@
     <li>
       <span><strong>{{ p.first_name }} {{ p.last_name }}</strong>{% if p.role %} <span class="muted">— {{ p.role }}</span>{% endif %}</span>
       {% if user_role in ('admin', 'attorney') %}
-      <form method="post" action="{{ url_for('party_delete', party_id=p.id) }}" class="inline" onsubmit="return confirm('Remove this opposing party?');">
+      <form method="post" action="{{ url_for('party_delete', party_id=p.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Remove this opposing party?', {title: 'Remove opposing party', confirmText: 'Remove', danger: true});">
         <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
         <button type="submit" class="btn btn-small btn-danger">Remove</button>
       </form>

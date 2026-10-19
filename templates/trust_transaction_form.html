@@ -87,7 +87,7 @@
       </div>
     </div>
     <div class="form-actions">
-      <button type="submit" class="btn btn-primary" onclick="return confirm('This transaction is PERMANENT and cannot be edited or deleted. Continue?');">
+      <button type="submit" class="btn btn-primary" onclick="return trustConfirmSubmit(event);">
         {% if reverse_of %}Record reversing entry{% else %}Record transaction{% endif %}
       </button>
       <a href="{{ url_for('trust_overview') }}" class="btn btn-link">Cancel</a>
@@ -107,3 +107,18 @@
 })();
 </script>
 {% endblock %}
+
+<script>
+function trustConfirmSubmit(e) {
+  e.preventDefault();
+  var form = e.target.closest('form');
+  showConfirm({
+    title: 'Record transaction',
+    message: 'This transaction is PERMANENT and cannot be edited or deleted. Continue?',
+    confirmText: 'Record',
+    danger: true,
+    icon: 'alert'
+  }).then(function (ok) { if (ok) form.submit(); });
+  return false;
+}
+</script>
