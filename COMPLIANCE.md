@@ -67,14 +67,36 @@ The 30-day clock and the 500-person AG threshold are called out there.
 Trust account and related financial records must be retained for a minimum
 of **7 years**.
 
-- v1 of this software has **no billing or trust-accounting module**, so no
-  financial records exist yet.
-- The codebase includes `RETENTION_YEARS_FINANCIAL = 7` and a
-  `retention_ok()` helper in `app.py` that fails closed (returns False for
-  missing or unparseable dates).
-- **Requirement for the billing build:** every financial-record deletion
-  path MUST call `retention_ok()` and refuse deletion before 7 years, with a
-  clear warning to the user. This is non-negotiable.
+- **v2 (current): the billing module is now built.** Time entries and invoices
+  are financial records. Every deletion path calls `retention_ok()` and
+  **refuses deletion** before 7 years with a clear warning to the user.
+  `retention_ok()` fails closed: missing or unparseable dates → no deletion.
+- Invoiced time entries cannot be deleted while on an invoice.
+
+### RPC 1.7 / 1.9 — Conflict of interest
+
+The software now includes a **conflict checker** (RPC 1.7 concurrent
+conflicts, RPC 1.9 duties to former clients):
+
+- Before a new client is created, the entered name is searched against **all
+  existing clients** and **all opposing parties** in every case.
+- On a match, the user sees a hard-stop **POTENTIAL CONFLICT OF INTEREST**
+  warning listing every match and must explicitly check a confirmation box
+  to proceed. The warning, and any override, is written to the audit log.
+- The checker depends on opposing parties being entered per case (case
+  detail → Opposing parties). The software cannot detect conflicts it has
+  not been told about — entering opposing parties is the attorney's duty.
+
+### Automated backups (operational safeguard)
+
+The software now performs **automatic daily backups** (database + encryption
+key) while running, keeps the 30 most recent, and shows last-backup status
+on the dashboard. A **"Back Up Now"** button allows manual backups.
+
+**What this does not replace:** offsite copies (fire/flood/theft) and the
+documents folder (`instance/documents/` is not in the automated backup).
+These remain the office's responsibility — see MAINTENANCE.md Sections 13
+and 17.
 
 ### Tamper-evident audit log
 
@@ -96,9 +118,12 @@ The software cannot do these things. They are operational and legal duties:
    unattended. Anyone with physical access to the machine can reset the
    admin password (see `MAINTENANCE.md` Section 9) — that is inherent to
    self-hosting.
-2. **Backups.** The software does not back itself up. Someone must copy
-   `instance/lawfirm.db` **and** `instance/data.key` offsite on a regular
-   schedule (see `MAINTENANCE.md` Section 3). Losing `data.key` means
+2. **Backups.** The software now backs itself up automatically once a day
+   (database + encryption key, 30 kept) and shows status on the dashboard.
+   What it does NOT do: copy backups **offsite** (fire/flood/theft), or back
+   up the **documents folder** (`instance/documents/`). Someone must copy
+   backups and documents to a USB drive weekly and take it offsite
+   (see `MAINTENANCE.md` Sections 13 and 17). Losing `data.key` means
    encrypted fields can never be decrypted again.
 3. **Updates.** Security patches to Python, Flask, and this app must be
    applied (see `MAINTENANCE.md` Section 5).
@@ -106,8 +131,8 @@ The software cannot do these things. They are operational and legal duties:
    access, but *whether a given incident triggers RCW 19.255.010
    notification* — and drafting the notices — is a legal judgment for the
    attorney and their counsel.
-5. **Retention policy enforcement.** Beyond the 7-year financial minimum
-   enforced in code (once billing exists), the attorney sets the firm's
+5. **Retention policy enforcement.** The 7-year financial minimum is enforced
+   in code for time entries and invoices. The attorney sets the firm's broader
    document retention and destruction policies.
 6. **Verifying compliance.** Rules change. The attorney must periodically
    confirm with counsel and the WSBA that the firm's practices (including
@@ -125,9 +150,15 @@ The software cannot do these things. They are operational and legal duties:
 | Client SSNs | `clients.ssn` | Encrypted at rest (Fernet) |
 | Client/spouse/child DOBs | `clients.date_of_birth`, `clients.spouse_dob`, `children.date_of_birth` | Encrypted at rest (Fernet) |
 | Names, contact info, notes | `clients`, `cases` tables | Access-controlled (login required), not encrypted at rest in v1 |
+| Opposing parties | `opposing_parties` | Access-controlled; drives conflict checker |
+| Document files | `instance/documents/<case_id>/` on disk | Access-controlled (login required); metadata in DB |
+| Calendar events | `calendar_events` | Access-controlled |
+| Time entries, invoices | `time_entries`, `invoices`, `invoice_items` | Access-controlled; 7-year deletion lock (RPC 1.15B) |
+| Backup log | `backups` | Access-controlled |
 | Audit history | `audit_log` | Append-only (DB triggers block edit/delete) |
 | Encryption key | `instance/data.key` | File permissions 0600; must be backed up offsite |
 | Session signing key | `instance/secret.key` | File on server; sessions expire after 30 min idle |
+| Backup copies | `instance/backups/` (or configured dir) | Same protections as source files; 30 kept |
 
 > **Note for counsel:** names and contact details are access-controlled but
 > not field-encrypted in v1. If the firm's risk assessment requires it,

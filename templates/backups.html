@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Backup history — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Backup history</h1>
+  <form method="post" action="{{ url_for('backup_now') }}" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <button type="submit" class="btn btn-primary">Back Up Now</button>
+  </form>
+</div>
+
+<p class="muted">Backups are stored in: <code>{{ backup_dir }}</code><br>
+The app backs up automatically once a day and keeps the 30 most recent backups.
+<strong>Also copy backups to a USB drive weekly and take it offsite</strong> — see the maintenance manual.</p>
+
+{% if backups %}
+<table class="table">
+  <thead><tr><th>When</th><th>File</th><th>Size</th><th>Status</th><th>Notes</th></tr></thead>
+  <tbody>
+  {% for b in backups %}
+    <tr>
+      <td class="nowrap">{{ b.timestamp[:19].replace('T', ' ') }}</td>
+      <td>{{ b.filename }}</td>
+      <td>{{ (b.size_bytes / 1024)|round(1) }} KB</td>
+      <td>{{ b.status }}</td>
+      <td class="small">{{ b.notes or '' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No backups recorded yet.</p>
+{% endif %}
+{% endblock %}

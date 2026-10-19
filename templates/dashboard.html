@@ -3,11 +3,67 @@
 {% block content %}
 <h1>Dashboard</h1>
 
+{% if overdue %}
+<div class="alert alert-danger">
+  <strong>⚠ {{ overdue|length }} OVERDUE item{{ 's' if overdue|length != 1 }}:</strong>
+  <ul>
+    {% for e in overdue %}
+    <li>{{ e.event_date }} — {{ e.title }}{% if e.case_number %} ({{ e.case_number }}){% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% set ns = namespace(urgent=[]) %}
+
 <div class="stat-row">
   <div class="stat"><span class="stat-num">{{ stats.active_cases }}</span><span class="stat-label">Active cases</span></div>
   <div class="stat"><span class="stat-num">{{ stats.pending_cases }}</span><span class="stat-label">Pending cases</span></div>
   <div class="stat"><span class="stat-num">{{ stats.total_clients }}</span><span class="stat-label">Clients</span></div>
+  <div class="stat"><span class="stat-num">{{ stats.unpaid_invoices }}</span><span class="stat-label">Unpaid invoices</span></div>
 </div>
+
+<div class="detail-card">
+  <h2>Backup status</h2>
+  {% if last_backup and last_backup.status == 'ok' %}
+    <p>✅ Last backup: <strong>{{ last_backup.timestamp[:19].replace('T', ' ') }}</strong>
+    ({{ last_backup.filename }}, {{ (last_backup.size_bytes / 1024)|round(1) }} KB)</p>
+  {% elif last_backup %}
+    <p class="flash flash-error" style="margin:0">⚠ Last backup FAILED: {{ last_backup.notes }}</p>
+  {% else %}
+    <p class="flash flash-warning" style="margin:0">⚠ No backups yet. Back up now.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('backup_now') }}" class="inline" style="margin-top:8px">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <button type="submit" class="btn btn-small">Back Up Now</button>
+    <a href="{{ url_for('backup_history') }}" class="btn btn-small">Backup history</a>
+  </form>
+</div>
+
+<h2>Upcoming deadlines <span class="muted small">(next 14 days)</span></h2>
+{% if deadlines %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Event</th><th>Type</th><th>Case</th><th></th></tr></thead>
+  <tbody>
+  {% for e in deadlines %}
+    <tr class="{{ 'row-urgent' if e.event_date <= urgent_cutoff else '' }}">
+      <td class="nowrap"><strong>{{ e.event_date }}</strong>{% if e.event_time %} {{ e.event_time }}{% endif %}</td>
+      <td>{{ e.title }}</td>
+      <td>{{ e.event_type|replace('_', ' ')|capitalize }}</td>
+      <td>{{ e.case_number or '—' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('event_toggle', event_id=e.id) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button type="submit" class="btn btn-small">Mark done</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No upcoming deadlines. <a href="{{ url_for('event_new') }}">Add one</a>.</p>
+{% endif %}
 
 <h2>Active cases</h2>
 {% if active_cases %}

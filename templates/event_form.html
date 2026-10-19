@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Add event — Case Management{% endblock %}
+{% block content %}
+<h1>Add calendar event</h1>
+<div class="form-card">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <div class="form-grid">
+      <label class="span2">Title<input name="title" required placeholder="e.g. Hearing on motion to compel"></label>
+      <label>Type
+        <select name="event_type">
+          {% for t in event_types %}
+          <option value="{{ t }}">{{ t|replace('_',' ')|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Case (optional)
+        <select name="case_id">
+          <option value="">— No case —</option>
+          {% for c in cases %}
+          <option value="{{ c.id }}" {{ 'selected' if preset_case and preset_case|int == c.id }}>{{ c.case_number }} — {{ c.title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Date<input type="date" name="event_date" required></label>
+      <label>Time (optional)<input type="time" name="event_time"></label>
+      <label class="span2">Description<textarea name="description" rows="3"></textarea></label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Add event</button>
+      <a href="{{ url_for('calendar_view') }}" class="btn">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

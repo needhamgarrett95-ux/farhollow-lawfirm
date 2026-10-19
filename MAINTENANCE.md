@@ -21,6 +21,11 @@ You do not need to be technical. Follow the steps exactly as written.
 10. [How to check that backups are working](#10-how-to-check-that-backups-are-working)
 11. [When to call Garrett vs. what you can fix yourself](#11-when-to-call-garrett-vs-what-you-can-fix-yourself)
 12. [What to do if you suspect a data breach](#12-what-to-do-if-you-suspect-a-data-breach)
+13. [Documents: uploading, downloading, versions](#13-documents-uploading-downloading-versions)
+14. [Calendar and deadlines](#14-calendar-and-deadlines)
+15. [Conflict checking: what the red warning means](#15-conflict-checking-what-the-red-warning-means)
+16. [Billing: time entries and invoices](#16-billing-time-entries-and-invoices)
+17. [Automated backups: how they work](#17-automated-backups-how-they-work)
 
 ---
 
@@ -496,3 +501,163 @@ obligations. When in doubt, notify.
 > **Bottom line:** the software gives you encryption and an audit trail to
 > limit damage and prove what happened. The legal response — who to notify
 > and when — is the attorney's call, on a 30-day clock.
+
+---
+
+## 13. Documents: uploading, downloading, versions
+
+Each case has its own document library. Open a case, then click **Documents**.
+
+**To upload a file:**
+
+**Step 1.** Click **Choose File** and pick the file from your computer.
+
+**Step 2.** Choose a **Category**: Pleadings, Correspondence, Discovery, Evidence, or Other.
+
+**Step 3.** Optionally type a short note (e.g. "Final version filed with court").
+
+**Step 4.** Click **Upload**.
+
+**Versions:** If you upload a file with the same name and category twice, the app
+keeps both — the new one becomes "Version 2", the old one stays as "Version 1".
+Nothing is ever silently overwritten. Download any version at any time.
+
+**Where files live:** Documents are stored on disk in the `instance/documents`
+folder (inside the app folder), organized by case. They are **not** inside the
+database file. This means:
+- When you back up the database (Section 3), **also back up the documents folder**.
+  The automated backup (Section 17) covers the database and encryption key only.
+- If you ever move the app to a new computer, copy the whole app folder —
+  database, documents, and everything.
+
+**Blocked file types:** For security, the app refuses to upload programs
+(`.exe`, `.bat`, `.ps1`, etc.). If you legitimately need to store one, call Garrett.
+
+---
+
+## 14. Calendar and deadlines
+
+Click **Calendar** in the top menu to see the month view. Click **Add event** to
+create one.
+
+**Event types:**
+- **Court date** — hearings, trials, appearances (shown in red on the calendar)
+- **Filing deadline** — shown in bold red; these are the most important
+- **Meeting** — client meetings, depositions
+- **Reminder** — anything else
+
+**The dashboard is your safety net.** Every time you log in, the dashboard shows:
+- 🔴 **Overdue items** in a red box at the top — things whose date has passed
+  and are not marked done. Deal with these first.
+- **Upcoming deadlines** (next 14 days) — anything due within **7 days** is
+  highlighted in red.
+
+**To mark something done:** click **Mark done** next to it. It disappears from
+the deadline lists but stays in the calendar history.
+
+**Malpractice warning:** A missed filing deadline can lose a case and trigger a
+bar complaint. Check the dashboard every morning. If the red box appears, stop
+what you are doing and handle it.
+
+---
+
+## 15. Conflict checking: what the red warning means
+
+When you add a new client, the app automatically searches:
+1. All existing clients, **and**
+2. All opposing parties in every case
+
+by first and last name. If it finds a match, you see a big red
+**POTENTIAL CONFLICT OF INTEREST** warning.
+
+**What to do:**
+
+**Step 1.** Read the matches carefully. Is it the same person, or just the same name?
+
+**Step 2.** If it is the **same person** and they are an opposing party in another
+case — **stop**. Do not add this client. Talk to the attorney before doing anything.
+Taking on a client when you already represent (or previously opposed) them can be
+an ethical violation (RPC 1.7, 1.9).
+
+**Step 3.** If it is a **different person** with the same name, check the box that
+says you have reviewed the warning and click **Add client anyway**.
+
+**Step 4.** Your decision is recorded in the audit log either way — including
+when you override the warning. This protects the firm if the conflict is ever
+questioned later.
+
+**To make conflict checking work, you must add opposing parties to every case.**
+Open a case → scroll to **Opposing parties** → add everyone on the other side
+(name + role, e.g. "respondent", "co-parent"). The checker is only as good as
+the data you put in.
+
+---
+
+## 16. Billing: time entries and invoices
+
+### Logging time
+
+Open a case → click **Time entries** → fill in the date, hours (e.g. 1.5),
+hourly rate, and a description of the work → click **Add entry**.
+
+**Rules to know:**
+- Time entries **cannot be deleted** once they are more than 7 years old — actually,
+  it is the opposite: they cannot be deleted *until* they are 7 years old
+  (RPC 1.15B, financial record retention). If you try, the app will refuse and
+  explain why.
+- A time entry that has been put on an invoice cannot be deleted at all. Delete
+  the invoice first (subject to the same 7-year rule).
+
+### Creating an invoice
+
+**Step 1.** Click **Billing** in the top menu → **New invoice**.
+
+**Step 2.** Choose the client. The page reloads and shows all **unbilled time**
+for that client — checked by default.
+
+**Step 3.** Uncheck any time entries you do *not* want on this invoice.
+
+**Step 4.** Add extra line items if needed (filing fees, copies, etc.) with
+**+ Add line**.
+
+**Step 5.** Fill in issue date and due date → **Create invoice**.
+
+**Step 6.** On the invoice page, change the status as things happen:
+**Draft → Sent → Paid** (or **Overdue**).
+
+**The dashboard** shows how many invoices are unpaid (Sent or Overdue).
+
+---
+
+## 17. Automated backups: how they work
+
+The app now backs itself up **automatically once a day** while it is running.
+You do not need to do anything for this to work — but you do need to keep the
+app running (see Section 1).
+
+**What gets backed up:**
+- The database (`lawfirm.db`) — all clients, cases, documents metadata, calendar, billing
+- The encryption key (`data.key`) — **without this, encrypted fields (SSNs, birth dates) cannot be read**
+
+**Where:** The `instance/backups` folder inside the app folder, unless Garrett
+configured a different location.
+
+**How many:** The 30 most recent backups are kept. Older ones are deleted
+automatically.
+
+**What YOU still need to do:**
+1. **Check the dashboard.** It shows the last backup date and time prominently.
+   If it says "No backups yet" or shows a failure, tell Garrett.
+2. **Copy backups offsite weekly.** The automated backup protects against
+   database corruption — it does **not** protect against fire, flood, or theft.
+   Once a week, copy the newest backup files to a USB drive and take it home.
+   (Or ask Garrett to set up an automatic offsite copy.)
+3. **The documents folder is NOT in the automated backup.** Copy
+   `instance/documents` to your USB drive too (see Section 13).
+
+**"Back Up Now" button:** On the dashboard, click this any time you want an
+immediate backup — for example, right before updating the software (Section 5)
+or after entering a large amount of data.
+
+**Backup history:** Click **Backup history** on the dashboard to see every backup
+the app has taken, when, and whether it succeeded.

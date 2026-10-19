@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Invoices — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Invoices</h1>
+  <a href="{{ url_for('invoice_new') }}" class="btn btn-primary">New invoice</a>
+</div>
+
+{% if invoices %}
+<table class="table">
+  <thead><tr><th>Invoice #</th><th>Client</th><th>Issued</th><th>Due</th><th>Total</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for i in invoices %}
+    <tr>
+      <td>{{ i.invoice_number }}</td>
+      <td>{{ i.first_name }} {{ i.last_name }}</td>
+      <td class="nowrap">{{ i.issue_date }}</td>
+      <td class="nowrap">{{ i.due_date or '—' }}</td>
+      <td>${{ '%.2f'|format(i.total) }}</td>
+      <td><span class="badge badge-{{ 'active' if i.status == 'paid' else 'pending' if i.status in ('sent','overdue') else 'closed' }}">{{ i.status }}</span></td>
+      <td><a href="{{ url_for('invoice_detail', invoice_id=i.id) }}">Open</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No invoices yet.</p>
+{% endif %}
+{% endblock %}

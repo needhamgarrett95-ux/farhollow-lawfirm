@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Conflict check — Case Management{% endblock %}
+{% block content %}
+<h1>Add client</h1>
+
+<div class="conflict-box">
+  <h2>⚠ POTENTIAL CONFLICT OF INTEREST</h2>
+  <p><strong>Do not proceed until you have reviewed this.</strong> Under RPC 1.7,
+  the firm cannot represent a client if there is a concurrent conflict of
+  interest. The name you entered matches {{ conflicts|length }} existing
+  record{{ 's' if conflicts|length != 1 }}:</p>
+  {% for c in conflicts %}
+  <div class="conflict-hit">
+    <strong>{{ c.name }}</strong>
+    <span class="badge {{ 'badge-pending' if c.kind == 'opposing_party' else 'badge-closed' }}">{{ c.kind|replace('_', ' ') }}</span><br>
+    <span class="small">{{ c.detail }}</span>
+  </div>
+  {% endfor %}
+  <p class="small muted">If this is a different person with the same name, or you have
+  confirmed there is no conflict, you may proceed by checking the box below.
+  This decision is recorded in the audit log.</p>
+</div>
+
+<div class="form-card">
+  <form method="post" action="{{ url_for('client_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    {% for k, v in form_data.items() %}
+    <input type="hidden" name="{{ k }}" value="{{ v }}">
+    {% endfor %}
+    <label style="display:flex; gap:8px; align-items:flex-start; font-weight:400;">
+      <input type="checkbox" name="conflict_confirmed" value="1" required style="width:auto; margin-top:6px;">
+      <span>I have reviewed the potential conflict{{ 's' if conflicts|length != 1 }} above and confirm
+      there is no conflict of interest, or I accept responsibility for proceeding.</span>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-danger">Add client anyway</button>
+      <a href="{{ url_for('client_list') }}" class="btn">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

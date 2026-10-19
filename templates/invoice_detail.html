@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Invoice {{ invoice.invoice_number }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Invoice {{ invoice.invoice_number }}</h1>
+  <a href="{{ url_for('invoice_list') }}" class="btn">All invoices</a>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Bill to</h2>
+    <p><strong>{{ invoice.first_name }} {{ invoice.last_name }}</strong><br>
+    {{ invoice.address or '' }}<br>
+    {{ invoice.email or '' }}{% if invoice.email and invoice.phone %}<br>{% endif %}{{ invoice.phone or '' }}</p>
+  </div>
+  <div class="detail-card">
+    <h2>Details</h2>
+    <dl>
+      <dt>Issued</dt><dd>{{ invoice.issue_date }}</dd>
+      <dt>Due</dt><dd>{{ invoice.due_date or '—' }}</dd>
+      <dt>Status</dt><dd><span class="badge badge-{{ 'active' if invoice.status == 'paid' else 'pending' if invoice.status in ('sent','overdue') else 'closed' }}">{{ invoice.status }}</span></dd>
+      <dt>Total</dt><dd><strong>${{ '%.2f'|format(total) }}</strong></dd>
+    </dl>
+    {% if invoice.notes %}<p class="muted small">{{ invoice.notes }}</p>{% endif %}
+  </div>
+</div>
+
+<h2>Line items</h2>
+{% if items %}
+<table class="table">
+  <thead><tr><th>Description</th><th>Hours</th><th>Rate</th><th>Amount</th></tr></thead>
+  <tbody>
+  {% for i in items %}
+    <tr>
+      <td>{{ i.description }}</td>
+      <td>{{ '%.1f'|format(i.hours) if i.hours else '—' }}</td>
+      <td>{{ '$%.2f'|format(i.rate) if i.rate else '—' }}</td>
+      <td>${{ '%.2f'|format(i.amount) }}</td>
+    </tr>
+  {% endfor %}
+    <tr><td colspan="3" style="text-align:right"><strong>Total</strong></td><td><strong>${{ '%.2f'|format(total) }}</strong></td></tr>
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No line items.</p>
+{% endif %}
+
+<div class="detail-card">
+  <h2>Change status</h2>
+  <form method="post" action="{{ url_for('invoice_status', invoice_id=invoice.id) }}" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <select name="status">
+      {% for s in statuses %}
+      <option value="{{ s }}" {{ 'selected' if invoice.status == s }}>{{ s|capitalize }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-small btn-primary">Update</button>
+  </form>
+</div>
+
+<div class="danger-zone">
+  <form method="post" action="{{ url_for('invoice_delete', invoice_id=invoice.id) }}" class="inline" onsubmit="return confirm('Delete this invoice? Financial records are normally retained 7 years.');">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <button type="submit" class="btn btn-danger">Delete invoice</button>
+  </form>
+  <p class="muted small">Invoices are financial records (RPC 1.15B): deletion is blocked until 7 years after the issue date.</p>
+</div>
+{% endblock %}

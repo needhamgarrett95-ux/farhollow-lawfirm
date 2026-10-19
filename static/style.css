@@ -132,7 +132,35 @@ dd { margin: 0; }
 .tabs a { padding: 8px 16px; text-decoration: none; color: var(--muted); font-weight: 600; }
 .tabs a.active { color: var(--navy); border-bottom: 2px solid var(--navy); margin-bottom: -2px; }
 
-/* Stats */
+/* Alerts */
+.alert { padding: 14px 18px; border-radius: 8px; margin-bottom: 18px; }
+.alert-danger { background: #fee2e2; border: 2px solid #dc2626; color: #7f1d1d; }
+.alert-danger ul { margin: 8px 0 0; padding-left: 20px; }
+.alert-warning { background: #fef3c7; border: 2px solid #d97706; color: #78350f; }
+.row-urgent { background: #fef2f2; }
+.row-urgent td { border-bottom-color: #fca5a5; }
+
+/* Conflict warning */
+.conflict-box { background: #fff; border: 3px solid #dc2626; border-radius: 10px; padding: 28px; margin: 24px 0; }
+.conflict-box h2 { color: #b91c1c; border: none; margin-top: 0; font-size: 22px; }
+.conflict-hit { background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 12px 16px; margin: 10px 0; }
+
+/* Calendar */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.cal-dow { background: #eef1f5; padding: 8px; text-align: center; font-weight: 700; font-size: 12px; color: var(--muted); }
+.cal-cell { background: #fff; min-height: 90px; padding: 6px; font-size: 12px; }
+.cal-cell.other-month { background: #f8fafc; color: #cbd5e1; }
+.cal-cell.today { background: #eff6ff; }
+.cal-day { font-weight: 700; margin-bottom: 4px; }
+.cal-event { background: #dbeafe; border-radius: 4px; padding: 2px 6px; margin: 2px 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-event.type-court_date { background: #fee2e2; }
+.cal-event.type-filing_deadline { background: #fecaca; font-weight: 700; }
+.cal-event.done { text-decoration: line-through; opacity: 0.6; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.cal-nav h2 { margin: 0; border: none; padding: 0; }
+
+/* File upload */
+.upload-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 8px; }
 .stat-row { display: flex; gap: 16px; margin-bottom: 8px; }
 .stat { background: var(--card); border-radius: 8px; padding: 18px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); flex: 1; text-align: center; }
 .stat-num { display: block; font-size: 32px; font-weight: 700; color: var(--navy); }

@@ -8,14 +8,19 @@ Then open: http://localhost:5000
 import os
 import sqlite3
 import secrets
-from datetime import datetime, timedelta
+import shutil
+import threading
+import time
+import uuid
+from datetime import datetime, timedelta, date
 from functools import wraps
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, g, flash, abort,
+    session, g, flash, abort, send_file,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 
 from crypto import encrypt_value, decrypt_value, looks_encrypted
 
@@ -42,9 +47,44 @@ else:
 
 SESSION_TIMEOUT_MINUTES = 30
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB upload cap
 
 CASE_TYPES = ["divorce", "custody", "support", "adoption", "other"]
 CASE_STATUSES = ["active", "pending", "closed"]
+
+DOC_CATEGORIES = ["pleadings", "correspondence", "discovery", "evidence", "other"]
+EVENT_TYPES = ["court_date", "filing_deadline", "meeting", "reminder"]
+INVOICE_STATUSES = ["draft", "sent", "paid", "overdue"]
+
+# Uploaded documents live on disk (not in the DB), namespaced per case.
+DOCUMENTS_DIR = os.path.join(INSTANCE_DIR, "documents")
+os.makedirs(DOCUMENTS_DIR, exist_ok=True)
+
+# Never allow executable uploads — a law office cannot risk malware.
+BLOCKED_EXTENSIONS = {
+    "exe", "bat", "cmd", "com", "scr", "msi", "ps1", "vbs", "js", "jar",
+    "dll", "sys", "reg", "lnk",
+}
+
+# Backups: database + encryption key copied to BACKUP_DIR. The office should
+# ALSO copy backups offsite (USB drive taken home weekly — see MAINTENANCE.md).
+BACKUP_DIR_FILE = os.path.join(INSTANCE_DIR, "backup_dir.txt")
+
+
+def get_backup_dir():
+    """Backup directory: configurable, defaults to instance/backups/."""
+    if os.path.exists(BACKUP_DIR_FILE):
+        with open(BACKUP_DIR_FILE, "r") as f:
+            d = f.read().strip()
+        if d:
+            os.makedirs(d, exist_ok=True)
+            return d
+    default = os.path.join(INSTANCE_DIR, "backups")
+    os.makedirs(default, exist_ok=True)
+    return default
+
+
+BACKUP_KEEP_COUNT = 30  # keep the 30 most recent backups, delete older ones
 
 # RPC 1.15A/B: trust account and financial records must be retained a minimum
 # of 7 years. No financial/billing records may be destroyed before then.
@@ -125,6 +165,87 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+-- Opposing parties, per case. Used by the conflict checker (RPC 1.7):
+-- before a new client is added, their name is searched against all clients
+-- AND all opposing parties. A match triggers a hard-stop warning.
+CREATE TABLE IF NOT EXISTS opposing_parties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    role TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
+-- Document metadata. Files live on disk under instance/documents/<case_id>/;
+-- only metadata lives here. Uploading a new version of the same file keeps
+-- the old file (version column increments).
+CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    original_name TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'other',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 1,
+    uploaded_by TEXT,
+    notes TEXT,
+    uploaded_at TEXT NOT NULL
+);
+-- Calendar events. Filing deadlines and court dates are malpractice-critical:
+-- the dashboard surfaces anything due within 7 days.
+CREATE TABLE IF NOT EXISTS calendar_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    event_type TEXT NOT NULL DEFAULT 'reminder',
+    event_date TEXT NOT NULL,
+    event_time TEXT,
+    description TEXT,
+    completed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+-- Time entries (billable hours). Financial records: RPC 1.15B requires
+-- 7-year retention. Deletion MUST go through retention_ok() — fail closed.
+CREATE TABLE IF NOT EXISTS time_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    entry_date TEXT NOT NULL,
+    hours REAL NOT NULL,
+    description TEXT NOT NULL,
+    rate REAL NOT NULL DEFAULT 0,
+    user_id INTEGER,
+    invoiced INTEGER NOT NULL DEFAULT 0,
+    invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_number TEXT UNIQUE NOT NULL,
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    issue_date TEXT NOT NULL,
+    due_date TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS invoice_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    hours REAL NOT NULL DEFAULT 0,
+    rate REAL NOT NULL DEFAULT 0,
+    amount REAL NOT NULL DEFAULT 0
+);
+-- Backup log. Each automated or manual backup records here.
+CREATE TABLE IF NOT EXISTS backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ok',
+    notes TEXT
 );
 -- Tamper-evident audit log (RPC 1.6 / WSBA Op 2215): the audit trail is
 -- append-only. These triggers make UPDATE/DELETE on audit_log fail at the
@@ -243,6 +364,113 @@ def audit(action, details=""):
         ),
     )
     db.commit()
+
+
+# ----------------------------------------------------------------------------
+# Backups
+# ----------------------------------------------------------------------------
+def do_backup(manual=False):
+    """Copy the database + encryption key to the backup directory.
+
+    Returns (ok, message). Keeps the newest BACKUP_KEEP_COUNT backups and
+    deletes older ones. Logs the result to the backups table and audit log.
+    """
+    backup_dir = get_backup_dir()
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    kind = "manual" if manual else "auto"
+    base = f"lawfirm-backup-{stamp}-{kind}"
+    db_backup = os.path.join(backup_dir, base + ".db")
+    key_backup = os.path.join(backup_dir, base + ".key")
+    notes = ""
+    try:
+        # SQLite online backup: copy via the backup API so we get a
+        # consistent snapshot even if the app is running.
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(db_backup)
+        src.backup(dst)
+        src.close()
+        dst.close()
+        # The encryption key MUST travel with the database, or encrypted
+        # fields (SSNs, DOBs) become unrecoverable.
+        key_src = os.path.join(INSTANCE_DIR, "data.key")
+        if os.path.exists(key_src):
+            shutil.copy2(key_src, key_backup)
+        else:
+            notes = "WARNING: data.key not found — encrypted fields may be unrecoverable!"
+        size = os.path.getsize(db_backup)
+        ok, msg = True, f"Backup saved to {db_backup}"
+    except Exception as e:  # noqa: BLE001 — report, don't crash the app
+        ok, msg = False, f"Backup FAILED: {e}"
+        size = 0
+
+    # Prune old backups (keep newest N)
+    try:
+        files = sorted(
+            f for f in os.listdir(backup_dir)
+            if f.startswith("lawfirm-backup-") and f.endswith(".db")
+        )
+        for old in files[:-BACKUP_KEEP_COUNT]:
+            try:
+                os.remove(os.path.join(backup_dir, old))
+                kb = os.path.join(backup_dir, old[:-3] + ".key")
+                if os.path.exists(kb):
+                    os.remove(kb)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    # Log it
+    try:
+        db = get_db()
+        db.execute(
+            "INSERT INTO backups (timestamp, filename, size_bytes, status, notes)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                datetime.utcnow().isoformat(),
+                os.path.basename(db_backup) if ok else base + ".db",
+                size,
+                "ok" if ok else "failed",
+                (msg + " " + notes).strip(),
+            ),
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001 — backup must not break the app
+        pass
+    return ok, msg
+
+
+def backup_scheduler():
+    """Background thread: ensure at least one backup per 24 hours."""
+    while True:
+        try:
+            time.sleep(3600)  # check hourly
+            with app.app_context():
+                db = get_db()
+                row = db.execute(
+                    "SELECT timestamp FROM backups WHERE status='ok'"
+                    " ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                needs_backup = True
+                if row and row["timestamp"]:
+                    try:
+                        last = datetime.fromisoformat(row["timestamp"])
+                        needs_backup = (
+                            datetime.utcnow() - last > timedelta(hours=24)
+                        )
+                    except ValueError:
+                        pass
+                if needs_backup:
+                    ok, msg = do_backup(manual=False)
+                    print(f"  [backup] {msg}")
+        except Exception as e:  # noqa: BLE001 — scheduler must never die loudly
+            print(f"  [backup] scheduler error: {e}")
+
+
+def start_backup_scheduler():
+    t = threading.Thread(target=backup_scheduler, daemon=True,
+                         name="backup-scheduler")
+    t.start()
 
 
 # ----------------------------------------------------------------------------
@@ -392,12 +620,40 @@ def dashboard():
         "total_clients": db.execute(
             "SELECT COUNT(*) AS c FROM clients"
         ).fetchone()["c"],
+        "unpaid_invoices": db.execute(
+            "SELECT COUNT(*) AS c FROM invoices WHERE status IN ('sent','overdue')"
+        ).fetchone()["c"],
     }
     recent = db.execute(
         "SELECT * FROM audit_log ORDER BY id DESC LIMIT 10"
     ).fetchall()
+    # Upcoming deadlines: not completed, due within 14 days. Anything within
+    # 7 days is malpractice-critical and rendered red in the template.
+    today = date.today().isoformat()
+    soon = (date.today() + timedelta(days=14)).isoformat()
+    deadlines = db.execute(
+        "SELECT e.*, c.case_number, c.title FROM calendar_events e"
+        " LEFT JOIN cases c ON e.case_id = c.id"
+        " WHERE e.completed = 0 AND e.event_date >= ? AND e.event_date <= ?"
+        " ORDER BY e.event_date, e.event_time",
+        (today, soon),
+    ).fetchall()
+    overdue = db.execute(
+        "SELECT e.*, c.case_number, c.title FROM calendar_events e"
+        " LEFT JOIN cases c ON e.case_id = c.id"
+        " WHERE e.completed = 0 AND e.event_date < ?"
+        " ORDER BY e.event_date",
+        (today,),
+    ).fetchall()
+    # Last backup status — shown prominently; a missing backup is a red flag.
+    last_backup = db.execute(
+        "SELECT * FROM backups ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    urgent_cutoff = (date.today() + timedelta(days=7)).isoformat()
     return render_template(
-        "dashboard.html", stats=stats, active_cases=active_cases, recent=recent
+        "dashboard.html", stats=stats, active_cases=active_cases,
+        recent=recent, deadlines=deadlines, overdue=overdue,
+        last_backup=last_backup, today=today, urgent_cutoff=urgent_cutoff,
     )
 
 
@@ -423,11 +679,66 @@ def client_list():
     return render_template("clients.html", clients=clients, q=q)
 
 
+def find_conflicts(first_name, last_name, exclude_client_id=None):
+    """Search existing clients and opposing parties for a name match.
+
+    Returns a list of dicts: {kind, name, detail}. kind is 'client' or
+    'opposing_party'. Matching is case-insensitive on first+last name.
+    """
+    fn = (first_name or "").strip().lower()
+    ln = (last_name or "").strip().lower()
+    if not fn and not ln:
+        return []
+    db = get_db()
+    hits = []
+    for c in db.execute("SELECT id, first_name, last_name FROM clients").fetchall():
+        if exclude_client_id and c["id"] == exclude_client_id:
+            continue
+        if c["first_name"].strip().lower() == fn and c["last_name"].strip().lower() == ln:
+            hits.append({
+                "kind": "client",
+                "name": f"{c['first_name']} {c['last_name']}",
+                "detail": f"Existing client (id={c['id']})",
+            })
+    for p in db.execute(
+        "SELECT p.first_name, p.last_name, p.role, c.case_number, c.title"
+        " FROM opposing_parties p JOIN cases c ON p.case_id = c.id"
+    ).fetchall():
+        if p["first_name"].strip().lower() == fn and p["last_name"].strip().lower() == ln:
+            hits.append({
+                "kind": "opposing_party",
+                "name": f"{p['first_name']} {p['last_name']}",
+                "detail": f"Opposing party ({p['role'] or 'party'}) in case"
+                          f" {p['case_number']}: {p['title']}",
+            })
+    return hits
+
+
 @app.route("/clients/new", methods=["GET", "POST"])
 @login_required
 def client_new():
     if request.method == "POST":
         check_csrf()
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        # RPC 1.7 conflict check: hard stop if the name matches an existing
+        # client or an opposing party in any case. The user must explicitly
+        # confirm before the record is created.
+        if not request.form.get("conflict_confirmed"):
+            hits = find_conflicts(first_name, last_name)
+            if hits:
+                form_data = {k: request.form.get(k, "") for k in (
+                    "first_name", "last_name", "email", "phone", "address",
+                    "date_of_birth", "spouse_name", "spouse_dob", "ssn",
+                    "notes",
+                )}
+                audit("conflict_warning",
+                      f"Conflict check flagged {len(hits)} match(es) for"
+                      f" {first_name} {last_name}")
+                return render_template(
+                    "conflict_warning.html", conflicts=hits,
+                    form_data=form_data,
+                )
         now = datetime.utcnow().isoformat()
         db = get_db()
         cur = db.execute(
@@ -436,8 +747,8 @@ def client_new():
             " updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                request.form.get("first_name", "").strip(),
-                request.form.get("last_name", "").strip(),
+                first_name,
+                last_name,
                 request.form.get("email", "").strip(),
                 request.form.get("phone", "").strip(),
                 request.form.get("address", "").strip(),
@@ -690,8 +1001,29 @@ def case_detail(case_id):
     ).fetchone()
     if not case:
         abort(404)
+    parties = db.execute(
+        "SELECT * FROM opposing_parties WHERE case_id = ?"
+        " ORDER BY last_name, first_name",
+        (case_id,),
+    ).fetchall()
+    doc_count = db.execute(
+        "SELECT COUNT(*) AS c FROM documents WHERE case_id = ?",
+        (case_id,),
+    ).fetchone()["c"]
+    upcoming = db.execute(
+        "SELECT * FROM calendar_events WHERE case_id = ? AND completed = 0"
+        " AND event_date >= ? ORDER BY event_date LIMIT 5",
+        (case_id, date.today().isoformat()),
+    ).fetchall()
+    time_totals = db.execute(
+        "SELECT COALESCE(SUM(hours),0) AS h, COALESCE(SUM(hours*rate),0) AS a"
+        " FROM time_entries WHERE case_id = ?",
+        (case_id,),
+    ).fetchone()
     audit("case_view", f"Viewed case {case['case_number']} (id={case_id})")
-    return render_template("case_detail.html", case=case)
+    return render_template("case_detail.html", case=case, parties=parties,
+                           doc_count=doc_count, upcoming=upcoming,
+                           time_totals=time_totals)
 
 
 @app.route("/cases/<int:case_id>/edit", methods=["GET", "POST"])
@@ -750,6 +1082,607 @@ def case_delete(case_id):
 
 
 # ----------------------------------------------------------------------------
+# Opposing parties (conflict checking support)
+# ----------------------------------------------------------------------------
+@app.route("/cases/<int:case_id>/parties/add", methods=["POST"])
+@login_required
+def party_add(case_id):
+    check_csrf()
+    db = get_db()
+    case = db.execute("SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone()
+    if not case:
+        abort(404)
+    first_name = request.form.get("first_name", "").strip()
+    last_name = request.form.get("last_name", "").strip()
+    if not first_name or not last_name:
+        flash("Opposing party needs a first and last name.", "error")
+    else:
+        db.execute(
+            "INSERT INTO opposing_parties (case_id, first_name, last_name, role,"
+            " notes, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                case_id, first_name, last_name,
+                request.form.get("role", "").strip(),
+                request.form.get("notes", "").strip(),
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        db.commit()
+        audit("party_add",
+              f"Added opposing party {first_name} {last_name} to case"
+              f" (id={case_id})")
+        flash("Opposing party added.", "success")
+    return redirect(url_for("case_detail", case_id=case_id))
+
+
+@app.route("/parties/<int:party_id>/delete", methods=["POST"])
+@login_required
+def party_delete(party_id):
+    check_csrf()
+    db = get_db()
+    row = db.execute(
+        "SELECT case_id, first_name, last_name FROM opposing_parties"
+        " WHERE id = ?", (party_id,)
+    ).fetchone()
+    if not row:
+        abort(404)
+    db.execute("DELETE FROM opposing_parties WHERE id = ?", (party_id,))
+    db.commit()
+    audit("party_delete",
+          f"Removed opposing party {row['first_name']} {row['last_name']}"
+          f" from case (id={row['case_id']})")
+    flash("Opposing party removed.", "success")
+    return redirect(url_for("case_detail", case_id=row["case_id"]))
+
+
+# ----------------------------------------------------------------------------
+# Documents
+# ----------------------------------------------------------------------------
+def _case_doc_dir(case_id):
+    d = os.path.join(DOCUMENTS_DIR, str(case_id))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+@app.route("/cases/<int:case_id>/documents", methods=["GET", "POST"])
+@login_required
+def document_list(case_id):
+    db = get_db()
+    case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+    if not case:
+        abort(404)
+    if request.method == "POST":
+        check_csrf()
+        f = request.files.get("file")
+        if not f or not f.filename:
+            flash("Choose a file to upload.", "error")
+            return redirect(url_for("document_list", case_id=case_id))
+        ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+        if ext in BLOCKED_EXTENSIONS:
+            flash(f"Files of type .{ext} are not allowed (security policy).",
+                  "error")
+            return redirect(url_for("document_list", case_id=case_id))
+        original = secure_filename(f.filename)
+        category = request.form.get("category", "other")
+        if category not in DOC_CATEGORIES:
+            category = "other"
+        notes = request.form.get("notes", "").strip()
+        # Versioning: same original name + category => bump version, keep old.
+        row = db.execute(
+            "SELECT MAX(version) AS v FROM documents"
+            " WHERE case_id = ? AND original_name = ? AND category = ?",
+            (case_id, original, category),
+        ).fetchone()
+        version = (row["v"] or 0) + 1
+        stored = f"{uuid.uuid4().hex}_{original}"
+        path = os.path.join(_case_doc_dir(case_id), stored)
+        f.save(path)
+        size = os.path.getsize(path)
+        db.execute(
+            "INSERT INTO documents (case_id, original_name, stored_name,"
+            " category, file_size, version, uploaded_by, notes, uploaded_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                case_id, original, stored, category, size, version,
+                session.get("username"), notes,
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        db.commit()
+        audit("document_upload",
+              f"Uploaded {original} (v{version}, {category}) to case"
+              f" {case['case_number']} (id={case_id})")
+        flash(f"Uploaded {original} (version {version}).", "success")
+        return redirect(url_for("document_list", case_id=case_id))
+    docs = db.execute(
+        "SELECT * FROM documents WHERE case_id = ?"
+        " ORDER BY original_name, version DESC",
+        (case_id,),
+    ).fetchall()
+    return render_template(
+        "documents.html", case=case, documents=docs,
+        categories=DOC_CATEGORIES,
+    )
+
+
+@app.route("/documents/<int:doc_id>/download")
+@login_required
+def document_download(doc_id):
+    db = get_db()
+    doc = db.execute(
+        "SELECT d.*, c.case_number FROM documents d"
+        " JOIN cases c ON d.case_id = c.id WHERE d.id = ?",
+        (doc_id,),
+    ).fetchone()
+    if not doc:
+        abort(404)
+    path = os.path.join(_case_doc_dir(doc["case_id"]), doc["stored_name"])
+    if not os.path.exists(path):
+        flash("File is missing from disk. Check backups.", "error")
+        return redirect(url_for("document_list", case_id=doc["case_id"]))
+    audit("document_download",
+          f"Downloaded {doc['original_name']} (v{doc['version']}) from case"
+          f" {doc['case_number']}")
+    return send_file(path, as_attachment=True,
+                     download_name=doc["original_name"])
+
+
+@app.route("/documents/<int:doc_id>/delete", methods=["POST"])
+@login_required
+def document_delete(doc_id):
+    check_csrf()
+    db = get_db()
+    doc = db.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
+    if not doc:
+        abort(404)
+    path = os.path.join(_case_doc_dir(doc["case_id"]), doc["stored_name"])
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+    db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    db.commit()
+    audit("document_delete",
+          f"Deleted {doc['original_name']} (v{doc['version']}) from case"
+          f" (id={doc['case_id']})")
+    flash("Document deleted.", "success")
+    return redirect(url_for("document_list", case_id=doc["case_id"]))
+
+
+# ----------------------------------------------------------------------------
+# Calendar & deadlines
+# ----------------------------------------------------------------------------
+@app.route("/calendar")
+@login_required
+def calendar_view():
+    db = get_db()
+    # Month navigation: ?y=2026&m=10
+    try:
+        year = int(request.args.get("y", date.today().year))
+        month = int(request.args.get("m", date.today().month))
+        first = date(year, month, 1)
+    except ValueError:
+        first = date.today()
+        year, month = first.year, first.month
+    # Build a 6x7 grid starting Monday
+    start = first - timedelta(days=first.weekday())
+    cells = []
+    for i in range(42):
+        d = start + timedelta(days=i)
+        cells.append(d)
+    month_start = first.isoformat()
+    if month == 12:
+        month_end = date(year + 1, 1, 1).isoformat()
+    else:
+        month_end = date(year, month + 1, 1).isoformat()
+    # Events overlapping the grid
+    grid_start = cells[0].isoformat()
+    grid_end = cells[-1].isoformat()
+    events = db.execute(
+        "SELECT e.*, c.case_number FROM calendar_events e"
+        " LEFT JOIN cases c ON e.case_id = c.id"
+        " WHERE e.event_date >= ? AND e.event_date <= ?"
+        " ORDER BY e.event_date, e.event_time",
+        (grid_start, grid_end),
+    ).fetchall()
+    by_date = {}
+    for e in events:
+        by_date.setdefault(e["event_date"], []).append(e)
+    # Prev/next month links
+    prev_m = month - 1 or 12
+    prev_y = year - (1 if month == 1 else 0)
+    next_m = month + 1 if month < 12 else 1
+    next_y = year + (1 if month == 12 else 0)
+    month_name = first.strftime("%B %Y")
+    return render_template(
+        "calendar.html", cells=cells, by_date=by_date, year=year, month=month,
+        month_name=month_name, prev_y=prev_y, prev_m=prev_m,
+        next_y=next_y, next_m=next_m, today=date.today().isoformat(),
+    )
+
+
+@app.route("/events/new", methods=["GET", "POST"])
+@login_required
+def event_new():
+    db = get_db()
+    cases = db.execute(
+        "SELECT id, case_number, title FROM cases WHERE status IN"
+        " ('active','pending') ORDER BY case_number"
+    ).fetchall()
+    preset_case = request.args.get("case_id", "")
+    if request.method == "POST":
+        check_csrf()
+        title = request.form.get("title", "").strip()
+        event_date = request.form.get("event_date", "").strip()
+        if not title or not event_date:
+            flash("Title and date are required.", "error")
+            return render_template(
+                "event_form.html", cases=cases, event=None,
+                event_types=EVENT_TYPES, preset_case=preset_case,
+            )
+        event_type = request.form.get("event_type", "reminder")
+        if event_type not in EVENT_TYPES:
+            event_type = "reminder"
+        case_id = request.form.get("case_id", "").strip() or None
+        db.execute(
+            "INSERT INTO calendar_events (case_id, title, event_type,"
+            " event_date, event_time, description, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                case_id, title, event_type, event_date,
+                request.form.get("event_time", "").strip(),
+                request.form.get("description", "").strip(),
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        db.commit()
+        audit("event_create", f"Created {event_type} '{title}' on {event_date}")
+        flash("Event added.", "success")
+        return redirect(url_for("calendar_view"))
+    return render_template(
+        "event_form.html", cases=cases, event=None,
+        event_types=EVENT_TYPES, preset_case=preset_case,
+    )
+
+
+@app.route("/events/<int:event_id>/toggle", methods=["POST"])
+@login_required
+def event_toggle(event_id):
+    check_csrf()
+    db = get_db()
+    ev = db.execute(
+        "SELECT * FROM calendar_events WHERE id = ?", (event_id,)
+    ).fetchone()
+    if not ev:
+        abort(404)
+    new_val = 0 if ev["completed"] else 1
+    db.execute(
+        "UPDATE calendar_events SET completed = ? WHERE id = ?",
+        (new_val, event_id),
+    )
+    db.commit()
+    audit("event_toggle",
+          f"Marked '{ev['title']}' ({ev['event_date']}) as"
+          f" {'done' if new_val else 'not done'}")
+    return redirect(request.referrer or url_for("calendar_view"))
+
+
+@app.route("/events/<int:event_id>/delete", methods=["POST"])
+@login_required
+def event_delete(event_id):
+    check_csrf()
+    db = get_db()
+    ev = db.execute(
+        "SELECT * FROM calendar_events WHERE id = ?", (event_id,)
+    ).fetchone()
+    if not ev:
+        abort(404)
+    db.execute("DELETE FROM calendar_events WHERE id = ?", (event_id,))
+    db.commit()
+    audit("event_delete", f"Deleted event '{ev['title']}' ({ev['event_date']})")
+    flash("Event deleted.", "success")
+    return redirect(request.referrer or url_for("calendar_view"))
+
+
+# ----------------------------------------------------------------------------
+# Billing & time tracking
+# ----------------------------------------------------------------------------
+@app.route("/cases/<int:case_id>/time", methods=["GET", "POST"])
+@login_required
+def time_list(case_id):
+    db = get_db()
+    case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+    if not case:
+        abort(404)
+    if request.method == "POST":
+        check_csrf()
+        try:
+            hours = float(request.form.get("hours", "0"))
+        except ValueError:
+            hours = 0
+        description = request.form.get("description", "").strip()
+        entry_date = request.form.get("entry_date", "").strip() or date.today().isoformat()
+        try:
+            rate = float(request.form.get("rate", "0"))
+        except ValueError:
+            rate = 0
+        if hours <= 0 or not description:
+            flash("Hours (greater than 0) and a description are required.",
+                  "error")
+        else:
+            db.execute(
+                "INSERT INTO time_entries (case_id, entry_date, hours,"
+                " description, rate, user_id, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    case_id, entry_date, hours, description, rate,
+                    session.get("user_id"), datetime.utcnow().isoformat(),
+                ),
+            )
+            db.commit()
+            audit("time_add",
+                  f"Logged {hours}h on case {case['case_number']} (id={case_id})")
+            flash("Time entry added.", "success")
+        return redirect(url_for("time_list", case_id=case_id))
+    entries = db.execute(
+        "SELECT * FROM time_entries WHERE case_id = ? ORDER BY entry_date DESC",
+        (case_id,),
+    ).fetchall()
+    total_hours = sum(e["hours"] for e in entries)
+    total_amount = sum(e["hours"] * e["rate"] for e in entries)
+    uninvoiced = [e for e in entries if not e["invoiced"]]
+    return render_template(
+        "time_entries.html", case=case, entries=entries,
+        total_hours=total_hours, total_amount=total_amount,
+        uninvoiced=uninvoiced, today=date.today().isoformat(),
+    )
+
+
+@app.route("/time/<int:entry_id>/delete", methods=["POST"])
+@login_required
+def time_delete(entry_id):
+    check_csrf()
+    db = get_db()
+    e = db.execute("SELECT * FROM time_entries WHERE id = ?", (entry_id,)).fetchone()
+    if not e:
+        abort(404)
+    # RPC 1.15B: financial records cannot be destroyed before 7 years.
+    # Fail closed: if the date is missing or too recent, refuse.
+    if not retention_ok(e["entry_date"]):
+        flash(
+            "Cannot delete this time entry: financial records must be retained"
+            f" for {RETENTION_YEARS_FINANCIAL} years (RPC 1.15B).",
+            "error",
+        )
+        audit("time_delete_blocked",
+              f"Blocked deletion of time entry (id={entry_id}) — retention")
+        return redirect(url_for("time_list", case_id=e["case_id"]))
+    if e["invoiced"]:
+        flash("Cannot delete a time entry that is on an invoice.", "error")
+        return redirect(url_for("time_list", case_id=e["case_id"]))
+    db.execute("DELETE FROM time_entries WHERE id = ?", (entry_id,))
+    db.commit()
+    audit("time_delete", f"Deleted time entry (id={entry_id})")
+    flash("Time entry deleted.", "success")
+    return redirect(url_for("time_list", case_id=e["case_id"]))
+
+
+@app.route("/invoices")
+@login_required
+def invoice_list():
+    db = get_db()
+    invoices = db.execute(
+        "SELECT i.*, cl.first_name, cl.last_name FROM invoices i"
+        " JOIN clients cl ON i.client_id = cl.id"
+        " ORDER BY i.created_at DESC"
+    ).fetchall()
+    # Compute totals
+    out = []
+    for inv in invoices:
+        total = db.execute(
+            "SELECT COALESCE(SUM(amount),0) AS t FROM invoice_items"
+            " WHERE invoice_id = ?", (inv["id"],)
+        ).fetchone()["t"]
+        d = dict(inv)
+        d["total"] = total
+        out.append(d)
+    return render_template("invoices.html", invoices=out)
+
+
+@app.route("/invoices/new", methods=["GET", "POST"])
+@login_required
+def invoice_new():
+    db = get_db()
+    clients = db.execute(
+        "SELECT id, first_name, last_name FROM clients"
+        " ORDER BY last_name, first_name"
+    ).fetchall()
+    preset_client = request.args.get("client_id", "")
+    # Uninvoiced time entries for the selected client (for quick-add)
+    sel_client = request.args.get("client_id", "") or (
+        request.form.get("client_id", "") if request.method == "POST" else "")
+    uninvoiced = []
+    if sel_client:
+        uninvoiced = db.execute(
+            "SELECT t.*, c.case_number FROM time_entries t"
+            " JOIN cases c ON t.case_id = c.id"
+            " WHERE c.client_id = ? AND t.invoiced = 0"
+            " ORDER BY t.entry_date",
+            (sel_client,),
+        ).fetchall()
+    if request.method == "POST":
+        check_csrf()
+        client_id = request.form.get("client_id", "").strip()
+        if not client_id:
+            flash("Choose a client.", "error")
+            return render_template(
+                "invoice_form.html", clients=clients,
+                preset_client=preset_client, uninvoiced=uninvoiced,
+            )
+        now = datetime.utcnow().isoformat()
+        inv_no = f"INV-{datetime.now().strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
+        cur = db.execute(
+            "INSERT INTO invoices (invoice_number, client_id, issue_date,"
+            " due_date, status, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                inv_no, client_id,
+                request.form.get("issue_date", "").strip() or date.today().isoformat(),
+                request.form.get("due_date", "").strip(),
+                "draft",
+                request.form.get("notes", "").strip(),
+                now,
+            ),
+        )
+        invoice_id = cur.lastrowid
+        # Pull selected uninvoiced time entries onto the invoice
+        entry_ids = request.form.getlist("entry_ids")
+        for eid in entry_ids:
+            e = db.execute(
+                "SELECT t.*, c.client_id FROM time_entries t"
+                " JOIN cases c ON t.case_id = c.id WHERE t.id = ?",
+                (eid,),
+            ).fetchone()
+            if e and str(e["client_id"]) == str(client_id) and not e["invoiced"]:
+                amount = e["hours"] * e["rate"]
+                db.execute(
+                    "INSERT INTO invoice_items (invoice_id, description, hours,"
+                    " rate, amount) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        invoice_id,
+                        f"{e['entry_date']} — {e['description']}",
+                        e["hours"], e["rate"], amount,
+                    ),
+                )
+                db.execute(
+                    "UPDATE time_entries SET invoiced = 1, invoice_id = ?"
+                    " WHERE id = ?", (invoice_id, eid),
+                )
+        # Manual line items
+        descs = request.form.getlist("item_desc")
+        amounts = request.form.getlist("item_amount")
+        for desc, amt in zip(descs, amounts):
+            desc, amt = desc.strip(), amt.strip()
+            if desc and amt:
+                try:
+                    amount = float(amt)
+                except ValueError:
+                    continue
+                db.execute(
+                    "INSERT INTO invoice_items (invoice_id, description, hours,"
+                    " rate, amount) VALUES (?, ?, 0, 0, ?)",
+                    (invoice_id, desc, amount),
+                )
+        db.commit()
+        audit("invoice_create", f"Created invoice {inv_no} (id={invoice_id})")
+        flash(f"Invoice {inv_no} created.", "success")
+        return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+    return render_template(
+        "invoice_form.html", clients=clients, preset_client=preset_client,
+        uninvoiced=uninvoiced,
+    )
+
+
+@app.route("/invoices/<int:invoice_id>")
+@login_required
+def invoice_detail(invoice_id):
+    db = get_db()
+    inv = db.execute(
+        "SELECT i.*, cl.first_name, cl.last_name, cl.email, cl.phone, cl.address"
+        " FROM invoices i JOIN clients cl ON i.client_id = cl.id"
+        " WHERE i.id = ?", (invoice_id,)
+    ).fetchone()
+    if not inv:
+        abort(404)
+    items = db.execute(
+        "SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,)
+    ).fetchall()
+    total = sum(i["amount"] for i in items)
+    audit("invoice_view", f"Viewed invoice {inv['invoice_number']} (id={invoice_id})")
+    return render_template(
+        "invoice_detail.html", invoice=inv, items=items, total=total,
+        statuses=INVOICE_STATUSES,
+    )
+
+
+@app.route("/invoices/<int:invoice_id>/status", methods=["POST"])
+@login_required
+def invoice_status(invoice_id):
+    check_csrf()
+    db = get_db()
+    inv = db.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if not inv:
+        abort(404)
+    status = request.form.get("status", "draft")
+    if status not in INVOICE_STATUSES:
+        flash("Invalid status.", "error")
+    else:
+        db.execute("UPDATE invoices SET status = ? WHERE id = ?",
+                   (status, invoice_id))
+        db.commit()
+        audit("invoice_status",
+              f"Set invoice {inv['invoice_number']} to {status}")
+        flash(f"Invoice marked {status}.", "success")
+    return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+
+
+@app.route("/invoices/<int:invoice_id>/delete", methods=["POST"])
+@login_required
+def invoice_delete(invoice_id):
+    check_csrf()
+    db = get_db()
+    inv = db.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if not inv:
+        abort(404)
+    # RPC 1.15B: invoices are financial records — 7-year retention, fail closed.
+    if not retention_ok(inv["issue_date"]):
+        flash(
+            "Cannot delete this invoice: financial records must be retained"
+            f" for {RETENTION_YEARS_FINANCIAL} years (RPC 1.15B).",
+            "error",
+        )
+        audit("invoice_delete_blocked",
+              f"Blocked deletion of invoice {inv['invoice_number']} — retention")
+        return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+    # Unlink time entries first
+    db.execute(
+        "UPDATE time_entries SET invoiced = 0, invoice_id = NULL"
+        " WHERE invoice_id = ?", (invoice_id,),
+    )
+    db.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    db.execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
+    db.commit()
+    audit("invoice_delete", f"Deleted invoice {inv['invoice_number']}")
+    flash("Invoice deleted.", "success")
+    return redirect(url_for("invoice_list"))
+
+
+# ----------------------------------------------------------------------------
+# Backups (manual trigger + history)
+# ----------------------------------------------------------------------------
+@app.route("/backup/now", methods=["POST"])
+@login_required
+def backup_now():
+    check_csrf()
+    ok, msg = do_backup(manual=True)
+    audit("backup_manual", msg)
+    flash(msg, "success" if ok else "error")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/backup/history")
+@login_required
+def backup_history():
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM backups ORDER BY id DESC LIMIT 60"
+    ).fetchall()
+    return render_template(
+        "backups.html", backups=rows, backup_dir=get_backup_dir(),
+    )
+
+
+# ----------------------------------------------------------------------------
 # Audit log viewer
 # ----------------------------------------------------------------------------
 @app.route("/audit")
@@ -780,6 +1713,7 @@ def bad_request(e):
 if __name__ == "__main__":
     with app.app_context():
         init_db()
+    start_backup_scheduler()
     print("\n  Farhollow Law Firm - Case Management")
     print("  Open your browser to:  http://localhost:5000\n")
     # Bind to localhost only by default — the app is meant for this machine.

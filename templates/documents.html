@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Documents — {{ case.case_number }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Documents — {{ case.case_number }}</h1>
+  <a href="{{ url_for('case_detail', case_id=case.id) }}" class="btn">Back to case</a>
+</div>
+
+<div class="detail-card">
+  <h2>Upload document</h2>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <div class="upload-row">
+      <label>File (max 50 MB)<input type="file" name="file" required></label>
+      <label>Category
+        <select name="category">
+          {% for c in categories %}
+          <option value="{{ c }}">{{ c|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Notes<input name="notes" placeholder="Optional description"></label>
+      <button type="submit" class="btn btn-primary">Upload</button>
+    </div>
+    <p class="muted small">Uploading a file with the same name and category creates a new version. Old versions are kept.</p>
+  </form>
+</div>
+
+<h2>Files</h2>
+{% if documents %}
+<table class="table">
+  <thead><tr><th>File</th><th>Category</th><th>Ver.</th><th>Size</th><th>Uploaded</th><th>By</th><th></th></tr></thead>
+  <tbody>
+  {% for d in documents %}
+    <tr>
+      <td>{{ d.original_name }}{% if d.notes %}<br><span class="muted small">{{ d.notes }}</span>{% endif %}</td>
+      <td>{{ d.category|capitalize }}</td>
+      <td>{{ d.version }}</td>
+      <td class="nowrap">{{ (d.file_size / 1024)|round(1) }} KB</td>
+      <td class="nowrap">{{ d.uploaded_at[:16].replace('T', ' ') }}</td>
+      <td>{{ d.uploaded_by }}</td>
+      <td class="nowrap">
+        <a href="{{ url_for('document_download', doc_id=d.id) }}" class="btn btn-small">Download</a>
+        <form method="post" action="{{ url_for('document_delete', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document version?');">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button type="submit" class="btn btn-small btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No documents yet.</p>
+{% endif %}
+{% endblock %}

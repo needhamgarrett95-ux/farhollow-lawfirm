@@ -27,6 +27,50 @@
 </div>
 
 <div class="detail-card">
+  <h2>Quick links</h2>
+  <p>
+    <a href="{{ url_for('document_list', case_id=case.id) }}" class="btn btn-small">Documents ({{ doc_count }})</a>
+    <a href="{{ url_for('time_list', case_id=case.id) }}" class="btn btn-small">Time entries ({{ '%.1f'|format(time_totals.h) }}h)</a>
+    <a href="{{ url_for('event_new', case_id=case.id) }}" class="btn btn-small">Add calendar event</a>
+  </p>
+  {% if upcoming %}
+  <h3>Upcoming events</h3>
+  <ul class="plain-list">
+    {% for e in upcoming %}
+    <li><span>{{ e.event_date }} — {{ e.title }} <span class="muted">({{ e.event_type|replace('_',' ') }})</span></span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+
+<div class="detail-card">
+  <h2>Opposing parties</h2>
+  <p class="muted small">Used by the conflict checker. Add everyone on the other side of this matter.</p>
+  {% if parties %}
+  <ul class="plain-list">
+    {% for p in parties %}
+    <li>
+      <span><strong>{{ p.first_name }} {{ p.last_name }}</strong>{% if p.role %} <span class="muted">— {{ p.role }}</span>{% endif %}</span>
+      <form method="post" action="{{ url_for('party_delete', party_id=p.id) }}" class="inline" onsubmit="return confirm('Remove this opposing party?');">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="btn btn-small btn-danger">Remove</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No opposing parties recorded.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('party_add', case_id=case.id) }}" class="child-form">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <input name="first_name" placeholder="First name" required>
+    <input name="last_name" placeholder="Last name" required>
+    <input name="role" placeholder="Role (e.g. respondent, co-parent)">
+    <button type="submit" class="btn btn-small btn-primary">Add party</button>
+  </form>
+</div>
+
+<div class="detail-card">
   <h2>Notes</h2>
   <p class="pre">{{ case.notes or '—' }}</p>
 </div>

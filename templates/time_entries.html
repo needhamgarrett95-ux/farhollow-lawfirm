@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Time entries — {{ case.case_number }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Time — {{ case.case_number }}</h1>
+  <a href="{{ url_for('case_detail', case_id=case.id) }}" class="btn">Back to case</a>
+</div>
+
+<div class="stat-row">
+  <div class="stat"><span class="stat-num">{{ '%.1f'|format(total_hours) }}</span><span class="stat-label">Total hours</span></div>
+  <div class="stat"><span class="stat-num">${{ '%.2f'|format(total_amount) }}</span><span class="stat-label">Total value</span></div>
+</div>
+
+<div class="detail-card">
+  <h2>Log time</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <div class="form-grid">
+      <label>Date<input type="date" name="entry_date" value="{{ today }}" required></label>
+      <label>Hours<input type="number" name="hours" step="0.1" min="0.1" required placeholder="e.g. 1.5"></label>
+      <label>Rate ($/hr)<input type="number" name="rate" step="0.01" min="0" placeholder="e.g. 250.00"></label>
+      <label class="span2">Description<textarea name="description" rows="2" required placeholder="What was done"></textarea></label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Add entry</button>
+    </div>
+  </form>
+</div>
+
+<h2>Entries</h2>
+{% if entries %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Hours</th><th>Rate</th><th>Amount</th><th>Description</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+    <tr>
+      <td class="nowrap">{{ e.entry_date }}</td>
+      <td>{{ '%.1f'|format(e.hours) }}</td>
+      <td>${{ '%.2f'|format(e.rate) }}</td>
+      <td>${{ '%.2f'|format(e.hours * e.rate) }}</td>
+      <td>{{ e.description }}</td>
+      <td>{{ 'Invoiced' if e.invoiced else 'Unbilled' }}</td>
+      <td>
+        {% if not e.invoiced %}
+        <form method="post" action="{{ url_for('time_delete', entry_id=e.id) }}" class="inline" onsubmit="return confirm('Delete this time entry? Financial records are normally retained 7 years.');">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button type="submit" class="btn btn-small btn-danger">Delete</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No time entries yet.</p>
+{% endif %}
+{% endblock %}

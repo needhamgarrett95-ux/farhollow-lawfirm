@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Calendar — Case Management{% endblock %}
+{% block content %}
+<div class="cal-nav">
+  <a href="{{ url_for('calendar_view', y=prev_y, m=prev_m) }}" class="btn">← Prev</a>
+  <h2>{{ month_name }}</h2>
+  <a href="{{ url_for('calendar_view', y=next_y, m=next_m) }}" class="btn">Next →</a>
+</div>
+<div style="margin-bottom:12px">
+  <a href="{{ url_for('event_new') }}" class="btn btn-primary btn-small">Add event</a>
+</div>
+
+<div class="cal-grid">
+  {% for dow in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+  <div class="cal-dow">{{ dow }}</div>
+  {% endfor %}
+  {% for d in cells %}
+  {% set ds = d.isoformat() %}
+  <div class="cal-cell {{ 'other-month' if d.month != month }} {{ 'today' if ds == today }}">
+    <div class="cal-day">{{ d.day }}</div>
+    {% for e in by_date.get(ds, []) %}
+    <div class="cal-event type-{{ e.event_type }} {{ 'done' if e.completed }}" title="{{ e.title }}{% if e.case_number %} ({{ e.case_number }}){% endif %}{% if e.event_time %} at {{ e.event_time }}{% endif %}">
+      {{ e.title|truncate(24) }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+<h2>Manage events</h2>
+{% set all_events = [] %}
+{% for ds, evs in by_date.items()|sort %}
+  {% for e in evs %}{{ all_events.append(e) or '' }}{% endfor %}
+{% endfor %}
+{% if all_events %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Event</th><th>Type</th><th>Case</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for e in all_events %}
+    <tr>
+      <td class="nowrap">{{ e.event_date }}{% if e.event_time %} {{ e.event_time }}{% endif %}</td>
+      <td>{{ e.title }}{% if e.description %}<br><span class="muted small">{{ e.description }}</span>{% endif %}</td>
+      <td>{{ e.event_type|replace('_',' ')|capitalize }}</td>
+      <td>{{ e.case_number or '—' }}</td>
+      <td>{{ 'Done' if e.completed else 'Open' }}</td>
+      <td class="nowrap">
+        <form method="post" action="{{ url_for('event_toggle', event_id=e.id) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button type="submit" class="btn btn-small">{{ 'Reopen' if e.completed else 'Done' }}</button>
+        </form>
+        <form method="post" action="{{ url_for('event_delete', event_id=e.id) }}" class="inline" onsubmit="return confirm('Delete this event?');">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <button type="submit" class="btn btn-small btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No events this month.</p>
+{% endif %}
+{% endblock %}
