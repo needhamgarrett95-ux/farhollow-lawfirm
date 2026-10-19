@@ -797,3 +797,30 @@ You can open the case management system on your phone when connected to the offi
 **"It says I'm offline but my WiFi is on":**
 - Your phone may have connected to a different WiFi network (for example, a guest network). Check Settings → WiFi and make sure you're on the office network.
 - Try closing the browser completely and reopening it.
+
+## 24. Automatic software updates
+
+**How it works:** The server checks for new versions by itself every 6 hours (it asks GitHub, nothing else). When a new version is out, the admin sees a yellow **"Update available"** banner at the top of every page, with a link to what's new.
+
+**To install an update (admin only):**
+1. Click **Review & Install** in the yellow banner (or go to the update page from the banner).
+2. Read what's new. If it looks good, click **Download and Install**.
+3. The server will:
+   - **Make a backup first** — automatically, before anything else.
+   - Download the new installer and check it's genuine (correct size, correct file type).
+   - Install the update and restart itself. You'll be logged out for about a minute.
+4. Log back in. The yellow banner will be gone, and the footer will show the new version number (for example: "Server v1.2.0").
+
+**Your data is never touched by an update.** Clients, cases, documents, billing, and settings live in the `instance` folder, and the installer is built to never delete or modify that folder — not during updates, and not even during uninstall. If an update ever fails halfway, the old version keeps running and nothing is lost.
+
+**"Server vX.X.X" in the footer:** Every page shows the server version at the bottom. Office computers don't need to update anything themselves — they just use the server. If the footer version changes, that means the host was updated. Nothing to do on your end.
+
+**If the automatic update fails:**
+1. Don't panic — your data is safe, and the old version is still running.
+2. The server made a backup right before trying. You can find it on the Dashboard under backups, or in the backup folder.
+3. To update manually: download the latest `LawFirmHostSetup.exe` from the Releases page (https://github.com/needhamgarrett95-ux/farhollow-lawfirm/releases), close the server, and run the installer yourself. It will upgrade in place without touching your data.
+4. If the server won't start after a manual update either: restore from the pre-update backup (see section 13 on backups), then ask Garrett for help.
+
+**If the update check itself isn't working** (it says it can't check, or never finds updates):
+- The host computer needs internet access for the check. If the office computer is offline, the check just waits and tries again later — the software works fine without it.
+- You can always check manually at the Releases page link above.

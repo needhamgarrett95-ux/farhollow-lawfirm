@@ -305,3 +305,24 @@ dd { margin: 0; }
   .stat-num { font-size: 22px; }
   .cal-cell { min-height: 44px; font-size: 10px; }
 }
+
+/* Software update banner + version tag */
+.update-banner {
+  background: #fef3c7;
+  border: 2px solid #d97706;
+  color: #78350f;
+  border-radius: 8px;
+  padding: 12px 18px;
+  margin-bottom: 18px;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.update-banner-links { display: flex; gap: 12px; align-items: center; }
+.update-banner-links a:not(.btn) { color: #92400e; font-weight: 600; }
+.version-tag { color: var(--muted); font-size: 12px; margin-left: 12px; }
+@media (max-width: 700px) {
+  .update-banner { flex-direction: column; align-items: stretch; }
+}

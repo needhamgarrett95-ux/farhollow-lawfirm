@@ -21,6 +21,8 @@ a = Analysis(
     datas=[
         (os.path.join(BASE, "templates"), "templates"),
         (os.path.join(BASE, "static"), "static"),
+        # VERSION is read at startup for the footer tag + update checker.
+        (os.path.join(BASE, "VERSION"), "."),
     ],
     hiddenimports=[],
     hookspath=[],

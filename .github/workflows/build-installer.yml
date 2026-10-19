@@ -56,6 +56,20 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Stamp VERSION file from tag
+        # The app reads VERSION at startup (footer tag + update checker).
+        # On tag builds the tag is authoritative; otherwise keep the
+        # committed VERSION file as-is.
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF -replace '^refs/tags/v', ''
+            $v | Out-File -FilePath VERSION -Encoding utf8 -NoNewline
+            Write-Host "Stamped VERSION: $v"
+          } else {
+            Write-Host "Not a tag build; keeping committed VERSION."
+          }
+
       - name: Build server exe with PyInstaller
         run: pyinstaller installer/lawfirm.spec
 

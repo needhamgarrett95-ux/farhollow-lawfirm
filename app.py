@@ -6,11 +6,15 @@ Run:  python app.py
 Then open: http://localhost:5000
 """
 import os
+import json
 import sqlite3
 import secrets
 import shutil
+import subprocess
+import sys
 import threading
 import time
+import urllib.request
 import uuid
 from datetime import datetime, timedelta, date, timezone
 from functools import wraps
@@ -478,6 +482,222 @@ def start_backup_scheduler():
 
 
 # ----------------------------------------------------------------------------
+# Software updates
+# ----------------------------------------------------------------------------
+def get_app_version():
+    """Read the bundled VERSION file. Falls back to 'dev' when running unpackaged."""
+    try:
+        with open(os.path.join(BASE_DIR, "VERSION"), "r") as f:
+            return f.read().strip()
+    except OSError:
+        return "0.0-dev"
+
+
+APP_VERSION = get_app_version()
+
+GITHUB_REPO = "needhamgarrett95-ux/farhollow-lawfirm"
+UPDATE_CHECK_INTERVAL = 6 * 3600  # every 6 hours
+INSTALLER_ASSET_NAME = "LawFirmHostSetup.exe"
+# Minimum plausible installer size (bytes). Anything smaller failed verification.
+INSTALLER_MIN_SIZE = 5_000_000
+
+UPDATE_INFO = {
+    "available": False,
+    "latest_version": None,
+    "release_url": None,
+    "release_notes": "",
+    "asset_url": None,
+    "asset_size": None,
+    "checked_at": None,
+    "error": None,
+}
+_update_lock = threading.Lock()
+
+
+def parse_version(v):
+    """Extract a comparable numeric tuple from 'v1.2.0', '1.2.0', '1.0-dev+abc'."""
+    import re
+    m = re.search(r"(\d+(?:\.\d+)*)", v or "")
+    if not m:
+        return ()
+    return tuple(int(x) for x in m.group(1).split("."))
+
+
+def _versions_equal_or_newer(current, latest):
+    """True if current >= latest, treating '1.2' and '1.2.0' as equal."""
+    c, l = parse_version(current), parse_version(latest)
+    if not l:
+        return True  # unparseable latest: don't offer a phantom update
+    n = max(len(c), len(l))
+    c += (0,) * (n - len(c))
+    l += (0,) * (n - len(l))
+    return c >= l
+
+
+def check_for_updates():
+    """Query the GitHub Releases API once and refresh UPDATE_INFO. Never raises."""
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            headers={
+                "User-Agent": "FarhollowLawFirm-Updater",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        latest_tag = (data.get("tag_name") or "").strip()
+        asset_url, asset_size = None, None
+        for asset in data.get("assets", []) or []:
+            if asset.get("name") == INSTALLER_ASSET_NAME:
+                asset_url = asset.get("browser_download_url")
+                asset_size = asset.get("size")
+                break
+        with _update_lock:
+            UPDATE_INFO.update({
+                "latest_version": latest_tag.lstrip("v") or None,
+                "release_url": data.get("html_url"),
+                "release_notes": data.get("body") or "",
+                "asset_url": asset_url,
+                "asset_size": asset_size,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "error": None,
+            })
+            cur = parse_version(APP_VERSION)
+            lat = parse_version(latest_tag)
+            UPDATE_INFO["available"] = bool(lat) and not _versions_equal_or_newer(
+                APP_VERSION, latest_tag)
+        if UPDATE_INFO["available"]:
+            print(f"  [update] v{UPDATE_INFO['latest_version']} available "
+                  f"(running v{APP_VERSION})")
+    except Exception as e:  # noqa: BLE001 — offline office? just record it
+        with _update_lock:
+            UPDATE_INFO["error"] = str(e)[:200]
+        print(f"  [update] check failed: {e}")
+
+
+def update_check_scheduler():
+    """Background thread: check for updates on startup, then every 6 hours."""
+    time.sleep(60)  # let the server finish starting first
+    while True:
+        check_for_updates()
+        time.sleep(UPDATE_CHECK_INTERVAL)
+
+
+def start_update_checker():
+    t = threading.Thread(target=update_check_scheduler, daemon=True,
+                         name="update-checker")
+    t.start()
+
+
+def run_self_update(asset_url):
+    """Download the new installer, back up first, then relaunch via a helper.
+
+    Only used when running as a packaged Windows exe. Returns (ok, message).
+    On success the current process exits shortly after returning — the helper
+    batch file waits, installs silently, and restarts the server.
+    instance/ (database, keys, documents, backups) is never touched.
+    """
+    update_dir = os.path.join(INSTANCE_DIR, "update")
+    os.makedirs(update_dir, exist_ok=True)
+    installer_path = os.path.join(update_dir, INSTALLER_ASSET_NAME)
+
+    # 1. Pre-update backup — data safety first. If this fails, stop.
+    ok, msg = do_backup(manual=True)
+    try:
+        audit("update_backup", f"Pre-update backup before self-update: {msg}")
+    except Exception:
+        pass
+    if not ok:
+        return False, (
+            "Update cancelled: the pre-update backup failed, so nothing was "
+            f"changed. ({msg})"
+        )
+
+    # 2. Download the installer with sanity checks.
+    try:
+        req = urllib.request.Request(
+            asset_url, headers={"User-Agent": "FarhollowLawFirm-Updater"})
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            with open(installer_path, "wb") as f:
+                shutil.copyfileobj(resp, f, length=1024 * 256)
+    except Exception as e:  # noqa: BLE001
+        return False, (
+            "Update cancelled: the download failed, so nothing was changed. "
+            f"({e})"
+        )
+    try:
+        size = os.path.getsize(installer_path)
+        with open(installer_path, "rb") as f:
+            magic = f.read(2)
+    except OSError as e:
+        return False, f"Update cancelled: could not verify download ({e})."
+    if size < INSTALLER_MIN_SIZE or magic != b"MZ":
+        try:
+            os.remove(installer_path)
+        except OSError:
+            pass
+        return False, (
+            "Update cancelled: the downloaded file failed verification "
+            "(wrong size or not a Windows installer). Nothing was changed."
+        )
+
+    # 3. Helper batch file: wait for this process to exit, install silently,
+    #    restart the server. The installer upgrades in place (same AppId);
+    #    instance/ is never removed on upgrade.
+    install_dir = os.path.dirname(os.path.abspath(sys.executable))
+    server_exe = os.path.join(install_dir, "LawFirmServer.exe")
+    bat_path = os.path.join(update_dir, "apply-update.bat")
+    log_path = os.path.join(update_dir, "update.log")
+    latest = UPDATE_INFO.get("latest_version") or "new version"
+    with open(bat_path, "w") as f:
+        f.write(
+            "@echo off\r\n"
+            f'echo [%date% %time%] Updating to v{latest} >> "{log_path}"\r\n'
+            "echo [%date% %time%] Waiting for server to stop... "
+            f'>> "{log_path}"\r\n'
+            "timeout /t 12 /nobreak >nul\r\n"
+            'echo [%date% %time%] Running installer... '
+            f'>> "{log_path}"\r\n'
+            f'start "" /wait "{installer_path}" /VERYSILENT /NORESTART '
+            f'/SUPPRESSMSGBOXES >> "{log_path}" 2>&1\r\n'
+            f'echo [%date% %time%] Installer finished (code %errorlevel%) '
+            f'>> "{log_path}"\r\n'
+            'echo [%date% %time%] Restarting server... '
+            f'>> "{log_path}"\r\n'
+            f'start "" "{server_exe}"\r\n'
+            f'del "{installer_path}"\r\n'
+            'del "%~f0"\r\n'
+        )
+    try:
+        audit("update_started",
+              f"Self-update to v{latest} started; installer verified "
+              f"({size} bytes). Server restarting.")
+    except Exception:
+        pass
+
+    # 4. Launch the helper detached, then get out of the installer's way.
+    try:
+        subprocess.Popen(
+            ["cmd", "/c", bat_path],
+            creationflags=(subprocess.DETACHED_PROCESS
+                           | subprocess.CREATE_NEW_PROCESS_GROUP),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, cwd=update_dir,
+        )
+    except Exception as e:  # noqa: BLE001
+        return False, (
+            "Update cancelled: could not start the installer "
+            f"({e}). Nothing was changed."
+        )
+    threading.Timer(2.0, lambda: os._exit(0)).start()
+    return True, (
+        "Update started — the server will shut down and restart with the new "
+        "version in about a minute. Your data is safe (a backup was made first)."
+    )
+
+
+# ----------------------------------------------------------------------------
 # Auth helpers
 # ----------------------------------------------------------------------------
 def login_required(f):
@@ -523,6 +743,35 @@ def check_csrf():
 def ensure_csrf():
     if "csrf_token" not in session:
         new_csrf_token()
+
+
+def is_admin():
+    """The packaged app has a single administrator account (username 'admin')."""
+    return session.get("username") == "admin"
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not is_admin():
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.context_processor
+def inject_update_info():
+    """Make the app version and update status available in every template."""
+    with _update_lock:
+        info = dict(UPDATE_INFO)
+    return {
+        "app_version": APP_VERSION,
+        "is_admin": is_admin(),
+        # The banner is admin-only; the footer version tag is for everyone
+        # (it doubles as the "server updated" notice for office computers).
+        "update_available": bool(info.get("available")) and is_admin(),
+        "update_info": info,
+    }
 
 
 # ----------------------------------------------------------------------------
@@ -1704,6 +1953,57 @@ def backup_history():
 
 
 # ----------------------------------------------------------------------------
+# Software update (admin only)
+# ----------------------------------------------------------------------------
+@app.route("/admin/update")
+@login_required
+@admin_required
+def update_page():
+    with _update_lock:
+        info = dict(UPDATE_INFO)
+    frozen = getattr(sys, "frozen", False)
+    return render_template(
+        "update.html", info=info, frozen=frozen,
+        current_version=APP_VERSION,
+    )
+
+
+@app.route("/admin/update/check", methods=["POST"])
+@login_required
+@admin_required
+def update_check_now():
+    check_csrf()
+    check_for_updates()
+    audit("update_check", "Manual update check requested.")
+    return redirect(url_for("update_page"))
+
+
+@app.route("/admin/update/apply", methods=["POST"])
+@login_required
+@admin_required
+def apply_update():
+    check_csrf()
+    if not getattr(sys, "frozen", False):
+        flash(
+            "This server is running from source code, not the installed "
+            "version — update it with 'git pull' and restart instead.",
+            "warning",
+        )
+        return redirect(url_for("update_page"))
+    with _update_lock:
+        asset_url = UPDATE_INFO.get("asset_url")
+        available = UPDATE_INFO.get("available")
+    if not available or not asset_url:
+        flash("No update is available right now.", "warning")
+        return redirect(url_for("update_page"))
+    ok, msg = run_self_update(asset_url)
+    flash(msg, "success" if ok else "error")
+    # On success the process exits ~2s after the response is sent; the
+    # helper batch file installs the new version and restarts the server.
+    return redirect(url_for("update_page"))
+
+
+# ----------------------------------------------------------------------------
 # Audit log viewer
 # ----------------------------------------------------------------------------
 @app.route("/audit")
@@ -1763,17 +2063,18 @@ if __name__ == "__main__":
     with app.app_context():
         init_db()
     start_backup_scheduler()
+    start_update_checker()
 
     if args.local_only:
         host = "127.0.0.1"
-        print("\n  Farhollow Law Firm - Case Management")
+        print("\n  Farhollow Law Firm - Case Management  v%s" % APP_VERSION)
         print("  LOCAL-ONLY mode: this computer only.")
         print("  Open your browser to:  http://localhost:%d\n" % args.port)
     else:
         host = "0.0.0.0"
         lan_ip = get_lan_ip()
         print("\n" + "=" * 60)
-        print("  Farhollow Law Firm - Case Management")
+        print("  Farhollow Law Firm - Case Management  v%s" % APP_VERSION)
         print("  NETWORK mode: office computers can connect.")
         print("")
         print("  This computer:        http://localhost:%d" % args.port)

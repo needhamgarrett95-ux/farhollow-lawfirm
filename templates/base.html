@@ -36,6 +36,18 @@
 {% endif %}
 
 <main class="container">
+  {% if update_available %}
+  <div class="update-banner">
+    <span><strong>&#8593; Update available: v{{ update_info.latest_version }}</strong>
+      <span class="muted small">(you're on v{{ app_version }})</span></span>
+    <span class="update-banner-links">
+      {% if update_info.release_url %}
+      <a href="{{ update_info.release_url }}" target="_blank" rel="noopener">What's new</a>
+      {% endif %}
+      <a href="{{ url_for('update_page') }}" class="btn btn-primary btn-small">Review &amp; Install</a>
+    </span>
+  </div>
+  {% endif %}
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
@@ -48,6 +60,7 @@
 
 <footer class="footer">
   <span>Confidential — for office use only.</span>
+  <span class="version-tag" title="Server software version">Server v{{ app_version }}</span>
   <span class="lan-warning" title="This software is designed for your office network only. Do not expose port 5000 to the internet.">&#9888; Office network only — do not expose to the internet.</span>
 </footer>
 <script>

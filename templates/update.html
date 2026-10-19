@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Software Update{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Software Update</h1>
+</div>
+
+<p>Current version: <strong>v{{ current_version }}</strong>
+  {% if info.checked_at %}<span class="muted small">— last checked {{ info.checked_at[:16].replace('T', ' ') }} UTC</span>{% endif %}
+</p>
+
+<form method="post" action="{{ url_for('update_check_now') }}" class="inline">
+  <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+  <button class="btn btn-small" type="submit">Check for updates now</button>
+</form>
+
+{% if info.available %}
+  <div class="alert alert-warning" style="margin-top:16px">
+    <strong>Version v{{ info.latest_version }} is available.</strong>
+    {% if info.release_url %}
+    <a href="{{ info.release_url }}" target="_blank" rel="noopener">See what's new</a>
+    {% endif %}
+  </div>
+
+  {% if info.release_notes %}
+  <h2>What's new in v{{ info.latest_version }}</h2>
+  <div class="detail-card pre">{{ info.release_notes }}</div>
+  {% endif %}
+
+  {% if frozen %}
+  <h2>Install the update</h2>
+  <p>Clicking the button below will:</p>
+  <ol>
+    <li>Make a <strong>backup</strong> of your database first (automatic).</li>
+    <li>Download the new installer (verified before use).</li>
+    <li>Install it and <strong>restart the server</strong> — you'll be logged out for about a minute.</li>
+  </ol>
+  <p class="muted">Your clients, cases, documents, and settings are never touched by an update. If anything goes wrong, the backup from step 1 can restore everything.</p>
+  <form method="post" action="{{ url_for('apply_update') }}"
+        onsubmit="return confirm('Install v{{ info.latest_version }} now? A backup will be made first, then the server will restart.');">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <button class="btn btn-primary" type="submit">Download and Install v{{ info.latest_version }}</button>
+  </form>
+  {% else %}
+  <div class="alert alert-warning" style="margin-top:16px">
+    This server is running from source code, not the installed version.
+    To update: <code>git pull</code> and restart the server.
+  </div>
+  {% endif %}
+{% else %}
+  <div class="alert" style="margin-top:16px; background:#dcfce7; border:2px solid #16a34a; color:#166534;">
+    <strong>You're up to date.</strong>
+  </div>
+  {% if info.error %}
+  <p class="muted small">Note: the last automatic check ran into an issue ({{ info.error }}). This usually means the host computer has no internet access right now — the check will try again later.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}

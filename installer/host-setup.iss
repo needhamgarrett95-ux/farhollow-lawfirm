@@ -41,8 +41,19 @@ Name: "firewall"; Description: "Allow office computers to connect (open Windows 
 
 [Files]
 Source: "{#BuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; NOTE: the instance\ folder (database + keys) is created on first run
-; and lives under the install dir. Back it up per MAINTENANCE.md.
+; NOTE: the packaged files never include instance\ (it is git-ignored and
+; created at install/first run). Upgrades only replace files the installer
+; owns, so client data is never touched by an update. See [Dirs] below.
+
+[Dirs]
+; The instance\ folder holds the database, encryption keys, documents, and
+; backups — everything the office cannot afford to lose.
+;   - uninsneveruninstall: uninstalling the program NEVER deletes client data.
+;     The folder is left behind; remove it by hand only if you mean it.
+;   - users-modify: the server must be able to write its database even when
+;     it runs as a normal user (e.g. auto-start from the Startup folder),
+;     not only as Administrator.
+Name: "{app}\instance"; Flags: uninsneveruninstall; Permissions: users-modify
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -71,11 +82,13 @@ begin
   end;
 end;
 
-{ Warn on uninstall that the database will be removed unless backed up. }
+{ Warn on uninstall. Client data is protected: the installer never deletes
+  instance\ (see [Dirs] uninsneveruninstall), so this is just a reminder. }
 function InitializeUninstall(): Boolean;
 begin
   Result := MsgBox('Uninstalling will remove the program files.' + #13#10 +
-    'Your case database is in the install folder under instance\.' + #13#10 +
-    'Make sure you have a backup before continuing. See MAINTENANCE.md.',
-    mbConfirmation, MB_OKCANCEL) = IDOK;
+    'Your case database is kept safe in the install folder under instance\ ' +
+    '(it is never deleted by the installer).' + #13#10 +
+    'If you want it gone too, delete that folder by hand afterwards.',
+    mbInformation, MB_OKCANCEL) = IDOK;
 end;
