@@ -22,7 +22,7 @@
           {% endfor %}
         </select>
       </label>
-      <label>Date<input type="date" name="event_date" required></label>
+      <label>Date<input type="date" name="event_date" required value="{{ today }}"></label>
       <label>Time (optional)<input type="time" name="event_time"></label>
       <label class="span2">Description<textarea name="description" rows="3"></textarea></label>
     </div>

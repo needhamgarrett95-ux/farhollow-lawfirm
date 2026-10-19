@@ -349,3 +349,13 @@ dd { margin: 0; }
   .card-grid { grid-template-columns: 1fr; }
   .template-card p { min-height: 0; }
 }
+
+/* UX overhaul v1.8.0 */
+.empty-state { text-align: center; padding: 48px 24px; background: var(--card); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-top: 16px; }
+.empty-state h2 { margin: 0 0 8px; border: none; padding: 0; }
+.empty-state p { margin: 0 0 20px; }
+.duration-chips { display: flex; gap: 6px; margin-top: 6px; }
+.chip { padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; background: #fff; font-size: 12px; cursor: pointer; color: var(--navy); }
+.chip:hover { background: var(--navy); color: #fff; border-color: var(--navy); }
+.status-select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-weight: 600; background: #fff; cursor: pointer; }
+.filter-input { margin-bottom: 6px; }

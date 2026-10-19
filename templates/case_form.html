@@ -6,21 +6,22 @@
   <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
   <div class="form-grid">
     <label>Case number *
-      <input type="text" name="case_number" value="{{ case.case_number if case else '' }}" {% if case %}disabled{% endif %} required>
-      {% if case %}<span class="muted small">Case number cannot be changed.</span>{% endif %}
+      <input type="text" name="case_number" value="{{ case.case_number if case else suggested_number }}" {% if case %}disabled{% endif %} required>
+      {% if case %}<span class="muted small">Case number cannot be changed.</span>
+      {% else %}<span class="muted small">Suggested next number — change it if you use your own system.</span>{% endif %}
     </label>
     <label>Client
       <select name="client_id">
         <option value="">— No client —</option>
         {% for cl in clients %}
-        <option value="{{ cl.id }}" {% if case and case.client_id == cl.id %}selected{% endif %}>
+        <option value="{{ cl.id }}" {% if (case and case.client_id == cl.id) or (not case and preset_client|string == cl.id|string) %}selected{% endif %}>
           {{ cl.last_name }}, {{ cl.first_name }}
         </option>
         {% endfor %}
       </select>
     </label>
-    <label class="span2">Title *
-      <input type="text" name="title" value="{{ case.title if case else '' }}" required>
+    <label class="span2">Title
+      <input type="text" name="title" value="{{ case.title if case else '' }}" placeholder="Leave blank to auto-fill from client + type">
     </label>
     <label>Case type
       <select name="case_type">
@@ -37,7 +38,7 @@
       </select>
     </label>
     <label>Date opened
-      <input type="date" name="date_opened" value="{{ case.date_opened if case else '' }}">
+      <input type="date" name="date_opened" value="{{ case.date_opened if case else today }}">
     </label>
     <label>Date closed
       <input type="date" name="date_closed" value="{{ case.date_closed if case else '' }}">

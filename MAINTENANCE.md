@@ -987,3 +987,16 @@ Staff accounts can use the calculator but cannot add deadlines to the calendar �
 - These calculations use **standard** Washington Superior Court rules. Your judge's scheduling order or a case-specific order can change them. **Always double-check before relying on a calculated deadline.**
 - If a deadline looks wrong, don't use it — verify it by hand or ask the attorney. This tool does not replace legal judgment.
 - Every deadline added to the calendar is recorded in the audit log.
+
+## 30. Speed tips (v1.8.0 ease-of-use update)
+
+The software now fills in a lot of things for you so you type less:
+
+- **New case:** the case number is suggested automatically (like 2026-001, 2026-002). If you leave the title blank, it fills in "Smith — Divorce" from the client name and case type. The open date defaults to today.
+- **New case from a client page:** click "+ New case for this client" on any client page and the client is already selected.
+- **Case status:** change it right on the case page with the dropdown — no need to open the edit form.
+- **Calendar events:** the date defaults to today.
+- **Time entries:** tap 0.5 / 1.0 / 1.5 / 2.0 instead of typing hours. Your hourly rate is remembered from last time.
+- **Invoices:** issue date defaults to today, due date to 30 days out. Type in the box above the client list to filter it.
+- **Trust transactions:** the date defaults to today.
+- **Client search:** start typing a name and matching clients appear as suggestions.

@@ -1640,6 +1640,24 @@ def case_new():
         "SELECT id, first_name, last_name FROM clients"
         " ORDER BY last_name, first_name"
     ).fetchall()
+    # Quick-add: pre-select client when coming from a client page (?client_id=N)
+    preset_client = request.args.get("client_id", "").strip()
+    # Suggest the next case number for the current year (YYYY-NNN)
+    year = date.today().year
+    last_num = db.execute(
+        "SELECT case_number FROM cases WHERE case_number LIKE ?"
+        " ORDER BY case_number DESC LIMIT 1",
+        (f"{year}-%",),
+    ).fetchone()
+    if last_num:
+        try:
+            seq = int(last_num["case_number"].split("-", 1)[1]) + 1
+        except (ValueError, IndexError):
+            seq = 1
+    else:
+        seq = 1
+    suggested_number = f"{year}-{seq:03d}"
+    today = date.today().isoformat()
     if request.method == "POST":
         check_csrf()
         now = datetime.now(timezone.utc).isoformat()
@@ -1649,6 +1667,8 @@ def case_new():
             return render_template(
                 "case_form.html", case=None, clients=clients,
                 case_types=CASE_TYPES, statuses=CASE_STATUSES,
+                preset_client=preset_client,
+                suggested_number=suggested_number, today=today,
             )
         exists = db.execute(
             "SELECT id FROM cases WHERE case_number = ?", (case_number,)
@@ -1658,19 +1678,34 @@ def case_new():
             return render_template(
                 "case_form.html", case=None, clients=clients,
                 case_types=CASE_TYPES, statuses=CASE_STATUSES,
+                preset_client=preset_client,
+                suggested_number=suggested_number, today=today,
             )
         client_id = request.form.get("client_id", "").strip() or None
+        case_type = request.form.get("case_type", "other")
+        # Auto-generate a title if left blank: "Smith — Divorce"
+        title = request.form.get("title", "").strip()
+        if not title:
+            if client_id:
+                cl = db.execute(
+                    "SELECT last_name FROM clients WHERE id = ?",
+                    (client_id,),
+                ).fetchone()
+                cname = cl["last_name"] if cl else "New matter"
+            else:
+                cname = "New matter"
+            title = f"{cname} — {case_type.capitalize()}"
         cur = db.execute(
             "INSERT INTO cases (case_number, title, client_id, case_type, status,"
             " date_opened, notes, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 case_number,
-                request.form.get("title", "").strip(),
+                title,
                 client_id,
-                request.form.get("case_type", "other"),
+                case_type,
                 request.form.get("status", "active"),
-                request.form.get("date_opened", "").strip(),
+                request.form.get("date_opened", "").strip() or today,
                 request.form.get("notes", "").strip(),
                 now,
                 now,
@@ -1684,6 +1719,8 @@ def case_new():
     return render_template(
         "case_form.html", case=None, clients=clients,
         case_types=CASE_TYPES, statuses=CASE_STATUSES,
+        preset_client=preset_client, suggested_number=suggested_number,
+        today=today,
     )
 
 
@@ -1761,6 +1798,32 @@ def case_edit(case_id):
         "case_form.html", case=case, clients=clients,
         case_types=CASE_TYPES, statuses=CASE_STATUSES,
     )
+
+
+@app.route("/cases/<int:case_id>/status", methods=["POST"])
+@role_required("admin", "attorney")
+def case_set_status(case_id):
+    """Inline status change from the case detail page (no full edit form)."""
+    check_csrf()
+    db = get_db()
+    case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+    if not case:
+        abort(404)
+    new_status = request.form.get("status", "").strip()
+    if new_status not in CASE_STATUSES:
+        flash("Invalid status.", "error")
+        return redirect(url_for("case_detail", case_id=case_id))
+    if new_status != case["status"]:
+        db.execute(
+            "UPDATE cases SET status = ?, updated_at = ? WHERE id = ?",
+            (new_status, datetime.now(timezone.utc).isoformat(), case_id),
+        )
+        db.commit()
+        audit("case_status",
+              f"Changed case {case['case_number']} status"
+              f" {case['status']} -> {new_status}")
+        flash(f"Status changed to {new_status}.", "success")
+    return redirect(url_for("case_detail", case_id=case_id))
 
 
 @app.route("/cases/<int:case_id>/delete", methods=["POST"])
@@ -2017,6 +2080,7 @@ def event_new():
             return render_template(
                 "event_form.html", cases=cases, event=None,
                 event_types=EVENT_TYPES, preset_case=preset_case,
+                today=date.today().isoformat(),
             )
         event_type = request.form.get("event_type", "reminder")
         if event_type not in EVENT_TYPES:
@@ -2040,6 +2104,7 @@ def event_new():
     return render_template(
         "event_form.html", cases=cases, event=None,
         event_types=EVENT_TYPES, preset_case=preset_case,
+        today=date.today().isoformat(),
     )
 
 
@@ -2250,10 +2315,17 @@ def time_list(case_id):
     total_hours = sum(e["hours"] for e in entries)
     total_amount = sum(e["hours"] * e["rate"] for e in entries)
     uninvoiced = [e for e in entries if not e["invoiced"]]
+    # Pre-fill the rate with this user's most recent rate (less typing)
+    last_rate = db.execute(
+        "SELECT rate FROM time_entries WHERE user_id = ? AND rate > 0"
+        " ORDER BY id DESC LIMIT 1",
+        (session.get("user_id"),),
+    ).fetchone()
     return render_template(
         "time_entries.html", case=case, entries=entries,
         total_hours=total_hours, total_amount=total_amount,
         uninvoiced=uninvoiced, today=date.today().isoformat(),
+        last_rate=(last_rate["rate"] if last_rate else ""),
     )
 
 
@@ -2398,9 +2470,12 @@ def invoice_new():
         audit("invoice_create", f"Created invoice {inv_no} (id={invoice_id})")
         flash(f"Invoice {inv_no} created.", "success")
         return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+    today = date.today()
     return render_template(
         "invoice_form.html", clients=clients, preset_client=preset_client,
         uninvoiced=uninvoiced,
+        default_issue=today.isoformat(),
+        default_due=(today + timedelta(days=30)).isoformat(),
     )
 
 
@@ -2931,6 +3006,7 @@ def trust_transaction_new():
                 "trust_transaction_form.html", accounts=accounts, clients=clients,
                 cases=cases, preset_account=preset_account or account_id,
                 preset_client=preset_client or client_id, reverse_of=reverse_of,
+                today=date.today().isoformat(),
             )
 
         # --- All validations passed: write the immutable transaction(s) ---
@@ -2987,6 +3063,7 @@ def trust_transaction_new():
         "trust_transaction_form.html", accounts=accounts, clients=clients,
         cases=cases, preset_account=preset_account,
         preset_client=preset_client, reverse_of=reverse_of,
+        today=date.today().isoformat(),
     )
 
 

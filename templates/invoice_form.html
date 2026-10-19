@@ -7,6 +7,8 @@
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
     <div class="form-grid">
       <label>Client
+        <input type="text" id="client-filter" placeholder="Type to filter…" class="filter-input"
+               oninput="filterClients()">
         <select name="client_id" id="client-select" required>
           <option value="">— Choose —</option>
           {% for c in clients %}
@@ -14,8 +16,8 @@
           {% endfor %}
         </select>
       </label>
-      <label>Issue date<input type="date" name="issue_date"></label>
-      <label>Due date<input type="date" name="due_date"></label>
+      <label>Issue date<input type="date" name="issue_date" value="{{ default_issue }}"></label>
+      <label>Due date<input type="date" name="due_date" value="{{ default_due }}"></label>
       <label class="span2">Notes<textarea name="notes" rows="2"></textarea></label>
     </div>
 
@@ -59,10 +61,19 @@
 function addItem() {
   const div = document.createElement('div');
   div.className = 'upload-row';
-  div.innerHTML = '<label>Date<input name="item_date" type="date"></label>' +
+  div.innerHTML = '<label>Date<input name="item_date" type="date" value="' + new Date().toISOString().slice(0,10) + '"></label>' +
     '<label>Description<input name="item_desc"></label>' +
     '<label>Amount ($)<input name="item_amount" type="number" step="0.01" min="0"></label>';
   document.getElementById('manual-items').appendChild(div);
+}
+// Filter the client dropdown as you type
+function filterClients() {
+  const q = document.getElementById('client-filter').value.toLowerCase();
+  const sel = document.getElementById('client-select');
+  for (const opt of sel.options) {
+    if (!opt.value) { opt.style.display = ''; continue; }
+    opt.style.display = opt.text.toLowerCase().includes(q) ? '' : 'none';
+  }
 }
 // When the client changes, reload the page with ?client_id= so the
 // uninvoiced time entries for that client appear. Does not submit the form.

@@ -17,8 +17,16 @@
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
     <div class="form-grid">
       <label>Date<input type="date" name="entry_date" value="{{ today }}" required></label>
-      <label>Hours<input type="number" name="hours" step="0.1" min="0.1" required placeholder="e.g. 1.5"></label>
-      <label>Rate ($/hr)<input type="number" name="rate" step="0.01" min="0" placeholder="e.g. 250.00"></label>
+      <label>Hours
+        <input type="number" name="hours" id="hours-input" step="0.1" min="0.1" required placeholder="e.g. 1.5">
+        <span class="duration-chips">
+          <button type="button" class="chip" onclick="setHours(0.5)">0.5</button>
+          <button type="button" class="chip" onclick="setHours(1)">1.0</button>
+          <button type="button" class="chip" onclick="setHours(1.5)">1.5</button>
+          <button type="button" class="chip" onclick="setHours(2)">2.0</button>
+        </span>
+      </label>
+      <label>Rate ($/hr)<input type="number" name="rate" step="0.01" min="0" placeholder="e.g. 250.00" value="{{ last_rate }}"></label>
       <label class="span2">Description<textarea name="description" rows="2" required placeholder="What was done"></textarea></label>
     </div>
     <div class="form-actions">
@@ -26,6 +34,11 @@
     </div>
   </form>
 </div>
+<script>
+function setHours(h) {
+  document.getElementById('hours-input').value = h;
+}
+</script>
 
 <h2>Entries</h2>
 {% if entries %}

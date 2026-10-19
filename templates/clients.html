@@ -7,7 +7,12 @@
 </div>
 
 <form method="get" action="{{ url_for('client_list') }}" class="search-row">
-  <input type="text" name="q" placeholder="Search by name…" value="{{ q }}">
+  <input type="text" name="q" placeholder="Search by name…" value="{{ q }}" list="client-names" autocomplete="off">
+  <datalist id="client-names">
+    {% for c in clients %}
+    <option value="{{ c.last_name }}, {{ c.first_name }}">
+    {% endfor %}
+  </datalist>
   <button type="submit" class="btn">Search</button>
   {% if q %}<a href="{{ url_for('client_list') }}" class="btn btn-link">Clear</a>{% endif %}
 </form>
@@ -27,6 +32,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No clients found.</p>
+<div class="empty-state">
+  <h2>No clients yet</h2>
+  <p class="muted">Add your first client to get started. You only need a name — the rest can come later.</p>
+  <a href="{{ url_for('client_new') }}" class="btn btn-primary">+ Add your first client</a>
+</div>
 {% endif %}
 {% endblock %}

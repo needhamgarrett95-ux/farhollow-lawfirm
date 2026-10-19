@@ -56,6 +56,10 @@
 </div>
 
 <h2>Cases</h2>
+<div class="page-head" style="margin-bottom: 8px;">
+  <span></span>
+  <a href="{{ url_for('case_new', client_id=client.id) }}" class="btn btn-small btn-primary">+ New case for this client</a>
+</div>
 {% if cases %}
 <table class="table">
   <thead><tr><th>Case #</th><th>Title</th><th>Type</th><th>Status</th><th></th></tr></thead>

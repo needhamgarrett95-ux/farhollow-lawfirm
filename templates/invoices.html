@@ -24,6 +24,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No invoices yet.</p>
+<div class="empty-state">
+  <h2>No invoices yet</h2>
+  <p class="muted">Create your first invoice from a client's unbilled time.</p>
+  <a href="{{ url_for('invoice_new') }}" class="btn btn-primary">+ Create your first invoice</a>
+</div>
 {% endif %}
 {% endblock %}

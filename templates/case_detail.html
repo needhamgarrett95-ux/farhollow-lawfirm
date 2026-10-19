@@ -11,7 +11,20 @@
     <h2>Details</h2>
     <dl>
       <dt>Type</dt><dd>{{ case.case_type|capitalize }}</dd>
-      <dt>Status</dt><dd><span class="badge badge-{{ case.status }}">{{ case.status }}</span></dd>
+      <dt>Status</dt><dd>
+        {% if user_role in ('admin', 'attorney') %}
+        <form method="post" action="{{ url_for('case_set_status', case_id=case.id) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+          <select name="status" onchange="this.form.submit()" class="status-select">
+            <option value="active" {% if case.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="pending" {% if case.status == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="closed" {% if case.status == 'closed' %}selected{% endif %}>Closed</option>
+          </select>
+        </form>
+        {% else %}
+        <span class="badge badge-{{ case.status }}">{{ case.status }}</span>
+        {% endif %}
+      </dd>
       <dt>Date opened</dt><dd>{{ case.date_opened or '—' }}</dd>
       <dt>Date closed</dt><dd>{{ case.date_closed or '—' }}</dd>
     </dl>

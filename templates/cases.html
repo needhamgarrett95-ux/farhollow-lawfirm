@@ -30,6 +30,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No cases here.</p>
+<div class="empty-state">
+  <h2>No {{ status }} cases</h2>
+  <p class="muted">Cases you open will show up here.</p>
+  <a href="{{ url_for('case_new') }}" class="btn btn-primary">+ Open your first case</a>
+</div>
 {% endif %}
 {% endblock %}
