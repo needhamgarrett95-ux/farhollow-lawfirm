@@ -136,6 +136,20 @@ def _court_caption(story, s, county, case_number, petitioner, respondent,
     story.append(Spacer(1, 10))
 
 
+def _ai_disclosure_footnote(story, s):
+    """Clallam County Superior Court requires AI-use disclosure in filings
+    (effective Sept 2025). Appended only when the attorney checks the
+    AI-assistance box at generation time. The attorney should verify the
+    exact required language against the current local rule."""
+    story.append(Paragraph(
+        "<b>AI ASSISTANCE DISCLOSURE:</b> This document was prepared with the "
+        "assistance of artificial intelligence tools. Undersigned counsel has "
+        "reviewed this filing for accuracy and compliance with all applicable "
+        "court rules.",
+        s["muted"],
+    ))
+
+
 def _esc(text):
     """Escape minimal HTML for reportlab Paragraph."""
     return (str(text).replace("&", "&amp;").replace("<", "&lt;")
@@ -284,6 +298,8 @@ def build_petition_dissolution(data, logo_path=None):
                  "grant such other relief as is just and equitable.")
     _numbered_paras(story, s, [p for p in paras if p.strip()])
     _signature_block(story, s)
+    if data.get("ai_disclosure"):
+        _ai_disclosure_footnote(story, s)
     doc.build(story)
     return buf.getvalue()
 
@@ -321,6 +337,8 @@ def build_parenting_plan(data, logo_path=None):
         "The parents agree to act in the children's best interests and to "
         "communicate respectfully regarding the children.", s["body"]))
     _signature_block(story, s)
+    if data.get("ai_disclosure"):
+        _ai_disclosure_footnote(story, s)
     doc.build(story)
     return buf.getvalue()
 
@@ -400,6 +418,8 @@ def build_support_worksheet(data, logo_path=None):
             story.append(p)
     story.append(Spacer(1, 8))
     story.append(Paragraph(SUPPORT_DISCLAIMER, s["warn"]))
+    if data.get("ai_disclosure"):
+        _ai_disclosure_footnote(story, s)
     doc.build(story)
     return buf.getvalue()
 
@@ -425,6 +445,8 @@ def build_declaration(data, logo_path=None):
                            s["body_l"]))
     story.append(Paragraph(f"<b>{_esc(data.get('declarant') or '')}</b>",
                            s["sig"]))
+    if data.get("ai_disclosure"):
+        _ai_disclosure_footnote(story, s)
     doc.build(story)
     return buf.getvalue()
 
@@ -451,6 +473,8 @@ def build_cover_letter(data, logo_path=None):
     story.append(Paragraph(_esc(data.get("closing") or "Sincerely,"), s["body_l"]))
     story.append(Paragraph(f"<b>{_esc(data.get('signer') or 'Derek G. Medina')}</b>",
                            s["sig"]))
+    if data.get("ai_disclosure"):
+        _ai_disclosure_footnote(story, s)
     doc.build(story)
     return buf.getvalue()
 

@@ -34,6 +34,8 @@ from deadlines import (
     TRIGGER_CHOICES,
     DISCLAIMER as DEADLINE_DISCLAIMER,
     calculate_deadlines,
+    clallam_warnings,
+    CLALLAM_CALENDARS_URL,
 )
 
 # ----------------------------------------------------------------------------
@@ -448,13 +450,20 @@ def _migrate_field_encryption(db):
 def audit(action, details=""):
     """Record an action in the audit log. Never put DOBs/SSNs in details."""
     db = get_db()
+    try:
+        user_id = session.get("user_id")
+        username = session.get("username")
+    except RuntimeError:
+        # Background threads (backup scheduler, schedule monitor) have no
+        # request context — log as the system instead of crashing.
+        user_id, username = None, "system"
     db.execute(
         "INSERT INTO audit_log (timestamp, user_id, username, action, details)"
         " VALUES (?, ?, ?, ?, ?)",
         (
             datetime.now(timezone.utc).isoformat(),
-            session.get("user_id"),
-            session.get("username"),
+            user_id,
+            username,
             action,
             details,
         ),
@@ -767,6 +776,138 @@ def start_update_checker():
     t = threading.Thread(target=update_check_scheduler, daemon=True,
                          name="update-checker")
     t.start()
+
+
+# ----------------------------------------------------------------------------
+# Clallam County court schedule monitor
+#
+# Weekly poll of the Friday Judge Bench Assignments spreadsheet published by
+# Clallam County Superior Court. The county marks changes with "*" and an
+# "Updated MM/DD/YY" header. We fetch the document, compare a content hash
+# (plus the parsed "Updated" date when present) against the stored baseline,
+# and raise a dashboard alert + audit entry when it changes. We never modify
+# deadlines automatically — the attorney reviews and decides.
+# ----------------------------------------------------------------------------
+CLALLAM_SCHEDULE_CHECK_INTERVAL = 7 * 24 * 3600  # weekly
+CLALLAM_MAX_FETCH_FAILURES = 4  # then warn the schedule is unreachable
+
+
+def _meta_get(key, default=""):
+    db = get_db()
+    row = db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def _meta_set(key, value):
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+        (key, str(value)),
+    )
+    db.commit()
+
+
+def _fetch_clallam_schedule():
+    """Return (updated_str, content_hash) or raise."""
+    import hashlib
+    import re
+    import urllib.request
+
+    from deadlines import CLALLAM_JUDGE_CALENDAR_URL
+
+    req = urllib.request.Request(
+        CLALLAM_JUDGE_CALENDAR_URL,
+        headers={"User-Agent": "LawFirmCaseManagement/schedule-monitor"},
+    )
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        raw = resp.read()
+    content_hash = hashlib.sha256(raw).hexdigest()
+    # The document header shows "Updated MM/DD/YY". The file is an xlsx served
+    # through DocumentCenter; when it comes back as HTML the date is parseable.
+    # If it's binary, we fall back to hash-only comparison.
+    updated_str = ""
+    try:
+        text = raw.decode("utf-8", errors="ignore")
+        m = re.search(r"Updated\s+(\d{1,2}/\d{1,2}/\d{2,4})", text, re.IGNORECASE)
+        if m:
+            updated_str = m.group(1)
+    except Exception:
+        pass
+    return updated_str, content_hash
+
+
+def clallam_schedule_check():
+    """One poll of the Clallam Friday judge calendar. Returns a status string."""
+    try:
+        updated_str, content_hash = _fetch_clallam_schedule()
+    except Exception as e:  # noqa: BLE001 — network failure is expected sometimes
+        fails = int(_meta_get("clallam_cal_failures", "0") or 0) + 1
+        _meta_set("clallam_cal_failures", fails)
+        _meta_set("clallam_cal_last_check",
+                  datetime.now(timezone.utc).isoformat())
+        if fails >= CLALLAM_MAX_FETCH_FAILURES and not _meta_get("clallam_cal_alert"):
+            msg = (
+                "Could not reach the Clallam County Friday judge calendar "
+                f"({fails} failed checks). Verify the schedule manually at "
+                f"{CLALLAM_CALENDARS_URL}."
+            )
+            _meta_set("clallam_cal_alert", "1")
+            _meta_set("clallam_cal_alert_msg", msg)
+            audit("clallam_schedule_unreachable", msg)
+            return "unreachable-alert"
+        return f"fetch-failed ({e})"
+    _meta_set("clallam_cal_failures", "0")
+    _meta_set("clallam_cal_last_check", datetime.now(timezone.utc).isoformat())
+    prev_hash = _meta_get("clallam_cal_hash")
+    prev_updated = _meta_get("clallam_cal_updated")
+    if not prev_hash:
+        # First successful check: establish the baseline, no alert.
+        _meta_set("clallam_cal_hash", content_hash)
+        _meta_set("clallam_cal_updated", updated_str)
+        return "baseline-established"
+    changed = (content_hash != prev_hash) or (
+        updated_str and prev_updated and updated_str != prev_updated
+    )
+    if changed:
+        msg = (
+            "The Clallam County Friday judge calendar may have changed "
+            f"(was '{prev_updated or 'unknown'}', now '{updated_str or 'unknown'}'). "
+            f"Review judge assignments at {CLALLAM_CALENDARS_URL} before your "
+            "next Friday hearing."
+        )
+        _meta_set("clallam_cal_hash", content_hash)
+        _meta_set("clallam_cal_updated", updated_str)
+        _meta_set("clallam_cal_alert", "1")
+        _meta_set("clallam_cal_alert_msg", msg)
+        audit("clallam_schedule_change", msg)
+        return "changed-alert"
+    return "no-change"
+
+
+def clallam_schedule_monitor():
+    """Background thread: weekly poll of the Clallam court schedule."""
+    time.sleep(120)  # let the server finish starting first
+    while True:
+        try:
+            with app.app_context():
+                status = clallam_schedule_check()
+                print(f"  [clallam-schedule] {status}")
+        except Exception as e:  # noqa: BLE001 — monitor must never die loudly
+            print(f"  [clallam-schedule] monitor error: {e}")
+        time.sleep(CLALLAM_SCHEDULE_CHECK_INTERVAL)
+
+
+def start_clallam_schedule_monitor():
+    t = threading.Thread(target=clallam_schedule_monitor, daemon=True,
+                         name="clallam-schedule-monitor")
+    t.start()
+
+
+def get_clallam_schedule_alert():
+    """Return the active schedule-change alert message, or '' if none."""
+    if _meta_get("clallam_cal_alert") == "1":
+        return _meta_get("clallam_cal_alert_msg")
+    return ""
 
 
 def run_self_update(asset_url):
@@ -1347,10 +1488,13 @@ def dashboard():
         "SELECT * FROM backups ORDER BY id DESC LIMIT 1"
     ).fetchone()
     urgent_cutoff = (date.today() + timedelta(days=7)).isoformat()
+    schedule_alert = get_clallam_schedule_alert()
     return render_template(
         "dashboard.html", stats=stats, active_cases=active_cases,
         recent=recent, deadlines=deadlines, overdue=overdue,
         last_backup=last_backup, today=today, urgent_cutoff=urgent_cutoff,
+        schedule_alert=schedule_alert,
+        calendars_url=CLALLAM_CALENDARS_URL,
     )
 
 
@@ -2178,6 +2322,11 @@ def deadline_calculator():
             rule_info = DEADLINE_RULES[trigger_type]
             results = calculate_deadlines(trigger_type, trigger_date)
     can_push = session.get("role") in ("admin", "attorney")
+    cal_warnings = (
+        clallam_warnings(trigger_type, trigger_date)
+        if (not error and trigger_date)
+        else []
+    )
     return render_template(
         "deadlines.html",
         trigger_choices=TRIGGER_CHOICES,
@@ -2192,6 +2341,7 @@ def deadline_calculator():
         can_push=can_push,
         disclaimer=DEADLINE_DISCLAIMER,
         today=date.today(),
+        clallam_warnings=cal_warnings,
     )
 
 
@@ -2266,6 +2416,19 @@ def deadline_push():
     )
     flash(f"Added {added} deadline(s) to the case calendar.", "success")
     return redirect(url_for("calendar_view"))
+
+
+@app.route("/clallam/schedule/dismiss", methods=["POST"])
+@role_required("admin", "attorney")
+def clallam_schedule_dismiss():
+    """Dismiss the Clallam schedule-change alert after reviewing."""
+    check_csrf()
+    _meta_set("clallam_cal_alert", "")
+    _meta_set("clallam_cal_alert_msg", "")
+    audit("clallam_schedule_acknowledged",
+          "Attorney reviewed and dismissed the court schedule change alert.")
+    flash("Schedule alert dismissed.", "success")
+    return redirect(url_for("dashboard"))
 
 
 # ----------------------------------------------------------------------------
@@ -2789,8 +2952,11 @@ def template_generate(key):
     case_id = request.form.get("case_id", type=int)
     client, children, case = _template_party_context(client_id, case_id)
     values = _gather_template_values(tmpl, request.form, client, children, case)
+    # Clallam County AI disclosure (effective Sept 2025)
+    ai_assisted = request.form.get("ai_assisted") == "on"
     # Enrich data for the PDF builders
     data = dict(values)
+    data["ai_disclosure"] = ai_assisted
     data["children"] = [{"name": c.get("name", ""),
                          "date_of_birth": c.get("date_of_birth", "")}
                         for c in children]
@@ -2805,14 +2971,17 @@ def template_generate(key):
     if case:
         version = _save_generated_doc(
             case["id"], filename, pdf_bytes, tmpl["doc_category"],
-            f"Generated from template: {tmpl['name']}")
+            f"Generated from template: {tmpl['name']}"
+            + (" (AI-assisted)" if ai_assisted else ""))
         audit("template_generate",
               f"Generated {tmpl['name']} (v{version}) for case"
-              f" {case['case_number']} (id={case['id']})")
+              f" {case['case_number']} (id={case['id']})"
+              + (" [AI-assisted]" if ai_assisted else ""))
     else:
         who = f"{client['first_name']} {client['last_name']}" if client else "no client"
         audit("template_generate",
-              f"Generated {tmpl['name']} for {who} (not filed to a case)")
+              f"Generated {tmpl['name']} for {who} (not filed to a case)"
+              + (" [AI-assisted]" if ai_assisted else ""))
     return send_file(
         io.BytesIO(pdf_bytes),
         mimetype="application/pdf",
@@ -3358,6 +3527,7 @@ if __name__ == "__main__":
         init_db()
     start_backup_scheduler()
     start_update_checker()
+    start_clallam_schedule_monitor()
 
     if args.local_only:
         host = "127.0.0.1"

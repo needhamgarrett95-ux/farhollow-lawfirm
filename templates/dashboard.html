@@ -3,6 +3,21 @@
 {% block content %}
 <h1>Dashboard</h1>
 
+{% if schedule_alert %}
+<div class="alert alert-warning">
+  <strong>⚠ Clallam County court schedule:</strong> {{ schedule_alert }}
+  <div style="margin-top:8px">
+    <a href="{{ calendars_url }}" target="_blank" rel="noopener" class="btn btn-small">Review court calendars</a>
+    {% if user_role in ('admin', 'attorney') %}
+    <form method="post" action="{{ url_for('clallam_schedule_dismiss') }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <button type="submit" class="btn btn-small">Dismiss</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {% if overdue %}
 <div class="alert alert-danger">
   <strong>⚠ {{ overdue|length }} OVERDUE item{{ 's' if overdue|length != 1 }}:</strong>

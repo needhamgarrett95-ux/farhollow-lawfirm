@@ -45,6 +45,11 @@
     <input type="hidden" name="{{ f.name }}" value="{{ values.get(f.name, '') }}">
     {% endif %}
   {% endfor %}
+  <label class="checkbox-row" style="margin-top:12px; align-items:flex-start">
+    <input type="checkbox" name="ai_assisted" value="on">
+    <span><b>This document was prepared with AI assistance.</b>
+    <span class="muted small">Clallam County Superior Court requires AI-use disclosure in filings (effective Sept 2025). Checking this adds a disclosure footnote to the PDF.</span></span>
+  </label>
   <div class="form-actions">
     <button type="submit" class="btn btn-primary">Generate PDF</button>
     <a href="{{ url_for('template_fill', key=template.key) }}{% if client %}?client_id={{ client.id }}{% endif %}{% if case %}{{ '&' if client else '?' }}case_id={{ case.id }}{% endif %}" class="btn btn-link">Back to edit</a>

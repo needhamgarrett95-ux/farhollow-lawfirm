@@ -1000,3 +1000,18 @@ The software now fills in a lot of things for you so you type less:
 - **Invoices:** issue date defaults to today, due date to 30 days out. Type in the box above the client list to filter it.
 - **Trust transactions:** the date defaults to today.
 - **Client search:** start typing a name and matching clients appear as suggestions.
+
+## 31. Clallam County court integration (v1.9.0)
+
+The deadline calculator now knows Clallam County Superior Court's local calendar:
+
+- **New deadline types** in the calculator dropdown:
+  - *Clallam Co. Motion Hearing (Friday 9:00 AM)* — family law motions are only heard Fridays at 9 AM. If you enter a different day, the calculator warns you.
+  - *Clallam Co. Child Support (1st/3rd Tue 9:00 AM)* — child support is only heard the 1st and 3rd Tuesdays. Other dates get a warning.
+  - *Clallam Co. Ex Parte (daily 1:00 PM)* — includes the 11:00 AM same-day filing cutoff. Warns if you pick a weekend.
+  - *LCR 2 — Response to Motion for Revision* — 10 days after service, per Clallam County LCR 2(c).
+- **When you push a Clallam motion's deadlines to the calendar**, two extra reminders are added automatically:
+  - *Bench copies due (by NOON)* the day before the hearing — Clallam requires paper bench copies by noon.
+  - *Telephone confirmation of motion calendar* the day before — the court requires a confirmation call.
+- **Court schedule monitor:** once a week, the software quietly checks the county's published Friday judge calendar. If it changed (different judge assigned, holiday added), you'll see a yellow alert at the top of the dashboard: "Clallam County court schedule may have changed — review here." Click through to the county calendars page, then Dismiss the alert. Nothing in your deadlines changes automatically — you decide what to do.
+- **AI disclosure on documents:** Clallam County requires AI-use disclosure in filings (effective Sept 2025). When generating a document from a template, check the box "This document was prepared with AI assistance" and a disclosure footnote is added to the PDF. When in doubt, check with the attorney — the exact required wording should be verified against the current local rule.

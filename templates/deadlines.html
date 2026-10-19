@@ -44,6 +44,12 @@
   <h2>{{ rule_info.label }} — {{ trigger_date.strftime('%A, %B %d, %Y') }}</h2>
   <p class="muted">{{ rule_info.description }}</p>
 
+  {% if clallam_warnings %}
+    {% for w in clallam_warnings %}
+    <div class="alert alert-warning"><strong>⚠ Clallam County:</strong> {{ w }}</div>
+    {% endfor %}
+  {% endif %}
+
   <form method="post" action="{{ url_for('deadline_push') }}" id="pushForm">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
     <input type="hidden" name="trigger" value="{{ trigger_type }}">
