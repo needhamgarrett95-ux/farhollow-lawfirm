@@ -24,9 +24,21 @@
       <div class="firm-name">Law Office of Derek G. Medina<small>Port Angeles, WA</small></div>
     </div>
     <nav class="nav-tabs">
-    {% for item in nav_items %}
-    {% if perms.get(item.permission) %}
-    <a class="tlink {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">{{ icon(item.icon, 17) }}<span class="tlink-label">{{ item.label }}</span>{% if item.badge and nav_deadline_count %}<span class="bdg">{{ nav_deadline_count }}</span>{% endif %}</a>
+    {% for group in nav_groups %}
+    {% if group.is_single %}
+    {# Single-item group renders as a direct link #}
+    {% set item = group["items"][0] %}
+    <a class="tlink {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">{{ icon(item.icon, 15) }}<span class="tlink-label">{{ item.label }}</span>{% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}</a>
+    {% else %}
+    {# Multi-item group renders as a dropdown #}
+    <div class="nav-dropdown {% if group.active %}active{% endif %}" data-dropdown>
+      <button type="button" class="tlink nav-drop-btn {% if group.active %}active{% endif %}" aria-haspopup="true" aria-expanded="false" data-drop-toggle>{{ icon(group.icon, 15) }}<span class="tlink-label">{{ group.label }}</span>{% if group.badge_count %}<span class="bdg">{{ group.badge_count }}</span>{% endif %}{{ icon('chevron-down', 13) }}</button>
+      <div class="nav-drop-menu" role="menu">
+        {% for item in group["items"] %}
+        <a class="nav-drop-item {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}" role="menuitem">{{ icon(item.icon, 15) }}<span>{{ item.label }}</span>{% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}</a>
+        {% endfor %}
+      </div>
+    </div>
     {% endif %}
     {% endfor %}
     </nav>
@@ -103,6 +115,56 @@
       }).catch(function () { /* theme still applies locally */ });
     });
   }
+})();
+// Nav dropdown menus (grouped navigation)
+(function () {
+  function closeAll(except) {
+    document.querySelectorAll('.nav-dropdown.open').forEach(function (dd) {
+      if (dd !== except) {
+        dd.classList.remove('open');
+        var btn = dd.querySelector('[data-drop-toggle]');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+  document.querySelectorAll('[data-dropdown]').forEach(function (dd) {
+    var btn = dd.querySelector('[data-drop-toggle]');
+    var menu = dd.querySelector('.nav-drop-menu');
+    if (!btn || !menu) return;
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var isOpen = dd.classList.contains('open');
+      closeAll(dd);
+      dd.classList.toggle('open', !isOpen);
+      btn.setAttribute('aria-expanded', String(!isOpen));
+      if (!isOpen) {
+        var first = menu.querySelector('.nav-drop-item');
+        if (first) first.focus();
+      }
+    });
+    // Keyboard: Escape closes, arrows navigate
+    dd.addEventListener('keydown', function (e) {
+      var items = Array.prototype.slice.call(menu.querySelectorAll('.nav-drop-item'));
+      var idx = items.indexOf(document.activeElement);
+      if (e.key === 'Escape') {
+        dd.classList.remove('open');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.focus();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        var next = items[(idx + 1) % items.length];
+        if (next) next.focus();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        var prev = items[(idx - 1 + items.length) % items.length];
+        if (prev) prev.focus();
+      }
+    });
+  });
+  document.addEventListener('click', function () { closeAll(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeAll();
+  });
 })();
 // Avatar dropdown
 (function () {

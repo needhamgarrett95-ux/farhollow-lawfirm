@@ -8,7 +8,7 @@
   <a href="{{ url_for('calendar_view', y=next_y, m=next_m) }}" class="btn">Next {{ icon("chevron-right", 16) }}</a>
 </div>
 <div style="margin-bottom:12px">
-  <a href="{{ url_for('event_new') }}" class="btn btn-primary btn-small">Add event</a>
+  {% if perms.get('manage_calendar') %}<a href="{{ url_for('event_new') }}" class="btn btn-primary btn-small">Add event</a>{% endif %}
 </div>
 
 <div class="cal-grid">
@@ -45,10 +45,12 @@
       <td>{{ e.case_number or '—' }}</td>
       <td>{{ 'Done' if e.completed else 'Open' }}</td>
       <td class="nowrap">
+        {% if perms.get('manage_calendar') %}
         <form method="post" action="{{ url_for('event_toggle', event_id=e.id) }}" class="inline">
           <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
           <button type="submit" class="btn btn-small">{{ 'Reopen' if e.completed else 'Done' }}</button>
         </form>
+        {% endif %}
         {% if perms.get('delete_records') %}
         <form method="post" action="{{ url_for('event_delete', event_id=e.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this event?', {title: 'Delete event', confirmText: 'Delete', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">

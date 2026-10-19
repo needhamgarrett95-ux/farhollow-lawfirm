@@ -42,7 +42,7 @@
     </span>
     {% endif %}
   </p>
-  <p><a href="{{ url_for('trust_reconcile', account_id=r.account.id) }}">Reconcile this account {{ icon("chevron-right", 16) }}</a></p>
+  {% if perms.get('manage_trust') %}<p><a href="{{ url_for('trust_reconcile', account_id=r.account.id) }}">Reconcile this account {{ icon("chevron-right", 16) }}</a></p>{% endif %}
 </div>
 {% endfor %}
 {% endblock %}

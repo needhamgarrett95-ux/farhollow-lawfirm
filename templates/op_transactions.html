@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Operating Transactions</h1>
-  <a href="{{ url_for('op_txn_new') }}" class="btn btn-primary">{{ icon('plus', 15) }} Record transaction</a>
+  {% if perms.get('manage_accounting') %}<a href="{{ url_for('op_txn_new') }}" class="btn btn-primary">{{ icon('plus', 15) }} Record transaction</a>{% endif %}
 </div>
 {% set active_tab = 'transactions' %}
 {% include "_accounting_tabs.html" %}
@@ -46,11 +46,13 @@
       <td class="muted small">{{ t.reference or '—' }}</td>
       <td class="nowrap">{% if t.amount_cents >= 0 %}+{% endif %}${{ t.amount_cents|cents }}</td>
       <td class="nowrap">
+        {% if perms.get('manage_accounting') %}
         <form method="post" action="{{ url_for('op_txn_delete', txn_id=t.id) }}" class="inline"
               onsubmit="return modalConfirmSubmit(this, 'Delete this transaction of ${{ t.amount_cents|cents }} on {{ t.txn_date }}? It will be permanently removed.', {title: 'Delete transaction', confirmText: 'Delete', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
           <button type="submit" class="btn btn-small btn-danger">Delete</button>
         </form>
+        {% endif %}
       </td>
     </tr>
   {% endfor %}

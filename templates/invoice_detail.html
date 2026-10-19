@@ -49,6 +49,7 @@
 <p class="muted">No line items.</p>
 {% endif %}
 
+{% if perms.get('manage_billing') %}
 <div class="detail-card">
   <h2>Change status</h2>
   <form method="post" action="{{ url_for('invoice_status', invoice_id=invoice.id) }}" class="inline">
@@ -61,7 +62,9 @@
     <button type="submit" class="btn btn-small btn-primary">Update</button>
   </form>
 </div>
+{% endif %}
 
+{% if perms.get('manage_billing') %}
 <div class="danger-zone">
   <form method="post" action="{{ url_for('invoice_delete', invoice_id=invoice.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this invoice? Financial records are normally retained 7 years.', {title: 'Delete invoice', confirmText: 'Delete', danger: true});">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
@@ -69,4 +72,5 @@
   </form>
   <p class="muted small">Invoices are financial records (RPC 1.15B): deletion is blocked until 7 years after the issue date.</p>
 </div>
+{% endif %}
 {% endblock %}

@@ -75,7 +75,7 @@
       {% set next_d = deadlines[0] %}
       <div class="dash-sub" style="margin-top:14px">{{ next_d.title }} due <b style="color:{% if next_d.event_date <= urgent_cutoff %}var(--error){% else %}var(--navy){% endif %}">{{ next_d.event_date }}</b>{% if next_d.case_number %} · {{ next_d.case_number }}{% endif %}</div>
       {% else %}
-      <p class="dash-sub">No upcoming deadlines. <a href="{{ url_for('event_new') }}">Add one</a>.</p>
+      <p class="dash-sub">No upcoming deadlines.{% if perms.get('manage_calendar') %} <a href="{{ url_for('event_new') }}">Add one</a>{% endif %}.</p>
       {% endif %}
     </div>
     {% endif %}
@@ -203,7 +203,7 @@
         {% endfor %}
       </div>
       {% else %}
-      <p class="dash-sub">No clients yet. <a href="{{ url_for('client_new') }}">Add your first client</a>.</p>
+      <p class="dash-sub">No clients yet.{% if perms.get('manage_clients') %} <a href="{{ url_for('client_new') }}">Add your first client</a>{% endif %}.</p>
       {% endif %}
     </div>
     {% endif %}

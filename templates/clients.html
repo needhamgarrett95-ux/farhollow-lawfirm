@@ -4,7 +4,7 @@
 <div class="page-head">
   <h1>Clients</h1>
   {% if perms.get('manage_clients') %}
-  <a href="{{ url_for('client_new') }}" class="btn btn-primary">+ New client</a>
+  {% if perms.get('manage_clients') %}<a href="{{ url_for('client_new') }}" class="btn btn-primary">+ New client</a>{% endif %}
   {% endif %}
 </div>
 
@@ -38,7 +38,7 @@
   <h2>No clients yet</h2>
   <p class="muted">Add your first client to get started. You only need a name — the rest can come later.</p>
   {% if perms.get('manage_clients') %}
-  <a href="{{ url_for('client_new') }}" class="btn btn-primary">+ Add your first client</a>
+  {% if perms.get('manage_clients') %}<a href="{{ url_for('client_new') }}" class="btn btn-primary">+ Add your first client</a>{% endif %}
   {% endif %}
 </div>
 {% endif %}

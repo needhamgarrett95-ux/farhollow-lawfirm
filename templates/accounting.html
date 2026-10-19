@@ -36,7 +36,7 @@
   <ul>
   {% for a in unreconciled %}
     <li>{{ a.name }} — book balance ${{ a.book_cents|cents }}
-      — <a href="{{ url_for('op_reconcile', account_id=a.id) }}">Reconcile now</a></li>
+      {% if perms.get('manage_accounting') %}— <a href="{{ url_for('op_reconcile', account_id=a.id) }}">Reconcile now</a>{% endif %}</li>
   {% endfor %}
   </ul>
 </div>
@@ -58,6 +58,6 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No operating transactions recorded yet. <a href="{{ url_for('op_txn_new') }}">Record the first one</a>.</p>
+{% if perms.get('manage_accounting') %}<p class="muted">No operating transactions recorded yet. <a href="{{ url_for('op_txn_new') }}">Record the first one</a>.</p>{% endif %}
 {% endif %}
 {% endblock %}

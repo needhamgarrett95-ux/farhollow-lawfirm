@@ -601,6 +601,34 @@ dd { margin: 0; }
   position: relative; z-index: 1;
 }
 .nav-tabs::-webkit-scrollbar { display: none; }
+/* --- Nav dropdown menus (grouped navigation) --- */
+.nav-dropdown { position: relative; flex-shrink: 0; }
+.nav-drop-btn { cursor: pointer; border: none; background: none; font: inherit; }
+.nav-drop-btn svg:last-child { transition: transform 0.18s ease; opacity: 0.6; }
+.nav-dropdown.open .nav-drop-btn svg:last-child { transform: rotate(180deg); }
+.nav-drop-menu {
+  position: absolute; top: calc(100% + 8px); left: 0; min-width: 210px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  padding: 6px; z-index: 50;
+  opacity: 0; transform: translateY(-6px) scale(0.98); pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.nav-dropdown.open .nav-drop-menu {
+  opacity: 1; transform: translateY(0) scale(1); pointer-events: auto;
+}
+.nav-drop-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px;
+  font-size: 13.5px; font-weight: 600; color: var(--muted); text-decoration: none;
+  white-space: nowrap;
+}
+.nav-drop-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.nav-drop-item:hover { background: var(--surface-hover); color: var(--navy); }
+.nav-drop-item.active { background: var(--brand); color: #fff; }
+.nav-drop-item.active:hover { background: var(--brand); color: #fff; }
+.nav-drop-item .bdg { margin-left: auto; }
+.nav-dropdown.active > .nav-drop-btn { background: var(--brand); color: #fff; }
 .monogram {
   width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
   background: linear-gradient(135deg, var(--gold), var(--gold-light));

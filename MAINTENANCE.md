@@ -1167,3 +1167,17 @@ won't update further).
 **For admins — permissions:**
 - `use_timeclock` — lets someone clock in/out (all roles have this by default).
 - `view_all_timeclocks` — lets someone see everyone's entries (admins and attorneys only by default). Grant it in Users → edit user → Permissions if needed.
+
+## 39. Navigation dropdowns + UI permission audit (v2.3.2)
+
+**Navigation:** The top bar now uses grouped dropdown menus instead of 13 individual tabs:
+- **Dashboard** — standalone (no dropdown)
+- **Practice** — Clients, Cases, Calendar, Deadlines
+- **Documents** — Templates
+- **Financial** — Billing, Trust, Accounting
+- **Team** — Timeclock, Users
+- **System** — Audit Log, Integrations
+
+Each dropdown only shows items you have permission for. If you have zero items in a group, the whole dropdown is hidden. Click the group name to open/close; click an item to go there. Press Escape to close.
+
+**UI permission audit:** Every button and link in the app now checks your permissions before showing. If you can't do something, you won't see the button for it — no more "Forbidden" pages from clicking visible buttons.

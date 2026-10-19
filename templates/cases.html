@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Cases</h1>
-  <a href="{{ url_for('case_new') }}" class="btn btn-primary">+ New case</a>
+  {% if perms.get('manage_cases') %}<a href="{{ url_for('case_new') }}" class="btn btn-primary">+ New case</a>{% endif %}
 </div>
 
 <div class="tabs">
@@ -33,7 +33,7 @@
 <div class="empty-state">
   <h2>No {{ status }} cases</h2>
   <p class="muted">Cases you open will show up here.</p>
-  <a href="{{ url_for('case_new') }}" class="btn btn-primary">+ Open your first case</a>
+  {% if perms.get('manage_cases') %}<a href="{{ url_for('case_new') }}" class="btn btn-primary">+ Open your first case</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

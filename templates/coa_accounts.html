@@ -7,6 +7,7 @@
 {% set active_tab = 'coa' %}
 {% include "_accounting_tabs.html" %}
 
+{% if perms.get('manage_accounting') %}
 <div class="form-card" style="margin-bottom:18px;">
   <h2 style="margin-top:0;">Add account</h2>
   <form method="post">
@@ -34,6 +35,7 @@
     </div>
   </form>
 </div>
+{% endif %}
 
 {% for gtype in ['asset', 'liability', 'equity', 'income', 'expense'] %}
 <h2>{{ gtype|capitalize }}</h2>
@@ -52,6 +54,7 @@
         {% else %}<span class="badge badge-closed">Inactive</span>{% endif %}
       </td>
       <td class="nowrap">
+        {% if perms.get('manage_accounting') %}
         <a href="{{ url_for('op_reconcile', account_id=a.id) }}" class="btn btn-small">Reconcile</a>
         <form method="post" action="{{ url_for('coa_toggle', account_id=a.id) }}" class="inline"
               {% if a.is_active %}onsubmit="return modalConfirmSubmit(this, 'Deactivate {{ a.code }} — {{ a.name }}? It will no longer appear in transaction forms. This can be undone.', {title: 'Deactivate account', confirmText: 'Deactivate', danger: true});"{% endif %}>
@@ -60,6 +63,7 @@
             {% if a.is_active %}Deactivate{% else %}Reactivate{% endif %}
           </button>
         </form>
+        {% endif %}
       </td>
     </tr>
   {% endfor %}

@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Trust Accounts</h1>
-  <a href="{{ url_for('trust_account_new') }}" class="btn btn-primary">New trust account</a>
+  {% if perms.get('manage_trust') %}<a href="{{ url_for('trust_account_new') }}" class="btn btn-primary">New trust account</a>{% endif %}
 </div>
 
 <div class="alert alert-warning">

@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Invoices</h1>
-  <a href="{{ url_for('invoice_new') }}" class="btn btn-primary">New invoice</a>
+  {% if perms.get('manage_billing') %}<a href="{{ url_for('invoice_new') }}" class="btn btn-primary">New invoice</a>{% endif %}
 </div>
 
 {% if invoices %}
@@ -27,7 +27,7 @@
 <div class="empty-state">
   <h2>No invoices yet</h2>
   <p class="muted">Create your first invoice from a client's unbilled time.</p>
-  <a href="{{ url_for('invoice_new') }}" class="btn btn-primary">+ Create your first invoice</a>
+  {% if perms.get('manage_billing') %}<a href="{{ url_for('invoice_new') }}" class="btn btn-primary">+ Create your first invoice</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

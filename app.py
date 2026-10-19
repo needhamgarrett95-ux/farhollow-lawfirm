@@ -1582,37 +1582,55 @@ def expand_permissions(raw):
 # If the user has the permission, the tab shows; the tab's target route
 # checks that same permission. No tab may lead to a 403.
 # ----------------------------------------------------------------------------
-NAV_ITEMS = [
-    {"label": "Dashboard", "icon": "dashboard", "endpoint": "dashboard",
-     "permission": "view_dashboard", "active_prefixes": ["dashboard"]},
-    {"label": "Clients", "icon": "clients", "endpoint": "client_list",
-     "permission": "view_clients", "active_prefixes": ["client"]},
-    {"label": "Cases", "icon": "cases", "endpoint": "case_list",
-     "permission": "view_cases", "active_prefixes": ["case"]},
-    {"label": "Calendar", "icon": "calendar", "endpoint": "calendar_view",
-     "permission": "view_calendar", "active_prefixes": ["calendar", "event"]},
-    {"label": "Deadlines", "icon": "deadlines", "endpoint": "deadline_calculator",
-     "permission": "calculate_deadlines", "active_prefixes": ["deadline", "clallam"],
-     "badge": "nav_deadline_count"},
-    {"label": "Templates", "icon": "templates", "endpoint": "template_gallery",
-     "permission": "use_templates", "active_prefixes": ["template"]},
-    {"label": "Billing", "icon": "billing", "endpoint": "invoice_list",
-     "permission": "view_billing", "active_prefixes": ["invoice", "time"]},
-    {"label": "Trust", "icon": "trust", "endpoint": "trust_overview",
-     "permission": "view_trust", "active_prefixes": ["trust"]},
-    {"label": "Accounting", "icon": "billing", "endpoint": "accounting_overview",
-     "permission": "view_accounting",
-     "active_prefixes": ["accounting", "op_", "employee", "payroll",
-                         "report_", "coa_", "tax_"]},
-    {"label": "Timeclock", "icon": "alarm", "endpoint": "timeclock",
-     "permission": "use_timeclock", "active_prefixes": ["timeclock"]},
-    {"label": "Audit Log", "icon": "documents", "endpoint": "audit_view",
-     "permission": "view_audit_log", "active_prefixes": ["audit"]},
-    {"label": "Users", "icon": "users", "endpoint": "user_list",
-     "permission": "manage_users", "active_prefixes": ["user"]},
-    {"label": "Integrations", "icon": "plug", "endpoint": "integration_list",
-     "permission": "manage_users", "active_prefixes": ["integration"]},
+# Nav structure: groups with dropdown menus. Each group has a label, icon, and
+# list of items. Items have the same fields as before. A group is hidden entirely
+# if the user has permission for zero of its items.
+NAV_GROUPS = [
+    {"label": "Dashboard", "icon": "dashboard", "items": [
+        {"label": "Dashboard", "icon": "dashboard", "endpoint": "dashboard",
+         "permission": "view_dashboard", "active_prefixes": ["dashboard"]},
+    ]},
+    {"label": "Practice", "icon": "cases", "items": [
+        {"label": "Clients", "icon": "clients", "endpoint": "client_list",
+         "permission": "view_clients", "active_prefixes": ["client"]},
+        {"label": "Cases", "icon": "cases", "endpoint": "case_list",
+         "permission": "view_cases", "active_prefixes": ["case"]},
+        {"label": "Calendar", "icon": "calendar", "endpoint": "calendar_view",
+         "permission": "view_calendar", "active_prefixes": ["calendar", "event"]},
+        {"label": "Deadlines", "icon": "deadlines", "endpoint": "deadline_calculator",
+         "permission": "calculate_deadlines", "active_prefixes": ["deadline", "clallam"],
+         "badge": "nav_deadline_count"},
+    ]},
+    {"label": "Documents", "icon": "templates", "items": [
+        {"label": "Templates", "icon": "templates", "endpoint": "template_gallery",
+         "permission": "use_templates", "active_prefixes": ["template"]},
+    ]},
+    {"label": "Financial", "icon": "billing", "items": [
+        {"label": "Billing", "icon": "billing", "endpoint": "invoice_list",
+         "permission": "view_billing", "active_prefixes": ["invoice", "time"]},
+        {"label": "Trust", "icon": "trust", "endpoint": "trust_overview",
+         "permission": "view_trust", "active_prefixes": ["trust"]},
+        {"label": "Accounting", "icon": "billing", "endpoint": "accounting_overview",
+         "permission": "view_accounting",
+         "active_prefixes": ["accounting", "op_", "employee", "payroll",
+                             "report_", "coa_", "tax_"]},
+    ]},
+    {"label": "Team", "icon": "users", "items": [
+        {"label": "Timeclock", "icon": "alarm", "endpoint": "timeclock",
+         "permission": "use_timeclock", "active_prefixes": ["timeclock"]},
+        {"label": "Users", "icon": "users", "endpoint": "user_list",
+         "permission": "manage_users", "active_prefixes": ["user"]},
+    ]},
+    {"label": "System", "icon": "documents", "items": [
+        {"label": "Audit Log", "icon": "documents", "endpoint": "audit_view",
+         "permission": "view_audit_log", "active_prefixes": ["audit"]},
+        {"label": "Integrations", "icon": "plug", "endpoint": "integration_list",
+         "permission": "manage_users", "active_prefixes": ["integration"]},
+    ]},
 ]
+
+# Flat list for backwards compatibility (first_allowed_endpoint, etc.)
+NAV_ITEMS = [item for group in NAV_GROUPS for item in group["items"]]
 
 
 def first_allowed_endpoint(user_perms):
@@ -1708,20 +1726,42 @@ def inject_update_info():
             ).fetchone()["c"]
         except Exception:
             pass
-    # Build nav items with active flags (single source of truth: NAV_ITEMS)
+    # Build nav groups with active flags (single source of truth: NAV_GROUPS).
+    # Groups with zero permitted items are hidden entirely.
     endpoint = request.endpoint or ""
-    nav_items = []
-    for item in NAV_ITEMS:
-        nav_items.append({
-            **item,
-            "active": any(endpoint.startswith(p) for p in item["active_prefixes"]),
+    user_perms = session.get("permissions", {})
+    nav_groups = []
+    for group in NAV_GROUPS:
+        items = []
+        for item in group["items"]:
+            if not user_has_perm(user_perms, item["permission"]):
+                continue
+            active = any(endpoint.startswith(p) for p in item["active_prefixes"])
+            badge_count = 0
+            if item.get("badge") == "nav_deadline_count":
+                badge_count = nav_deadline_count
+            items.append({**item, "active": active, "badge_count": badge_count})
+        if not items:
+            continue
+        # Single-item groups render as a direct link (no dropdown)
+        is_single = len(items) == 1
+        group_active = any(i["active"] for i in items)
+        group_badge = sum(i["badge_count"] for i in items)
+        nav_groups.append({
+            "label": group["label"],
+            "icon": group["icon"],
+            "items": items,
+            "is_single": is_single,
+            "active": group_active,
+            "badge_count": group_badge,
         })
     return {
         "app_version": APP_VERSION,
         "is_admin": is_admin(),
         "user_role": session.get("role", "staff"),
         "perms": session.get("permissions", {}),
-        "nav_items": nav_items,
+        "nav_items": NAV_ITEMS,
+        "nav_groups": nav_groups,
         "theme": theme,
         "nav_deadline_count": nav_deadline_count,
         # The banner is admin-only; the footer version tag is for everyone
@@ -3216,7 +3256,7 @@ def deadline_calculator():
         if not error:
             rule_info = DEADLINE_RULES[trigger_type]
             results = calculate_deadlines(trigger_type, trigger_date)
-    can_push = session.get("role") in ("admin", "attorney")
+    can_push = user_has_perm(session.get("permissions", {}), "push_deadlines")
     cal_warnings = (
         clallam_warnings(trigger_type, trigger_date)
         if (not error and trigger_date)

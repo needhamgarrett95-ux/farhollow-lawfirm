@@ -9,12 +9,18 @@
   <a href="{{ url_for('op_txn_list') }}" class="{% if active_tab == 'transactions' %}active{% endif %}">Transactions</a>
   <a href="{{ url_for('coa_list') }}" class="{% if active_tab == 'coa' %}active{% endif %}">Chart of Accounts</a>
   <a href="{{ url_for('report_pl') }}" class="{% if active_tab == 'reports' %}active{% endif %}">Reports</a>
+  {% if perms.get('manage_accounting') %}
   {% if _rc %}
   <a href="{{ url_for('op_reconcile', account_id=_rc) }}" class="{% if active_tab == 'reconcile' %}active{% endif %}">Reconcile</a>
   {% else %}
   <a href="{{ url_for('coa_list') }}" class="{% if active_tab == 'reconcile' %}active{% endif %}">Reconcile</a>
   {% endif %}
+  {% endif %}
+  {% if perms.get('run_payroll') %}
   <a href="{{ url_for('employee_list') }}" class="{% if active_tab == 'employees' %}active{% endif %}">Employees</a>
   <a href="{{ url_for('payroll_run') }}" class="{% if active_tab == 'payroll' %}active{% endif %}">Payroll</a>
+  {% endif %}
+  {% if perms.get('manage_accounting') %}
   <a href="{{ url_for('tax_settings') }}" class="{% if active_tab == 'tax' %}active{% endif %}">Tax Settings</a>
+  {% endif %}
 </div>

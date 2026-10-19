@@ -11,7 +11,7 @@
 <div class="alert alert-warning">
   <strong>Verify before you pay.</strong> Payroll tax rates change annually — confirm the current
   IRS federal, Social Security, and Medicare rates plus WA PFML and WA Cares rates in
-  <a href="{{ url_for('tax_settings') }}">Tax Settings</a> before generating paychecks.
+  {% if perms.get('manage_accounting') %}<a href="{{ url_for('tax_settings') }}">Tax Settings</a>{% else %}Tax Settings{% endif %} before generating paychecks.
   This tool does not replace a CPA or payroll service.
 </div>
 
