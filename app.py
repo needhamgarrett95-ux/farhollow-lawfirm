@@ -12,7 +12,7 @@ import shutil
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from functools import wraps
 
 from flask import (
@@ -105,7 +105,7 @@ def retention_ok(record_date_iso):
         record_date = datetime.fromisoformat(str(record_date_iso)[:10])
     except ValueError:
         return False
-    age = datetime.utcnow() - record_date
+    age = datetime.now(timezone.utc) - record_date
     return age >= timedelta(days=365 * RETENTION_YEARS_FINANCIAL)
 
 
@@ -300,7 +300,7 @@ def init_db():
     # Seed default admin on first run
     row = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()
     if row["c"] == 0:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "INSERT INTO users (username, password_hash, full_name, "
             "must_change_password, created_at) VALUES (?, ?, ?, 1, ?)",
@@ -360,7 +360,7 @@ def audit(action, details=""):
         "INSERT INTO audit_log (timestamp, user_id, username, action, details)"
         " VALUES (?, ?, ?, ?, ?)",
         (
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             session.get("user_id"),
             session.get("username"),
             action,
@@ -431,7 +431,7 @@ def do_backup(manual=False):
             "INSERT INTO backups (timestamp, filename, size_bytes, status, notes)"
             " VALUES (?, ?, ?, ?, ?)",
             (
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
                 os.path.basename(db_backup) if ok else base + ".db",
                 size,
                 "ok" if ok else "failed",
@@ -460,7 +460,7 @@ def backup_scheduler():
                     try:
                         last = datetime.fromisoformat(row["timestamp"])
                         needs_backup = (
-                            datetime.utcnow() - last > timedelta(hours=24)
+                            datetime.now(timezone.utc) - last > timedelta(hours=24)
                         )
                     except ValueError:
                         pass
@@ -488,12 +488,12 @@ def login_required(f):
         # Inactivity timeout
         last = session.get("last_activity")
         if last:
-            idle = datetime.utcnow() - datetime.fromisoformat(last)
+            idle = datetime.now(timezone.utc) - datetime.fromisoformat(last)
             if idle > timedelta(minutes=SESSION_TIMEOUT_MINUTES):
                 session.clear()
                 flash("You were logged out due to inactivity.", "warning")
                 return redirect(url_for("login"))
-        session["last_activity"] = datetime.utcnow().isoformat()
+        session["last_activity"] = datetime.now(timezone.utc).isoformat()
         # Forced password change
         if session.get("must_change_password") and request.endpoint not in (
             "change_password",
@@ -526,6 +526,23 @@ def ensure_csrf():
 
 
 # ----------------------------------------------------------------------------
+# PWA routes (service worker needs root scope; offline fallback page)
+# ----------------------------------------------------------------------------
+@app.route("/sw.js")
+def service_worker():
+    resp = send_file("static/sw.js")
+    resp.headers["Content-Type"] = "application/javascript"
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/offline.html")
+def offline_page():
+    return send_file("static/offline.html")
+
+
+# ----------------------------------------------------------------------------
 # Auth routes
 # ----------------------------------------------------------------------------
 @app.route("/")
@@ -550,7 +567,7 @@ def login():
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["must_change_password"] = bool(user["must_change_password"])
-            session["last_activity"] = datetime.utcnow().isoformat()
+            session["last_activity"] = datetime.now(timezone.utc).isoformat()
             new_csrf_token()
             audit("login", "User logged in")
             if user["must_change_password"]:
@@ -743,7 +760,7 @@ def client_new():
                     "conflict_warning.html", conflicts=hits,
                     form_data=form_data,
                 )
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         db = get_db()
         cur = db.execute(
             "INSERT INTO clients (first_name, last_name, email, phone, address,"
@@ -825,7 +842,7 @@ def client_edit(client_id):
         abort(404)
     if request.method == "POST":
         check_csrf()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "UPDATE clients SET first_name=?, last_name=?, email=?, phone=?,"
             " address=?, date_of_birth=?, spouse_name=?, spouse_dob=?, ssn=?,"
@@ -949,7 +966,7 @@ def case_new():
     ).fetchall()
     if request.method == "POST":
         check_csrf()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         case_number = request.form.get("case_number", "").strip()
         if not case_number:
             flash("Case number is required.", "error")
@@ -1043,7 +1060,7 @@ def case_edit(case_id):
     ).fetchall()
     if request.method == "POST":
         check_csrf()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         client_id = request.form.get("client_id", "").strip() or None
         db.execute(
             "UPDATE cases SET title=?, client_id=?, case_type=?, status=?,"
@@ -1108,7 +1125,7 @@ def party_add(case_id):
                 case_id, first_name, last_name,
                 request.form.get("role", "").strip(),
                 request.form.get("notes", "").strip(),
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
         db.commit()
@@ -1189,7 +1206,7 @@ def document_list(case_id):
             (
                 case_id, original, stored, category, size, version,
                 session.get("username"), notes,
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
         db.commit()
@@ -1337,7 +1354,7 @@ def event_new():
                 case_id, title, event_type, event_date,
                 request.form.get("event_time", "").strip(),
                 request.form.get("description", "").strip(),
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
         db.commit()
@@ -1421,7 +1438,7 @@ def time_list(case_id):
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     case_id, entry_date, hours, description, rate,
-                    session.get("user_id"), datetime.utcnow().isoformat(),
+                    session.get("user_id"), datetime.now(timezone.utc).isoformat(),
                 ),
             )
             db.commit()
@@ -1524,7 +1541,7 @@ def invoice_new():
                 "invoice_form.html", clients=clients,
                 preset_client=preset_client, uninvoiced=uninvoiced,
             )
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         inv_no = f"INV-{datetime.now().strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
         cur = db.execute(
             "INSERT INTO invoices (invoice_number, client_id, issue_date,"

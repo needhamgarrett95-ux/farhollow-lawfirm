@@ -761,3 +761,39 @@ python app.py --local-only
 Or with the installed exe, create a shortcut and add `--local-only` after
 the program path in the shortcut's Target field. In this mode, other
 computers cannot connect even if they know the address.
+
+## 22. Using the software on your phone
+
+You can open the case management system on your phone when connected to the office WiFi.
+
+**To open it:**
+1. Make sure your phone is connected to the office WiFi (not cellular data).
+2. Open your phone's web browser (Safari on iPhone, Chrome on Android).
+3. Type the host computer's address in the address bar — the same address office computers use (for example: `http://192.168.1.100:5000`). The host computer shows this address when the server starts.
+4. Log in with your usual username and password.
+
+**To add it to your home screen (so it works like an app):**
+- **iPhone:** Open the page in Safari, tap the Share button (square with arrow), then tap "Add to Home Screen."
+- **Android:** Open the page in Chrome, tap the three-dot menu, then tap "Add to Home screen" or "Install app."
+
+**What works on the phone:** Everything — dashboard, clients, cases, calendar, documents, billing. The layout adjusts to fit your screen. Tables become stacked cards you scroll through.
+
+**What does NOT work on the phone:** Nothing is missing, but keep in mind:
+- If you lose WiFi connection, you'll see an "offline" message. Your data is safe on the host computer — just reconnect to WiFi.
+- The phone does not store any case data. Everything stays on the host computer in the office.
+
+## 23. Phone troubleshooting
+
+**"I can't reach the server from my phone":**
+1. Check your phone is on the office WiFi — look for the WiFi symbol at the top of your screen. If you're on cellular (4G/5G/LTE), it won't work.
+2. Make sure you typed the address exactly right, including `http://` at the start and `:5000` at the end.
+3. Make sure the host computer is turned on and the server is running.
+4. Some office WiFi networks block devices from talking to each other. If nothing works, ask Garrett — the WiFi router may need a setting changed ("client isolation" must be OFF).
+
+**"The page looks too small / I have to pinch to zoom":**
+- This shouldn't happen. If it does, make sure you're using Safari (iPhone) or Chrome (Android) — not an in-app browser from an email or text message link.
+- Try removing the home screen icon and re-adding it following the steps above.
+
+**"It says I'm offline but my WiFi is on":**
+- Your phone may have connected to a different WiFi network (for example, a guest network). Check Settings → WiFi and make sure you're on the office network.
+- Try closing the browser completely and reopening it.

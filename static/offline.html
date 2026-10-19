@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1f3a5f">
+<title>Offline — Case Management</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+<div class="login-card">
+  <h1>You're offline</h1>
+  <p class="muted">The Law Firm server can't be reached. Check that:</p>
+  <ul style="text-align:left">
+    <li>You're connected to the office WiFi</li>
+    <li>The host computer is powered on</li>
+    <li>The Law Firm server is running on the host</li>
+  </ul>
+  <button class="btn btn-primary btn-block" onclick="window.location.reload()">Try again</button>
+  <p class="muted small">Case data is never stored on this device — reconnect to continue.</p>
+</div>
+</body>
+</html>

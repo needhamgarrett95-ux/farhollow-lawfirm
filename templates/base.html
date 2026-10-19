@@ -3,12 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1f3a5f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Law Firm">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icon-192.png') }}">
 <title>{% block title %}Law Firm Case Management{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 {% if session.get('user_id') %}
-<header class="topbar">
+<header class="topbar" id="topbar">
+  <button class="nav-toggle" id="navToggle" aria-label="Menu" aria-expanded="false">&#9776;</button>
   <div class="brand">Case Management</div>
   <nav>
     <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
@@ -41,5 +50,41 @@
   <span>Confidential — for office use only.</span>
   <span class="lan-warning" title="This software is designed for your office network only. Do not expose port 5000 to the internet.">&#9888; Office network only — do not expose to the internet.</span>
 </footer>
+<script>
+// Hamburger nav toggle
+(function () {
+  var toggle = document.getElementById('navToggle');
+  var bar = document.getElementById('topbar');
+  if (toggle && bar) {
+    toggle.addEventListener('click', function () {
+      var open = bar.classList.toggle('nav-open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+  // Auto-inject data-labels into table cells from <th> text (for mobile card layout)
+  document.querySelectorAll('table.table').forEach(function (table) {
+    var headers = Array.prototype.map.call(
+      table.querySelectorAll('thead th'),
+      function (th) { return th.textContent.trim(); }
+    );
+    if (!headers.length) return;
+    table.querySelectorAll('tbody tr').forEach(function (tr) {
+      Array.prototype.forEach.call(tr.children, function (td, i) {
+        if (td.tagName.toLowerCase() === 'td') {
+          var label = headers[i] || '';
+          if (label) { td.setAttribute('data-label', label); }
+          else { td.classList.add('no-label'); }
+        }
+      });
+    });
+  });
+})();
+// Service worker (offline fallback) — requires HTTPS on iOS; harmless on HTTP
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () { /* offline mode unavailable */ });
+  });
+}
+</script>
 </body>
 </html>

@@ -178,3 +178,130 @@ dd { margin: 0; }
 .login-card .muted { text-align: center; }
 .login-card label { margin-bottom: 12px; }
 .login-card .btn-block { margin-top: 8px; }
+
+/* ============================================================
+   MOBILE / RESPONSIVE — phones and small tablets
+   ============================================================ */
+
+/* Hamburger button (hidden on desktop) */
+.nav-toggle {
+  display: none;
+  background: none; border: none; color: #fff;
+  font-size: 26px; line-height: 1; cursor: pointer;
+  padding: 10px 12px; min-width: 48px; min-height: 48px;
+}
+
+/* --- Tablet and below --- */
+@media (max-width: 900px) {
+  .container { padding: 0 14px 60px; }
+  .detail-grid { grid-template-columns: 1fr; }
+  dl { grid-template-columns: 130px 1fr; }
+}
+
+/* --- Phone --- */
+@media (max-width: 700px) {
+  body { font-size: 15px; }
+  h1 { font-size: 21px; }
+
+  /* Top bar → hamburger */
+  .topbar { gap: 8px; padding: 0 8px 0 12px; height: auto; min-height: 56px; flex-wrap: wrap; }
+  .nav-toggle { display: block; }
+  .topbar nav {
+    display: none;
+    flex-basis: 100%; flex-direction: column;
+    padding: 4px 0 12px; gap: 2px;
+  }
+  .topbar.nav-open nav { display: flex; }
+  .topbar nav a { padding: 12px 14px; font-size: 16px; min-height: 48px; display: flex; align-items: center; }
+  .userbox { margin-left: auto; font-size: 12px; gap: 8px; }
+  .userbox span { display: none; } /* hide username text, keep links */
+
+  /* Page head stacks */
+  .page-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+
+  /* Forms: single column, big touch targets */
+  .form-grid { grid-template-columns: 1fr; }
+  .form-grid .span2 { grid-column: span 1; }
+  .form-card { padding: 18px 16px; }
+  label input, label select, label textarea {
+    padding: 12px; font-size: 16px; /* 16px stops iOS auto-zoom */
+    min-height: 48px;
+  }
+  .search-row { flex-direction: column; }
+  .search-row input { font-size: 16px; padding: 12px; min-height: 48px; }
+  .form-actions { flex-direction: column; align-items: stretch; }
+  .form-actions .btn { text-align: center; min-height: 48px; display: flex; align-items: center; justify-content: center; }
+
+  /* Buttons: comfortable touch targets */
+  .btn { padding: 12px 18px; font-size: 15px; min-height: 44px; }
+  .btn-small { padding: 10px 14px; font-size: 14px; min-height: 44px; }
+
+  /* Tables → cards (data-label injected by JS from <th>) */
+  .table thead { display: none; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table { background: none; box-shadow: none; }
+  .table tr {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 12px; padding: 4px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .table td {
+    border: none; border-bottom: 1px solid var(--border);
+    padding: 10px 14px; min-height: 0;
+  }
+  .table td:last-child { border-bottom: none; }
+  .table td::before {
+    content: attr(data-label);
+    display: block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    color: var(--muted); margin-bottom: 2px;
+  }
+  .table td.no-label::before { display: none; }
+  .row-urgent { background: none; }
+  .table tr.row-urgent { background: #fef2f2; border-color: #fca5a5; }
+
+  /* Dashboard stats → 2 columns */
+  .stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat { padding: 14px 12px; }
+  .stat-num { font-size: 26px; }
+
+  /* Detail lists */
+  .plain-list li { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .child-form { flex-direction: column; align-items: stretch; }
+  .child-form input { min-height: 44px; font-size: 16px; }
+  dl { grid-template-columns: 1fr; gap: 2px; }
+  dd { margin-bottom: 10px; }
+
+  /* Calendar: compact grid, dots for events */
+  .cal-cell { min-height: 48px; padding: 4px; font-size: 11px; }
+  .cal-day { font-size: 12px; margin-bottom: 2px; }
+  .cal-event {
+    font-size: 10px; padding: 1px 4px; margin: 1px 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cal-dow { padding: 6px 2px; font-size: 10px; }
+  .cal-nav .btn { padding: 10px 12px; }
+
+  /* Tabs scroll horizontally if needed */
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabs a { white-space: nowrap; padding: 12px 14px; }
+
+  /* Login card fits phone */
+  .login-card { width: calc(100% - 32px); max-width: 380px; padding: 28px 22px; margin: 16px; }
+
+  /* Footer stacks */
+  .footer .lan-warning { display: block; margin: 8px 0 0; }
+
+  /* Conflict box padding */
+  .conflict-box { padding: 20px 16px; }
+
+  /* Upload rows stack */
+  .upload-row { flex-direction: column; align-items: stretch; }
+}
+
+/* --- Very small phones --- */
+@media (max-width: 380px) {
+  .stat-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-num { font-size: 22px; }
+  .cal-cell { min-height: 44px; font-size: 10px; }
+}
