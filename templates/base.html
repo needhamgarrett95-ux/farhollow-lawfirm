@@ -24,11 +24,18 @@
     <a href="{{ url_for('client_list') }}" class="{% if request.endpoint and request.endpoint.startswith('client') %}active{% endif %}">Clients</a>
     <a href="{{ url_for('case_list') }}" class="{% if request.endpoint and request.endpoint.startswith('case') %}active{% endif %}">Cases</a>
     <a href="{{ url_for('calendar_view') }}" class="{% if request.endpoint and request.endpoint.startswith('calendar') or request.endpoint and request.endpoint.startswith('event') %}active{% endif %}">Calendar</a>
+    {% if user_role in ('admin', 'attorney') %}
     <a href="{{ url_for('invoice_list') }}" class="{% if request.endpoint and request.endpoint.startswith('invoice') %}active{% endif %}">Billing</a>
+    {% endif %}
+    {% if user_role in ('admin', 'attorney') %}
     <a href="{{ url_for('audit_view') }}" class="{% if request.endpoint == 'audit_view' %}active{% endif %}">Audit Log</a>
+    {% endif %}
+    {% if is_admin %}
+    <a href="{{ url_for('user_list') }}" class="{% if request.endpoint and request.endpoint.startswith('user') %}active{% endif %}">Users</a>
+    {% endif %}
   </nav>
   <div class="userbox">
-    <span>{{ session.get('username') }}</span>
+    <span>{{ session.get('username') }} <span class="badge badge-role-{{ user_role }}">{{ user_role|capitalize }}</span></span>
     <a href="{{ url_for('change_password') }}">Change password</a>
     <a href="{{ url_for('logout') }}">Log out</a>
   </div>

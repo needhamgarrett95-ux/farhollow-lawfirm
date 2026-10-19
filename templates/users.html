@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Users — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Users</h1>
+  <a href="{{ url_for('user_new') }}" class="btn btn-primary">+ New user</a>
+</div>
+<p class="muted">Only administrators can see this page. Roles: <strong>Admin</strong> (full access),
+<strong>Attorney</strong> (everything except user management),
+<strong>Staff</strong> (no billing, no deleting, no audit log).</p>
+
+<table class="table">
+  <thead><tr><th>Username</th><th>Full name</th><th>Role</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr{% if not u.is_active %} class="row-inactive"{% endif %}>
+      <td>{{ u.username }}</td>
+      <td>{{ u.full_name or '—' }}</td>
+      <td><span class="badge badge-role-{{ u.role }}">{{ u.role|capitalize }}</span></td>
+      <td>
+        {% if u.is_active %}<span class="badge badge-active">Active</span>
+        {% else %}<span class="badge badge-closed">Inactive</span>{% endif %}
+      </td>
+      <td>{{ u.last_login[:16].replace('T', ' ') if u.last_login else 'Never' }}</td>
+      <td class="nowrap">
+        <a href="{{ url_for('user_edit', user_id=u.id) }}" class="btn btn-small">Edit</a>
+        {% if u.is_active %}
+        <form method="post" action="{{ url_for('user_reset_password', user_id=u.id) }}" class="inline"
+              onsubmit="return confirm('Reset the password for {{ u.username }}? They will get a temporary password and must change it on next login.');">
+          <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+          <button type="submit" class="btn btn-small">Reset password</button>
+        </form>
+        <form method="post" action="{{ url_for('user_deactivate', user_id=u.id) }}" class="inline"
+              onsubmit="return confirm('Deactivate {{ u.username }}? They will not be able to log in. This can be undone.');">
+          <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+          <button type="submit" class="btn btn-small btn-danger">Deactivate</button>
+        </form>
+        {% else %}
+        <form method="post" action="{{ url_for('user_reactivate', user_id=u.id) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+          <button type="submit" class="btn btn-small btn-primary">Reactivate</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

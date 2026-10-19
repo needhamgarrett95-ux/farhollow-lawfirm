@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     full_name TEXT,
     must_change_password INTEGER NOT NULL DEFAULT 0,
+    role TEXT NOT NULL DEFAULT 'staff',
+    is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS clients (
@@ -294,6 +296,18 @@ def init_db():
     db.executescript(SCHEMA)
     db.commit()
 
+    # Ensure role / is_active exist on users (added in v1.4.0 for RBAC).
+    ucols = [r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()]
+    if "role" not in ucols:
+        db.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'staff'")
+        db.execute("UPDATE users SET role = 'admin' WHERE username = 'admin'")
+        db.execute("UPDATE users SET role = 'staff' WHERE role IS NULL OR role = ''")
+        db.commit()
+    if "is_active" not in ucols:
+        db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
+        db.execute("UPDATE users SET is_active = 1 WHERE is_active IS NULL")
+        db.commit()
+
     # Ensure SSN column exists on older databases (encrypted at rest, RCW 19.255.010)
     cols = [r["name"] for r in db.execute("PRAGMA table_info(clients)").fetchall()]
     if "ssn" not in cols:
@@ -326,7 +340,7 @@ def init_db():
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "INSERT INTO users (username, password_hash, full_name, "
-            "must_change_password, created_at) VALUES (?, ?, ?, 1, ?)",
+            "must_change_password, role, is_active, created_at) VALUES (?, ?, ?, 1, 'admin', 1, ?)",
             ("admin", generate_password_hash("changeme123"), "Administrator", now),
         )
         db.commit()
@@ -726,6 +740,18 @@ def login_required(f):
     def decorated(*args, **kwargs):
         if "user_id" not in session:
             return redirect(url_for("login"))
+        # Refresh role + active status from the database on every request so
+        # admin changes (role change, deactivation) take effect immediately.
+        db = get_db()
+        me = db.execute(
+            "SELECT role, is_active FROM users WHERE id = ?",
+            (session["user_id"],),
+        ).fetchone()
+        if not me or not me["is_active"]:
+            session.clear()
+            flash("Your account is no longer active. Please contact the administrator.", "warning")
+            return redirect(url_for("login"))
+        session["role"] = me["role"] or "staff"
         # Inactivity timeout
         last = session.get("last_activity")
         if last:
@@ -770,16 +796,49 @@ def ensure_csrf():
 
 
 def is_admin():
-    """The packaged app has a single administrator account (username 'admin')."""
-    return session.get("username") == "admin"
+    """True when the logged-in user has the admin role."""
+    return session.get("role") == "admin"
 
 
 def admin_required(f):
+    """Admin-only route. Includes the login check."""
+
     @wraps(f)
+    @login_required
     def decorated(*args, **kwargs):
-        if not is_admin():
-            abort(403)
+        if session.get("role") != "admin":
+            abort(403, description="Only administrators can access this page.")
         return f(*args, **kwargs)
+
+    return decorated
+
+
+def role_required(*roles):
+    """Route restricted to the given roles (e.g. 'admin', 'attorney')."""
+
+    def decorator(f):
+        @wraps(f)
+        @login_required
+        def decorated(*args, **kwargs):
+            if session.get("role") not in roles:
+                abort(403, description="Your role does not have access to this page.")
+            return f(*args, **kwargs)
+
+        return decorated
+
+    return decorator
+
+
+def can_delete(f):
+    """Only admin and attorney roles may delete records. Staff is blocked."""
+
+    @wraps(f)
+    @login_required
+    def decorated(*args, **kwargs):
+        if session.get("role") not in ("admin", "attorney"):
+            abort(403, description="Your role does not allow deleting records.")
+        return f(*args, **kwargs)
+
     return decorated
 
 
@@ -791,6 +850,7 @@ def inject_update_info():
     return {
         "app_version": APP_VERSION,
         "is_admin": is_admin(),
+        "user_role": session.get("role", "staff"),
         # The banner is admin-only; the footer version tag is for everyone
         # (it doubles as the "server updated" notice for office computers).
         "update_available": bool(info.get("available")) and is_admin(),
@@ -843,9 +903,13 @@ def login():
             "SELECT * FROM users WHERE username = ?", (username,)
         ).fetchone()
         if user and check_password_hash(user["password_hash"], password):
+            if not user["is_active"]:
+                flash("This account has been deactivated. Please contact the administrator.", "error")
+                return render_template("login.html")
             session.clear()
             session["user_id"] = user["id"]
             session["username"] = user["username"]
+            session["role"] = user["role"] or "staff"
             session["must_change_password"] = bool(user["must_change_password"])
             session["last_activity"] = datetime.now(timezone.utc).isoformat()
             new_csrf_token()
@@ -897,6 +961,188 @@ def change_password():
             flash("Password changed successfully.", "success")
             return redirect(url_for("dashboard"))
     return render_template("change_password.html")
+
+
+# ----------------------------------------------------------------------------
+# User management (admin only)
+# ----------------------------------------------------------------------------
+VALID_ROLES = ("admin", "attorney", "staff")
+
+
+def _user_last_login(db, user_id):
+    row = db.execute(
+        "SELECT MAX(timestamp) AS t FROM audit_log WHERE user_id = ? AND action = 'login'",
+        (user_id,),
+    ).fetchone()
+    return row["t"] if row else None
+
+
+def _gen_temp_password():
+    import secrets as _secrets
+    import string as _string
+    alphabet = _string.ascii_letters + _string.digits
+    return "DGM-" + "".join(_secrets.choice(alphabet) for _ in range(8))
+
+
+@app.route("/users")
+@admin_required
+def user_list():
+    db = get_db()
+    users = db.execute(
+        "SELECT * FROM users ORDER BY is_active DESC, username"
+    ).fetchall()
+    users = [
+        dict(u, last_login=_user_last_login(db, u["id"])) for u in users
+    ]
+    return render_template("users.html", users=users)
+
+
+@app.route("/users/new", methods=["GET", "POST"])
+@admin_required
+def user_new():
+    if request.method == "POST":
+        check_csrf()
+        username = request.form.get("username", "").strip().lower()
+        full_name = request.form.get("full_name", "").strip()
+        password = request.form.get("password", "")
+        role = request.form.get("role", "staff")
+        db = get_db()
+        if not username or not password or not full_name:
+            flash("Username, full name, and password are all required.", "error")
+        elif role not in VALID_ROLES:
+            flash("Invalid role selected.", "error")
+        elif len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+        elif db.execute(
+            "SELECT 1 FROM users WHERE username = ?", (username,)
+        ).fetchone():
+            flash("That username is already taken.", "error")
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                "INSERT INTO users (username, password_hash, full_name, "
+                "must_change_password, role, is_active, created_at)"
+                " VALUES (?, ?, ?, 1, ?, 1, ?)",
+                (username, generate_password_hash(password), full_name, role, now),
+            )
+            db.commit()
+            audit("user_created", f"Created user '{username}' with role '{role}'")
+            flash(f"User '{username}' created. They must change their password on first login.", "success")
+            return redirect(url_for("user_list"))
+    return render_template("user_form.html", user=None, roles=VALID_ROLES)
+
+
+@app.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
+@admin_required
+def user_edit(user_id):
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        abort(404)
+    if request.method == "POST":
+        check_csrf()
+        full_name = request.form.get("full_name", "").strip()
+        role = request.form.get("role", "staff")
+        is_active = 1 if request.form.get("is_active") else 0
+        if not full_name:
+            flash("Full name is required.", "error")
+        elif role not in VALID_ROLES:
+            flash("Invalid role selected.", "error")
+        elif user["id"] == session["user_id"] and role != "admin":
+            flash("You cannot remove your own admin role.", "error")
+        elif user["id"] == session["user_id"] and not is_active:
+            flash("You cannot deactivate your own account.", "error")
+        elif (
+            user["role"] == "admin"
+            and role != "admin"
+            and _count_active_admins(db) <= 1
+        ):
+            flash("You cannot demote the last active admin.", "error")
+        else:
+            changes = []
+            if full_name != user["full_name"]:
+                changes.append(f"name -> '{full_name}'")
+            if role != user["role"]:
+                changes.append(f"role {user['role']} -> {role}")
+            if is_active != user["is_active"]:
+                changes.append("deactivated" if not is_active else "reactivated")
+            db.execute(
+                "UPDATE users SET full_name = ?, role = ?, is_active = ? WHERE id = ?",
+                (full_name, role, is_active, user["id"]),
+            )
+            db.commit()
+            audit("user_updated", f"Updated user '{user['username']}': " + (", ".join(changes) or "no changes"))
+            flash(f"User '{user['username']}' updated.", "success")
+            return redirect(url_for("user_list"))
+        # Re-fetch so the form re-renders with submitted values on error
+        user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return render_template("user_form.html", user=user, roles=VALID_ROLES)
+
+
+@app.route("/users/<int:user_id>/reset-password", methods=["POST"])
+@admin_required
+def user_reset_password(user_id):
+    check_csrf()
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        abort(404)
+    temp = _gen_temp_password()
+    db.execute(
+        "UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?",
+        (generate_password_hash(temp), user["id"]),
+    )
+    db.commit()
+    audit("user_password_reset", f"Reset password for user '{user['username']}'")
+    flash(
+        f"Temporary password for '{user['username']}': {temp} — "
+        "write it down now, it will not be shown again. They must change it on next login.",
+        "warning",
+    )
+    return redirect(url_for("user_list"))
+
+
+@app.route("/users/<int:user_id>/deactivate", methods=["POST"])
+@admin_required
+def user_deactivate(user_id):
+    check_csrf()
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        abort(404)
+    if user["id"] == session["user_id"]:
+        flash("You cannot deactivate your own account.", "error")
+        return redirect(url_for("user_list"))
+    if user["role"] == "admin" and _count_active_admins(db) <= 1:
+        flash("You cannot deactivate the last active admin.", "error")
+        return redirect(url_for("user_list"))
+    db.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user["id"],))
+    db.commit()
+    audit("user_deactivated", f"Deactivated user '{user['username']}'")
+    flash(f"User '{user['username']}' deactivated.", "success")
+    return redirect(url_for("user_list"))
+
+
+@app.route("/users/<int:user_id>/reactivate", methods=["POST"])
+@admin_required
+def user_reactivate(user_id):
+    check_csrf()
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        abort(404)
+    db.execute("UPDATE users SET is_active = 1 WHERE id = ?", (user["id"],))
+    db.commit()
+    audit("user_reactivated", f"Reactivated user '{user['username']}'")
+    flash(f"User '{user['username']}' reactivated.", "success")
+    return redirect(url_for("user_list"))
+
+
+def _count_active_admins(db):
+    row = db.execute(
+        "SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND is_active = 1"
+    ).fetchone()
+    return row["c"]
 
 
 # ----------------------------------------------------------------------------
@@ -1151,7 +1397,7 @@ def client_edit(client_id):
 
 
 @app.route("/clients/<int:client_id>/delete", methods=["POST"])
-@login_required
+@can_delete
 def client_delete(client_id):
     check_csrf()
     db = get_db()
@@ -1196,7 +1442,7 @@ def child_add(client_id):
 
 
 @app.route("/children/<int:child_id>/delete", methods=["POST"])
-@login_required
+@can_delete
 def child_delete(child_id):
     check_csrf()
     db = get_db()
@@ -1368,7 +1614,7 @@ def case_edit(case_id):
 
 
 @app.route("/cases/<int:case_id>/delete", methods=["POST"])
-@login_required
+@can_delete
 def case_delete(case_id):
     check_csrf()
     db = get_db()
@@ -1417,7 +1663,7 @@ def party_add(case_id):
 
 
 @app.route("/parties/<int:party_id>/delete", methods=["POST"])
-@login_required
+@can_delete
 def party_delete(party_id):
     check_csrf()
     db = get_db()
@@ -1529,7 +1775,7 @@ def document_download(doc_id):
 
 
 @app.route("/documents/<int:doc_id>/delete", methods=["POST"])
-@login_required
+@can_delete
 def document_delete(doc_id):
     check_csrf()
     db = get_db()
@@ -1670,7 +1916,7 @@ def event_toggle(event_id):
 
 
 @app.route("/events/<int:event_id>/delete", methods=["POST"])
-@login_required
+@can_delete
 def event_delete(event_id):
     check_csrf()
     db = get_db()
@@ -1690,7 +1936,7 @@ def event_delete(event_id):
 # Billing & time tracking
 # ----------------------------------------------------------------------------
 @app.route("/cases/<int:case_id>/time", methods=["GET", "POST"])
-@login_required
+@role_required("admin", "attorney")
 def time_list(case_id):
     db = get_db()
     case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
@@ -1741,7 +1987,7 @@ def time_list(case_id):
 
 
 @app.route("/time/<int:entry_id>/delete", methods=["POST"])
-@login_required
+@role_required("admin", "attorney")
 def time_delete(entry_id):
     check_csrf()
     db = get_db()
@@ -1770,7 +2016,7 @@ def time_delete(entry_id):
 
 
 @app.route("/invoices")
-@login_required
+@role_required("admin", "attorney")
 def invoice_list():
     db = get_db()
     invoices = db.execute(
@@ -1792,7 +2038,7 @@ def invoice_list():
 
 
 @app.route("/invoices/new", methods=["GET", "POST"])
-@login_required
+@role_required("admin", "attorney")
 def invoice_new():
     db = get_db()
     clients = db.execute(
@@ -1888,7 +2134,7 @@ def invoice_new():
 
 
 @app.route("/invoices/<int:invoice_id>")
-@login_required
+@role_required("admin", "attorney")
 def invoice_detail(invoice_id):
     db = get_db()
     inv = db.execute(
@@ -1910,7 +2156,7 @@ def invoice_detail(invoice_id):
 
 
 @app.route("/invoices/<int:invoice_id>/status", methods=["POST"])
-@login_required
+@role_required("admin", "attorney")
 def invoice_status(invoice_id):
     check_csrf()
     db = get_db()
@@ -1931,7 +2177,7 @@ def invoice_status(invoice_id):
 
 
 @app.route("/invoices/<int:invoice_id>/delete", methods=["POST"])
-@login_required
+@role_required("admin", "attorney")
 def invoice_delete(invoice_id):
     check_csrf()
     db = get_db()
@@ -1962,7 +2208,7 @@ def invoice_delete(invoice_id):
 
 
 @app.route("/invoices/<int:invoice_id>/pdf")
-@login_required
+@role_required("admin", "attorney")
 def invoice_pdf(invoice_id):
     """Download a professionally formatted PDF of the invoice."""
     db = get_db()
@@ -1999,7 +2245,7 @@ def invoice_pdf(invoice_id):
 # Backups (manual trigger + history)
 # ----------------------------------------------------------------------------
 @app.route("/backup/now", methods=["POST"])
-@login_required
+@role_required("admin", "attorney")
 def backup_now():
     check_csrf()
     ok, msg = do_backup(manual=True)
@@ -2009,7 +2255,7 @@ def backup_now():
 
 
 @app.route("/backup/history")
-@login_required
+@role_required("admin", "attorney")
 def backup_history():
     db = get_db()
     rows = db.execute(
@@ -2024,7 +2270,6 @@ def backup_history():
 # Software update (admin only)
 # ----------------------------------------------------------------------------
 @app.route("/admin/update")
-@login_required
 @admin_required
 def update_page():
     with _update_lock:
@@ -2037,7 +2282,6 @@ def update_page():
 
 
 @app.route("/admin/update/check", methods=["POST"])
-@login_required
 @admin_required
 def update_check_now():
     check_csrf()
@@ -2047,7 +2291,6 @@ def update_check_now():
 
 
 @app.route("/admin/update/apply", methods=["POST"])
-@login_required
 @admin_required
 def apply_update():
     check_csrf()
@@ -2075,7 +2318,7 @@ def apply_update():
 # Audit log viewer
 # ----------------------------------------------------------------------------
 @app.route("/audit")
-@login_required
+@role_required("admin", "attorney")
 def audit_view():
     db = get_db()
     entries = db.execute(

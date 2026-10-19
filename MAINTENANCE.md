@@ -837,3 +837,32 @@ Every invoice page has a **Print / PDF** button at the top. Clicking it download
 - Total due, any notes, and payment terms in the footer
 
 **Line-item dates:** When you add time entries to an invoice, their dates carry over automatically. For manual line items, you can enter a date when creating the invoice (optional — leave blank if it doesn't apply).
+
+## 26. Managing users (admin only)
+
+The software supports three kinds of accounts. Only an **Admin** can add or manage users — look for the **Users** tab at the top of the screen (it only appears for admins).
+
+**The three roles:**
+
+- **Admin** — full access to everything, including adding/removing users and installing software updates. There must always be at least one active admin.
+- **Attorney** — can do everything except manage users. Sees clients, cases, documents, calendar, billing, and the audit log.
+- **Staff** — for paralegals and assistants. Can view and edit clients, cases, documents, and the calendar, but **cannot** see billing or invoices, **cannot** delete any records, and **cannot** see the audit log. The menu simply won't show those items.
+
+**To add a new user:**
+
+1. Click **Users**, then **+ New user**.
+2. Enter a username (lowercase, no spaces), their full name, a starting password (at least 8 characters), and pick their role.
+3. Click **Save**. The new user must change their password the first time they log in.
+
+**To change someone's role or name:** Click **Edit** next to their name, make the changes, and **Save**. Role changes take effect immediately — even if that person is currently logged in.
+
+**If someone forgets their password:** Click **Reset password** next to their name. You'll get a one-time temporary password on screen — write it down or copy it, because it won't be shown again. Give it to them; they'll be forced to pick a new password when they log in.
+
+**To remove someone's access:** Click **Deactivate**. They immediately can't log in anymore, but their name stays on the list (so old audit log entries still make sense). To bring them back, click **Reactivate**.
+
+**Safety rules built into the software:**
+
+- You cannot deactivate your own account.
+- You cannot remove admin rights from yourself.
+- You cannot deactivate or demote the last remaining admin — the software will refuse and tell you why.
+- Deactivated users cannot log in, even with a correct password.

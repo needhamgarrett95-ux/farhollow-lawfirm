@@ -20,9 +20,12 @@
   <div class="stat"><span class="stat-num">{{ stats.active_cases }}</span><span class="stat-label">Active cases</span></div>
   <div class="stat"><span class="stat-num">{{ stats.pending_cases }}</span><span class="stat-label">Pending cases</span></div>
   <div class="stat"><span class="stat-num">{{ stats.total_clients }}</span><span class="stat-label">Clients</span></div>
+  {% if user_role in ('admin', 'attorney') %}
   <div class="stat"><span class="stat-num">{{ stats.unpaid_invoices }}</span><span class="stat-label">Unpaid invoices</span></div>
+  {% endif %}
 </div>
 
+{% if user_role in ('admin', 'attorney') %}
 <div class="detail-card">
   <h2>Backup status</h2>
   {% if last_backup and last_backup.status == 'ok' %}
@@ -39,6 +42,7 @@
     <a href="{{ url_for('backup_history') }}" class="btn btn-small">Backup history</a>
   </form>
 </div>
+{% endif %}
 
 <h2>Upcoming deadlines <span class="muted small">(next 14 days)</span></h2>
 {% if deadlines %}

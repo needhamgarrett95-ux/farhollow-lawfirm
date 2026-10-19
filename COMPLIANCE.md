@@ -31,6 +31,7 @@ Software controls addressing this:
 | All database queries parameterized (no SQL injection) | every `db.execute()` call |
 | Sensitive fields encrypted at rest (SSNs, dates of birth) | `crypto.py`, `encrypt_value`/`decrypt_value` |
 | Tamper-evident audit log (see below) | `audit_log` table + DB triggers |
+| Role-based access control: Admin / Attorney / Staff roles; staff cannot see billing, delete records, or view the audit log; user management is admin-only | `role_required` / `can_delete` / `admin_required` decorators, `users` table |
 | Binds to `127.0.0.1` by default (this machine only) | `app.run(...)` in `app.py` |
 
 ### WSBA Advisory Opinion 2215 — Ongoing duty of data security
@@ -147,6 +148,7 @@ The software cannot do these things. They are operational and legal duties:
 | Data | Stored where | Protected how |
 |---|---|---|
 | Passwords | `users.password_hash` | Hashed (PBKDF2 via Werkzeug), never plain text |
+| User roles, active status | `users.role`, `users.is_active` | Admin-only management; deactivated users cannot log in |
 | Client SSNs | `clients.ssn` | Encrypted at rest (Fernet) |
 | Client/spouse/child DOBs | `clients.date_of_birth`, `clients.spouse_dob`, `children.date_of_birth` | Encrypted at rest (Fernet) |
 | Names, contact info, notes | `clients`, `cases` tables | Access-controlled (login required), not encrypted at rest in v1 |

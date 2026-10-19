@@ -85,6 +85,12 @@ h3 { font-size: 15px; margin: 16px 0 8px; }
 .badge-active { background: #dcfce7; color: var(--success); }
 .badge-pending { background: #fef3c7; color: var(--warning); }
 .badge-closed { background: #e5e7eb; color: var(--muted); }
+.badge-role-admin { background: #1f3a5f; color: #fff; }
+.badge-role-attorney { background: #dbeafe; color: #1e40af; }
+.badge-role-staff { background: #f3f4f6; color: #4b5563; }
+.row-inactive { opacity: 0.65; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin: 12px 0; }
+.checkbox-row input { width: auto; }
 
 /* Buttons */
 .btn {

@@ -43,10 +43,12 @@
   </div>
 </form>
 {% if client %}
+{% if user_role in ('admin', 'attorney') %}
 <form method="post" action="{{ url_for('client_delete', client_id=client.id) }}" class="danger-zone"
       onsubmit="return confirm('Delete this client? This cannot be undone.');">
   <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
   <button type="submit" class="btn btn-danger">Delete client</button>
 </form>
+{% endif %}
 {% endif %}
 {% endblock %}
