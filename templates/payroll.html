@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Run Payroll — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Run Payroll</h1>
+  <a href="{{ url_for('payroll_reports') }}" class="btn btn-link">Payroll reports</a>
+</div>
+{% set active_tab = 'payroll' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="alert alert-warning">
+  <strong>Verify before you pay.</strong> Payroll tax rates change annually — confirm the current
+  IRS federal, Social Security, and Medicare rates plus WA PFML and WA Cares rates in
+  <a href="{{ url_for('tax_settings') }}">Tax Settings</a> before generating paychecks.
+  This tool does not replace a CPA or payroll service.
+</div>
+
+<div class="form-card" style="margin-bottom:18px;">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <div class="form-grid">
+      <label>Period start *
+        <input type="date" name="period_start" value="{{ period_start or '' }}" required>
+      </label>
+      <label>Period end *
+        <input type="date" name="period_end" value="{{ period_end or '' }}" required>
+      </label>
+      <label>Pay date *
+        <input type="date" name="pay_date" value="{{ pay_date or '' }}" required>
+      </label>
+      <div class="form-actions" style="margin-top:0;align-self:end;">
+        <button type="submit" name="action" value="preview" class="btn btn-primary">{{ icon('eye', 15) }} Preview</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% if preview %}
+<h2>Preview <span class="muted small">{{ period_start }} to {{ period_end }} · pay date {{ pay_date }}</span></h2>
+<table class="table">
+  <thead><tr><th>Employee</th><th>Reg hrs</th><th>OT hrs</th><th>Gross</th><th>Federal</th><th>SS</th><th>Medicare</th><th>PFML</th><th>WA Cares</th><th>Net</th></tr></thead>
+  <tbody>
+  {% for p in preview %}
+    <tr>
+      <td>{{ p.full_name }}</td>
+      <td class="nowrap">{{ p.reg_hours }}</td>
+      <td class="nowrap">{{ p.ot_hours }}</td>
+      <td class="nowrap">${{ p.gross_cents|cents }}</td>
+      <td class="nowrap">${{ p.federal_cents|cents }}</td>
+      <td class="nowrap">${{ p.ss_cents|cents }}</td>
+      <td class="nowrap">${{ p.medicare_cents|cents }}</td>
+      <td class="nowrap">${{ p.pfml_cents|cents }}</td>
+      <td class="nowrap">${{ p.wacares_cents|cents }}</td>
+      <td class="nowrap"><strong>${{ p.net_cents|cents }}</strong></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<form method="post" onsubmit="return modalConfirmSubmit(this, 'Generate {{ preview|length }} paycheck(s) for pay date {{ pay_date }}? This is final and cannot be undone.', {title: 'Generate paychecks', confirmText: 'Generate', danger: true});">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+  <input type="hidden" name="period_start" value="{{ period_start }}">
+  <input type="hidden" name="period_end" value="{{ period_end }}">
+  <input type="hidden" name="pay_date" value="{{ pay_date }}">
+  <button type="submit" name="action" value="generate" class="btn btn-danger">{{ icon('checkmark', 15) }} Generate paychecks</button>
+</form>
+{% endif %}
+
+{% if employees %}
+<p class="muted small">Eligible employees:
+{% for e in employees %}{{ e.full_name }} ({{ e.pay_type }}, {{ e.pay_frequency|replace('_', '-') }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+{% endif %}
+
+<h2>Recent paychecks</h2>
+{% if generated %}
+<table class="table">
+  <thead><tr><th>Employee</th><th>Pay date</th><th>Net pay</th><th></th></tr></thead>
+  <tbody>
+  {% for g in generated %}
+    <tr>
+      <td>{{ g.employee_name }}</td>
+      <td class="nowrap">{{ g.pay_date }}</td>
+      <td class="nowrap">${{ g.net_cents|cents }}</td>
+      <td><a href="{{ url_for('paystub_pdf', paycheck_id=g.id) }}" class="btn btn-small">{{ icon('download', 13) }} Pay stub PDF</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No paychecks generated yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{% if employee %}Edit{% else %}Add{% endif %} Employee — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{% if employee %}Edit Employee{% else %}Add Employee{% endif %}</h1>
+</div>
+{% set active_tab = 'employees' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="form-card">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <div class="form-grid">
+      <label>Full name *
+        <input type="text" name="full_name" required placeholder="e.g. Jane Smith"
+               {% if employee %}value="{{ employee.full_name }}"{% endif %}>
+      </label>
+      <label>Linked login (optional)
+        <select name="user_id">
+          <option value="">— none —</option>
+          {% for u in users %}
+          <option value="{{ u.id }}" {% if employee and employee.user_id and employee.user_id|string == u.id|string %}selected{% endif %}>{{ u.username }}{% if u.full_name %} ({{ u.full_name }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Pay type *
+        <select name="pay_type" id="payType" required>
+          <option value="hourly" {% if employee and employee.pay_type == 'hourly' %}selected{% endif %}>Hourly</option>
+          <option value="salary" {% if employee and employee.pay_type == 'salary' %}selected{% endif %}>Salary</option>
+        </select>
+      </label>
+      <label>Pay rate ($) *
+        <span class="muted small" id="payRateHint">hourly rate</span>
+        <input type="number" name="pay_rate" required placeholder="0.00" step="0.01" min="0.01" inputmode="decimal"
+               {% if employee %}value="{{ '%.2f'|format(employee.pay_rate_cents / 100) }}"{% endif %}>
+      </label>
+      <label>Pay frequency *
+        <select name="pay_frequency" required>
+          {% for f in ['weekly', 'biweekly', 'semi-monthly', 'monthly'] %}
+          <option value="{{ f }}" {% if employee and employee.pay_frequency == f %}selected{% endif %}>{{ f|replace('_', '-')|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Hire date
+        <input type="date" name="hire_date" value="{{ employee.hire_date if employee and employee.hire_date else today }}">
+      </label>
+      <label>Filing status *
+        <select name="filing_status" required>
+          <option value="single" {% if employee and employee.filing_status == 'single' %}selected{% endif %}>Single</option>
+          <option value="married" {% if employee and employee.filing_status == 'married' %}selected{% endif %}>Married</option>
+        </select>
+      </label>
+      <label>Allowances
+        <input type="number" name="allowances" min="0" step="1" placeholder="0"
+               value="{{ employee.allowances if employee and employee.allowances is not none else 0 }}">
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">{% if employee %}Save changes{% else %}Add employee{% endif %}</button>
+      <a href="{{ url_for('employee_list') }}" class="btn btn-link">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  var typeSel = document.getElementById('payType');
+  var hint = document.getElementById('payRateHint');
+  function toggle() {
+    hint.textContent = (typeSel.value === 'salary') ? 'annual salary' : 'hourly rate';
+  }
+  typeSel.addEventListener('change', toggle);
+  toggle();
+})();
+</script>
+{% endblock %}

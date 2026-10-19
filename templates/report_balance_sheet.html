@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Balance Sheet — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Balance Sheet</h1>
+  <a href="{{ url_for('report_export_csv', report='balance_sheet', as_of=as_of) }}" class="btn">{{ icon('download', 15) }} Export CSV</a>
+</div>
+{% set active_tab = 'reports' %}
+{% include "_accounting_tabs.html" %}
+<p class="muted small">View: <a href="{{ url_for('report_pl') }}">P&amp;L</a> · <strong>Balance sheet</strong> · <a href="{{ url_for('report_ledger') }}">General ledger</a></p>
+<p class="muted">As of {{ as_of }}</p>
+
+<h2>Assets</h2>
+{% if assets %}
+<table class="table">
+  <thead><tr><th>Account</th><th>Total</th></tr></thead>
+  <tbody>
+  {% for a in assets %}
+    <tr><td>{{ a.name }}</td><td class="nowrap">${{ a.total_cents|cents }}</td></tr>
+  {% endfor %}
+    <tr><td><strong>Total assets</strong></td><td class="nowrap"><strong>${{ total_assets|cents }}</strong></td></tr>
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No asset accounts.</p>
+{% endif %}
+
+<h2>Liabilities</h2>
+{% if liabilities %}
+<table class="table">
+  <thead><tr><th>Account</th><th>Total</th></tr></thead>
+  <tbody>
+  {% for l in liabilities %}
+    <tr><td>{{ l.name }}</td><td class="nowrap">${{ l.total_cents|cents }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No liability accounts.</p>
+{% endif %}
+
+<h2>Equity</h2>
+{% if equity %}
+<table class="table">
+  <thead><tr><th>Account</th><th>Total</th></tr></thead>
+  <tbody>
+  {% for e in equity %}
+    <tr><td>{{ e.name }}</td><td class="nowrap">${{ e.total_cents|cents }}</td></tr>
+  {% endfor %}
+    <tr><td><strong>Total liabilities + equity</strong></td><td class="nowrap"><strong>${{ total_liab_equity|cents }}</strong></td></tr>
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No equity accounts.</p>
+{% endif %}
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Total assets</h2>
+    <p><span class="stat-num">${{ total_assets|cents }}</span></p>
+  </div>
+  <div class="detail-card">
+    <h2>Total liabilities + equity</h2>
+    <p><span class="stat-num">${{ total_liab_equity|cents }}</span></p>
+  </div>
+</div>
+{% if total_assets == total_liab_equity %}
+<p class="muted">{{ icon('checkmark', 16) }} The books balance — assets equal liabilities plus equity.</p>
+{% else %}
+<div class="alert alert-danger">
+  <strong>Out of balance</strong> by ${{ (total_assets - total_liab_equity)|abs|cents }}. Review your entries before relying on these numbers.
+</div>
+{% endif %}
+{% endblock %}

@@ -29,6 +29,11 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 from crypto import encrypt_value, decrypt_value, looks_encrypted
+from payroll import (
+    calculate_paycheck, weekly_hours, entry_hours, get_rate,
+    PAY_PERIODS_PER_YEAR,
+)
+from paystub_pdf import build_paystub_pdf
 from deadlines import (
     DEADLINE_RULES,
     TRIGGER_CHOICES,
@@ -334,6 +339,100 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     dashboard_layout TEXT,  -- JSON: [{"id": "deadlines", "visible": true}, ...] in display order
     theme TEXT NOT NULL DEFAULT 'light'  -- 'light' or 'dark'
 );
+-- Operating bookkeeping (firm's own money — separate from client trust funds).
+-- Amounts stored as INTEGER cents, signed: income positive, expenses negative.
+-- Balances always computed via SUM(); never stored.
+CREATE TABLE IF NOT EXISTS coa_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,  -- income | expense | asset | liability | equity
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS op_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES coa_accounts(id),
+    txn_date TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,  -- signed: + income/asset, - expense
+    description TEXT NOT NULL,
+    client_id INTEGER REFERENCES clients(id),
+    case_id INTEGER REFERENCES cases(id),
+    reference TEXT,
+    receipt_path TEXT,
+    invoice_id INTEGER REFERENCES invoices(id),  -- auto-created from paid invoices
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS op_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES coa_accounts(id),
+    statement_date TEXT NOT NULL,
+    statement_balance_cents INTEGER NOT NULL,
+    book_balance_cents INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reconciled_by INTEGER REFERENCES users(id),
+    reconciled_at TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
+-- Payroll. WA has no state income tax. Employee wage data is sensitive:
+-- pay_rate_cents is encrypted at rest via crypto.py.
+CREATE TABLE IF NOT EXISTS employees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id),
+    full_name TEXT NOT NULL,
+    pay_type TEXT NOT NULL DEFAULT 'hourly',  -- hourly | salary
+    pay_rate_cents INTEGER NOT NULL,  -- hourly rate in cents, or ANNUAL salary in cents; encrypted
+    pay_frequency TEXT NOT NULL DEFAULT 'biweekly',  -- weekly|biweekly|semimonthly|monthly
+    filing_status TEXT NOT NULL DEFAULT 'single',  -- single | married
+    allowances INTEGER NOT NULL DEFAULT 0,
+    hire_date TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timeclock_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    clock_in TEXT NOT NULL,   -- ISO datetime
+    clock_out TEXT,           -- ISO datetime, NULL = currently clocked in
+    manual_hours REAL,        -- set for manual entries instead of clock in/out
+    entry_date TEXT NOT NULL, -- YYYY-MM-DD (for manual entries / grouping)
+    notes TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paychecks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    pay_period_start TEXT NOT NULL,
+    pay_period_end TEXT NOT NULL,
+    pay_date TEXT NOT NULL,
+    reg_hours REAL NOT NULL DEFAULT 0,
+    ot_hours REAL NOT NULL DEFAULT 0,
+    gross_cents INTEGER NOT NULL,
+    federal_cents INTEGER NOT NULL DEFAULT 0,
+    ss_cents INTEGER NOT NULL DEFAULT 0,
+    medicare_cents INTEGER NOT NULL DEFAULT 0,
+    pfml_cents INTEGER NOT NULL DEFAULT 0,
+    wacares_cents INTEGER NOT NULL DEFAULT 0,
+    other_deductions_cents INTEGER NOT NULL DEFAULT 0,
+    net_cents INTEGER NOT NULL,
+    ytd_gross_cents INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
+-- Configurable tax rates. Rates change annually — the owner MUST verify
+-- these against current IRS / WA ESD / WA L&I publications before running
+-- payroll. Editable via the Tax Settings page (admin only).
+CREATE TABLE IF NOT EXISTS tax_rates (
+    key TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    value TEXT NOT NULL,
+    help TEXT,
+    effective_year INTEGER NOT NULL DEFAULT 2026,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -356,6 +455,110 @@ def close_db(exc):
         db.close()
 
 
+DEFAULT_COA = [
+    # (code, name, type)
+    ("4000", "Legal Fees", "income"),
+    ("4010", "Consultation Fees", "income"),
+    ("4020", "Other Income", "income"),
+    ("1000", "Operating Checking", "asset"),
+    ("1010", "Petty Cash", "asset"),
+    ("1100", "Accounts Receivable", "asset"),
+    ("1500", "Equipment", "asset"),
+    ("2000", "Accounts Payable", "liability"),
+    ("2010", "Credit Card", "liability"),
+    ("2100", "Payroll Liabilities", "liability"),
+    ("5000", "Rent", "expense"),
+    ("5010", "Utilities", "expense"),
+    ("5020", "Office Supplies", "expense"),
+    ("5030", "Insurance", "expense"),
+    ("5040", "Bar Dues", "expense"),
+    ("5050", "CLE / Education", "expense"),
+    ("5060", "Software & Subscriptions", "expense"),
+    ("5070", "Marketing", "expense"),
+    ("5080", "Travel", "expense"),
+    ("5090", "Meals & Entertainment", "expense"),
+    ("5100", "Professional Services", "expense"),
+    ("5110", "Bank Fees", "expense"),
+    ("5120", "Payroll Wages", "expense"),
+    ("5130", "Payroll Taxes (Employer)", "expense"),
+    ("5990", "Other Expenses", "expense"),
+    ("3000", "Owner's Capital", "equity"),
+    ("3100", "Owner's Draw", "equity"),
+    ("3200", "Capital Contributions", "equity"),
+]
+
+# Default tax rates. THESE ARE ESTIMATES — the owner MUST verify against
+# current IRS Publication 15-T, WA ESD, and WA L&I publications before
+# running payroll. All editable via Tax Settings (admin only).
+DEFAULT_TAX_RATES = [
+    # key, label, value, help
+    ("fed_std_ded_single", "Federal standard deduction — Single (annual $)",
+     "15750", "IRS 2026 estimate. Subtracted from annualized wages before applying withholding brackets."),
+    ("fed_std_ded_married", "Federal standard deduction — Married (annual $)",
+     "31500", "IRS 2026 estimate."),
+    ("fed_brackets_single", "Federal withholding brackets — Single",
+     "12275:10,49900:12,106450:22,203250:24,258050:32,645250:35,99999999:37",
+     "Percentage-method brackets (2026 estimate). Format: upper_bound:rate_pct, ... Applied to annualized taxable wages."),
+    ("fed_brackets_married", "Federal withholding brackets — Married",
+     "24550:10,99800:12,212900:22,406500:24,516100:32,99999999:37",
+     "Percentage-method brackets (2026 estimate)."),
+    ("ss_rate", "Social Security rate — employee (%)", "6.2",
+     "Withheld from paycheck."),
+    ("ss_wage_base", "Social Security wage base (annual $)", "184500",
+     "2026 estimate. No SS withheld above this YTD amount."),
+    ("ss_rate_employer", "Social Security rate — employer (%)", "6.2",
+     "Employer cost, not deducted from paycheck."),
+    ("medicare_rate", "Medicare rate — employee (%)", "1.45", "Withheld from paycheck."),
+    ("medicare_rate_employer", "Medicare rate — employer (%)", "1.45",
+     "Employer cost, not deducted from paycheck."),
+    ("medicare_addl_rate", "Additional Medicare rate over $200k (%)", "0.9",
+     "Employee-paid on wages over $200,000."),
+    ("pfml_total_rate", "WA PFML total premium rate (%)", "0.92",
+     "WA Paid Family & Medical Leave. Verify current ESD rate annually."),
+    ("pfml_employee_share", "WA PFML employee share of total (%)", "71.43",
+     "Small employers (<50 staff) do not pay the employer share; employee pays this share of the total."),
+    ("pfml_employer_pays", "WA PFML employer pays its share (1=yes, 0=no)", "0",
+     "Set to 1 only if the firm has 50+ employees."),
+    ("wacares_rate", "WA Cares (long-term care) rate — employee (%)", "0.58",
+     "Employee-paid. Verify current rate annually."),
+    ("sui_rate", "WA unemployment (SUI) rate — employer (%)", "1.5",
+     "Employer-paid. Actual rate varies by employer experience rating — verify with ESD."),
+    ("sui_wage_base", "WA SUI taxable wage base (annual $)", "74000",
+     "Verify current ESD wage base annually."),
+    ("li_rate_per_hour", "WA workers' comp (L&I) — employer cost per hour ($)", "0.25",
+     "Employer-paid. Actual rate depends on risk class — verify with L&I. Office work is low; this is a placeholder."),
+]
+
+
+def _seed_coa(db):
+    """Insert the default chart of accounts if the table is empty."""
+    row = db.execute("SELECT COUNT(*) AS c FROM coa_accounts").fetchone()
+    if row["c"] > 0:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    for code, name, atype in DEFAULT_COA:
+        db.execute(
+            "INSERT INTO coa_accounts (code, name, type, is_active, created_at)"
+            " VALUES (?, ?, ?, 1, ?)",
+            (code, name, atype, now),
+        )
+    db.commit()
+
+
+def _seed_tax_rates(db):
+    """Insert default tax rates for any missing keys (never overwrites)."""
+    now = datetime.now(timezone.utc).isoformat()
+    for key, label, value, help_text in DEFAULT_TAX_RATES:
+        row = db.execute("SELECT 1 FROM tax_rates WHERE key = ?", (key,)).fetchone()
+        if not row:
+            db.execute(
+                "INSERT INTO tax_rates (key, label, value, help, effective_year, updated_at)"
+                " VALUES (?, ?, ?, ?, 2026, ?)",
+                (key, label, value, help_text, now),
+            )
+    db.commit()
+
+
 def init_db():
     db = get_db()
     db.executescript(SCHEMA)
@@ -372,6 +575,19 @@ def init_db():
         db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
         db.execute("UPDATE users SET is_active = 1 WHERE is_active IS NULL")
         db.commit()
+    # Granular permissions (v2.1): JSON dict on users.permissions. Backfill
+    # from the role preset for existing users.
+    if "permissions" not in ucols:
+        db.execute("ALTER TABLE users ADD COLUMN permissions TEXT")
+        db.commit()
+    for urow in db.execute("SELECT id, role, permissions FROM users").fetchall():
+        if not urow["permissions"]:
+            preset = role_default_permissions(urow["role"] or "staff")
+            db.execute(
+                "UPDATE users SET permissions = ? WHERE id = ?",
+                (json.dumps(preset), urow["id"]),
+            )
+    db.commit()
 
     # Ensure SSN column exists on older databases (encrypted at rest, RCW 19.255.010)
     cols = [r["name"] for r in db.execute("PRAGMA table_info(clients)").fetchall()]
@@ -415,14 +631,76 @@ def init_db():
         db.execute("ALTER TABLE user_preferences ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'")
     db.commit()
 
+    # Migration for v2.1: operating bookkeeping + payroll tables. CREATE TABLE
+    # IF NOT EXISTS in SCHEMA handles fresh installs; ensure existing DBs
+    # get the new tables too.
+    for _ddl in (
+        """CREATE TABLE IF NOT EXISTS coa_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL, type TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS op_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id INTEGER NOT NULL REFERENCES coa_accounts(id),
+            txn_date TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+            description TEXT NOT NULL, client_id INTEGER REFERENCES clients(id),
+            case_id INTEGER REFERENCES cases(id), reference TEXT,
+            receipt_path TEXT, invoice_id INTEGER REFERENCES invoices(id),
+            created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS op_reconciliations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id INTEGER NOT NULL REFERENCES coa_accounts(id),
+            statement_date TEXT NOT NULL, statement_balance_cents INTEGER NOT NULL,
+            book_balance_cents INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            reconciled_by INTEGER REFERENCES users(id), reconciled_at TEXT,
+            notes TEXT, created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER REFERENCES users(id), full_name TEXT NOT NULL,
+            pay_type TEXT NOT NULL DEFAULT 'hourly', pay_rate_cents INTEGER NOT NULL,
+            pay_frequency TEXT NOT NULL DEFAULT 'biweekly',
+            filing_status TEXT NOT NULL DEFAULT 'single',
+            allowances INTEGER NOT NULL DEFAULT 0, hire_date TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS timeclock_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id),
+            clock_in TEXT NOT NULL, clock_out TEXT, manual_hours REAL,
+            entry_date TEXT NOT NULL, notes TEXT,
+            created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS paychecks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id),
+            pay_period_start TEXT NOT NULL, pay_period_end TEXT NOT NULL,
+            pay_date TEXT NOT NULL, reg_hours REAL NOT NULL DEFAULT 0,
+            ot_hours REAL NOT NULL DEFAULT 0, gross_cents INTEGER NOT NULL,
+            federal_cents INTEGER NOT NULL DEFAULT 0, ss_cents INTEGER NOT NULL DEFAULT 0,
+            medicare_cents INTEGER NOT NULL DEFAULT 0, pfml_cents INTEGER NOT NULL DEFAULT 0,
+            wacares_cents INTEGER NOT NULL DEFAULT 0,
+            other_deductions_cents INTEGER NOT NULL DEFAULT 0,
+            net_cents INTEGER NOT NULL, ytd_gross_cents INTEGER NOT NULL DEFAULT 0,
+            created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS tax_rates (
+            key TEXT PRIMARY KEY, label TEXT NOT NULL, value TEXT NOT NULL,
+            help TEXT, effective_year INTEGER NOT NULL DEFAULT 2026,
+            updated_at TEXT NOT NULL)""",
+    ):
+        db.execute(_ddl)
+    db.commit()
+
+    _seed_coa(db)
+    _seed_tax_rates(db)
+
     # Seed default admin on first run
     row = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()
     if row["c"] == 0:
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "INSERT INTO users (username, password_hash, full_name, "
-            "must_change_password, role, is_active, created_at) VALUES (?, ?, ?, 1, 'admin', 1, ?)",
-            ("admin", generate_password_hash("changeme123"), "Administrator", now),
+            "must_change_password, role, is_active, permissions, created_at)"
+            " VALUES (?, ?, ?, 1, 'admin', 1, ?, ?)",
+            ("admin", generate_password_hash("changeme123"), "Administrator",
+             json.dumps(role_default_permissions("admin")), now),
         )
         db.commit()
         print("=" * 60)
@@ -1049,8 +1327,8 @@ def login_required(f):
     def decorated(*args, **kwargs):
         if "user_id" not in session:
             return redirect(url_for("login"))
-        # Refresh role + active status from the database on every request so
-        # admin changes (role change, deactivation) take effect immediately.
+        # Refresh role + active status + permissions from the database on
+        # every request so admin changes take effect immediately.
         db = get_db()
         me = db.execute(
             "SELECT role, is_active FROM users WHERE id = ?",
@@ -1061,6 +1339,7 @@ def login_required(f):
             flash("Your account is no longer active. Please contact the administrator.", "warning")
             return redirect(url_for("login"))
         session["role"] = me["role"] or "staff"
+        session["permissions"] = get_user_permissions(db, session["user_id"])
         # Inactivity timeout
         last = session.get("last_activity")
         if last:
@@ -1109,28 +1388,140 @@ def is_admin():
     return session.get("role") == "admin"
 
 
-def admin_required(f):
-    """Admin-only route. Includes the login check."""
+# ----------------------------------------------------------------------------
+# Granular permissions (v2.1). Roles are presets/templates — the admin can
+# customize individual permissions per user on the user edit page.
+# Stored as JSON in users.permissions; refreshed into the session on every
+# request by login_required, so changes take effect immediately.
+# ----------------------------------------------------------------------------
+PERMISSIONS = [
+    # (key, group, label)
+    ("view_dashboard", "General", "View dashboard"),
+    ("view_clients", "Clients", "View client list and details"),
+    ("manage_clients", "Clients", "Add and edit clients"),
+    ("view_client_ssn", "Clients", "View sensitive fields (SSN, DOB)"),
+    ("view_cases", "Cases", "View cases"),
+    ("manage_cases", "Cases", "Add and edit cases"),
+    ("view_calendar", "Calendar", "View calendar"),
+    ("manage_calendar", "Calendar", "Add and edit events"),
+    ("view_documents", "Documents", "View and download documents"),
+    ("manage_documents", "Documents", "Upload documents"),
+    ("view_billing", "Billing", "View invoices"),
+    ("manage_billing", "Billing", "Create and manage invoices"),
+    ("view_trust", "Trust", "View trust accounts and ledgers"),
+    ("manage_trust", "Trust", "Record trust transactions and reconcile"),
+    ("use_templates", "Templates", "Use document templates"),
+    ("calculate_deadlines", "Deadlines", "Use the deadline calculator"),
+    ("push_deadlines", "Deadlines", "Push deadlines to the calendar"),
+    ("view_accounting", "Accounting", "View bookkeeping reports"),
+    ("manage_accounting", "Accounting", "Record transactions, manage accounts"),
+    ("run_payroll", "Payroll", "Manage employees and run payroll"),
+    ("view_paystubs", "Payroll", "View and print paystubs"),
+    ("use_timeclock", "Timeclock", "Clock in and out"),
+    ("view_audit_log", "Audit Log", "View the audit log"),
+    ("manage_backups", "Backups", "Run and view backups"),
+    ("manage_users", "Users", "Manage users and permissions"),
+    ("delete_records", "General", "Delete records (clients, cases, etc.)"),
+]
 
-    @wraps(f)
-    @login_required
-    def decorated(*args, **kwargs):
-        if session.get("role") != "admin":
-            abort(403, description="Only administrators can access this page.")
-        return f(*args, **kwargs)
+PERM_GROUPS = ["General", "Clients", "Cases", "Calendar", "Documents", "Billing",
+               "Trust", "Templates", "Deadlines", "Accounting", "Payroll",
+               "Timeclock", "Audit Log", "Backups", "Users"]
 
-    return decorated
+# manage_* implies the corresponding view_* (expanded at load time).
+PERM_IMPLICATIONS = {
+    "manage_clients": ("view_clients",),
+    "manage_cases": ("view_cases",),
+    "manage_calendar": ("view_calendar",),
+    "manage_documents": ("view_documents",),
+    "manage_billing": ("view_billing",),
+    "manage_trust": ("view_trust",),
+    "manage_accounting": ("view_accounting",),
+    "run_payroll": ("view_paystubs",),
+    "push_deadlines": ("calculate_deadlines",),
+}
+
+_ALL_PERM_KEYS = [p[0] for p in PERMISSIONS]
 
 
-def role_required(*roles):
-    """Route restricted to the given roles (e.g. 'admin', 'attorney')."""
+def role_default_permissions(role):
+    """Default permission set for a role preset. Returns {perm: bool}."""
+    if role == "admin":
+        return {k: True for k in _ALL_PERM_KEYS}
+    if role == "attorney":
+        excluded = {"manage_users", "manage_accounting", "run_payroll"}
+        return {k: (k not in excluded) for k in _ALL_PERM_KEYS}
+    if role == "accountant":
+        granted = {
+            "view_dashboard", "view_clients",
+            "view_billing", "manage_billing",
+            "view_trust", "manage_trust",
+            "view_accounting", "manage_accounting",
+            "run_payroll", "view_paystubs",
+            "use_timeclock",
+        }
+        return {k: (k in granted) for k in _ALL_PERM_KEYS}
+    # staff (default)
+    granted = {
+        "view_dashboard",
+        "view_clients", "manage_clients",
+        "view_cases", "manage_cases",
+        "view_calendar", "manage_calendar",
+        "view_documents", "manage_documents",
+        "calculate_deadlines",
+        "use_timeclock",
+    }
+    return {k: (k in granted) for k in _ALL_PERM_KEYS}
+
+
+def expand_permissions(raw):
+    """Expand manage_* implications so checks are simple lookups."""
+    perms = dict(raw)
+    for granter, implied in PERM_IMPLICATIONS.items():
+        if perms.get(granter):
+            for p in implied:
+                perms[p] = True
+    # Ensure every known key exists
+    for k in _ALL_PERM_KEYS:
+        perms.setdefault(k, False)
+    return perms
+
+
+def get_user_permissions(db, user_id):
+    """Load and expand a user's permission dict. Falls back to role preset."""
+    row = db.execute(
+        "SELECT role, permissions FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    if not row:
+        return expand_permissions(role_default_permissions("staff"))
+    raw = {}
+    if row["permissions"]:
+        try:
+            raw = json.loads(row["permissions"])
+        except (ValueError, TypeError):
+            raw = {}
+    if not raw:
+        raw = role_default_permissions(row["role"] or "staff")
+    # Only keep known keys
+    raw = {k: bool(v) for k, v in raw.items() if k in _ALL_PERM_KEYS}
+    return expand_permissions(raw)
+
+
+def user_has_perm(perms, perm):
+    """True if the (expanded) permission dict grants perm."""
+    return bool(perms.get(perm))
+
+
+def permission_required(*perms):
+    """Route requires ANY of the given permissions. Includes login check."""
 
     def decorator(f):
         @wraps(f)
         @login_required
         def decorated(*args, **kwargs):
-            if session.get("role") not in roles:
-                abort(403, description="Your role does not have access to this page.")
+            user_perms = session.get("permissions", {})
+            if not any(user_has_perm(user_perms, p) for p in perms):
+                abort(403, description="You do not have permission to access this page.")
             return f(*args, **kwargs)
 
         return decorated
@@ -1138,17 +1529,17 @@ def role_required(*roles):
     return decorator
 
 
-def can_delete(f):
-    """Only admin and attorney roles may delete records. Staff is blocked."""
-
-    @wraps(f)
-    @login_required
-    def decorated(*args, **kwargs):
-        if session.get("role") not in ("admin", "attorney"):
-            abort(403, description="Your role does not allow deleting records.")
-        return f(*args, **kwargs)
-
-    return decorated
+def count_manage_users_holders(db, exclude_user_id=None):
+    """Count active users with the manage_users permission (for safety checks)."""
+    count = 0
+    q = "SELECT id, is_active, permissions, role FROM users WHERE is_active = 1"
+    for row in db.execute(q).fetchall():
+        if exclude_user_id and row["id"] == exclude_user_id:
+            continue
+        perms = get_user_permissions(db, row["id"])
+        if perms.get("manage_users"):
+            count += 1
+    return count
 
 
 @app.template_filter("cents")
@@ -1185,6 +1576,7 @@ def inject_update_info():
         "app_version": APP_VERSION,
         "is_admin": is_admin(),
         "user_role": session.get("role", "staff"),
+        "perms": session.get("permissions", {}),
         "theme": theme,
         "nav_deadline_count": nav_deadline_count,
         # The banner is admin-only; the footer version tag is for everyone
@@ -1302,7 +1694,7 @@ def change_password():
 # ----------------------------------------------------------------------------
 # User management (admin only)
 # ----------------------------------------------------------------------------
-VALID_ROLES = ("admin", "attorney", "staff")
+VALID_ROLES = ("admin", "attorney", "accountant", "staff")
 
 
 def _user_last_login(db, user_id):
@@ -1321,7 +1713,7 @@ def _gen_temp_password():
 
 
 @app.route("/users")
-@admin_required
+@permission_required("manage_users")
 def user_list():
     db = get_db()
     users = db.execute(
@@ -1334,7 +1726,7 @@ def user_list():
 
 
 @app.route("/users/new", methods=["GET", "POST"])
-@admin_required
+@permission_required("manage_users")
 def user_new():
     if request.method == "POST":
         check_csrf()
@@ -1354,22 +1746,46 @@ def user_new():
         ).fetchone():
             flash("That username is already taken.", "error")
         else:
+            # Permissions: start from the role preset, apply checkbox overrides.
+            perms = _permissions_from_form(role)
             now = datetime.now(timezone.utc).isoformat()
             db.execute(
                 "INSERT INTO users (username, password_hash, full_name, "
-                "must_change_password, role, is_active, created_at)"
-                " VALUES (?, ?, ?, 1, ?, 1, ?)",
-                (username, generate_password_hash(password), full_name, role, now),
+                "must_change_password, role, is_active, permissions, created_at)"
+                " VALUES (?, ?, ?, 1, ?, 1, ?, ?)",
+                (username, generate_password_hash(password), full_name, role,
+                 json.dumps(perms), now),
             )
             db.commit()
             audit("user_created", f"Created user '{username}' with role '{role}'")
             flash(f"User '{username}' created. They must change their password on first login.", "success")
             return redirect(url_for("user_list"))
-    return render_template("user_form.html", user=None, roles=VALID_ROLES)
+    return render_template(
+        "user_form.html", user=None, roles=VALID_ROLES,
+        permissions=PERMISSIONS, perm_groups=PERM_GROUPS,
+        role_presets={r: role_default_permissions(r) for r in VALID_ROLES},
+        current_perms=role_default_permissions("staff"),
+    )
+
+
+def _permissions_from_form(default_role):
+    """Build a permission dict from submitted checkboxes, falling back to
+    the role preset when no checkbox data was submitted."""
+    perms = {}
+    any_submitted = False
+    for key in _ALL_PERM_KEYS:
+        if f"perm_{key}" in request.form:
+            any_submitted = True
+            perms[key] = True
+    if not any_submitted:
+        return role_default_permissions(default_role)
+    # Unchecked boxes are False; expand implications
+    full = {k: (k in perms) for k in _ALL_PERM_KEYS}
+    return expand_permissions(full)
 
 
 @app.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
-@admin_required
+@permission_required("manage_users")
 def user_edit(user_id):
     db = get_db()
     user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -1380,20 +1796,19 @@ def user_edit(user_id):
         full_name = request.form.get("full_name", "").strip()
         role = request.form.get("role", "staff")
         is_active = 1 if request.form.get("is_active") else 0
+        new_perms = _permissions_from_form(role)
+        is_self = user["id"] == session["user_id"]
         if not full_name:
             flash("Full name is required.", "error")
         elif role not in VALID_ROLES:
             flash("Invalid role selected.", "error")
-        elif user["id"] == session["user_id"] and role != "admin":
-            flash("You cannot remove your own admin role.", "error")
-        elif user["id"] == session["user_id"] and not is_active:
+        elif is_self and not is_active:
             flash("You cannot deactivate your own account.", "error")
-        elif (
-            user["role"] == "admin"
-            and role != "admin"
-            and _count_active_admins(db) <= 1
-        ):
-            flash("You cannot demote the last active admin.", "error")
+        elif is_self and not new_perms.get("manage_users"):
+            flash("You cannot remove your own user-management permission.", "error")
+        elif (not new_perms.get("manage_users")
+                and count_manage_users_holders(db, exclude_user_id=user["id"]) < 1):
+            flash("You cannot remove the last user with user-management permission.", "error")
         else:
             changes = []
             if full_name != user["full_name"]:
@@ -1402,9 +1817,15 @@ def user_edit(user_id):
                 changes.append(f"role {user['role']} -> {role}")
             if is_active != user["is_active"]:
                 changes.append("deactivated" if not is_active else "reactivated")
+            old_perms = get_user_permissions(db, user["id"])
+            perm_changes = [k for k in _ALL_PERM_KEYS
+                            if bool(old_perms.get(k)) != bool(new_perms.get(k))]
+            if perm_changes:
+                changes.append(f"permissions changed: {', '.join(perm_changes)}")
             db.execute(
-                "UPDATE users SET full_name = ?, role = ?, is_active = ? WHERE id = ?",
-                (full_name, role, is_active, user["id"]),
+                "UPDATE users SET full_name = ?, role = ?, is_active = ?, permissions = ?"
+                " WHERE id = ?",
+                (full_name, role, is_active, json.dumps(new_perms), user["id"]),
             )
             db.commit()
             audit("user_updated", f"Updated user '{user['username']}': " + (", ".join(changes) or "no changes"))
@@ -1412,11 +1833,17 @@ def user_edit(user_id):
             return redirect(url_for("user_list"))
         # Re-fetch so the form re-renders with submitted values on error
         user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    return render_template("user_form.html", user=user, roles=VALID_ROLES)
+    current_perms = get_user_permissions(db, user["id"])
+    return render_template(
+        "user_form.html", user=user, roles=VALID_ROLES,
+        permissions=PERMISSIONS, perm_groups=PERM_GROUPS,
+        role_presets={r: role_default_permissions(r) for r in VALID_ROLES},
+        current_perms=current_perms,
+    )
 
 
 @app.route("/users/<int:user_id>/reset-password", methods=["POST"])
-@admin_required
+@permission_required("manage_users")
 def user_reset_password(user_id):
     check_csrf()
     db = get_db()
@@ -1439,7 +1866,7 @@ def user_reset_password(user_id):
 
 
 @app.route("/users/<int:user_id>/deactivate", methods=["POST"])
-@admin_required
+@permission_required("manage_users")
 def user_deactivate(user_id):
     check_csrf()
     db = get_db()
@@ -1460,7 +1887,7 @@ def user_deactivate(user_id):
 
 
 @app.route("/users/<int:user_id>/reactivate", methods=["POST"])
-@admin_required
+@permission_required("manage_users")
 def user_reactivate(user_id):
     check_csrf()
     db = get_db()
@@ -1668,12 +2095,14 @@ def dashboard():
     schedule_alert = get_clallam_schedule_alert()
 
     # --- v2.0 widget data ------------------------------------------------
-    is_staff = session.get("role") not in ("admin", "attorney")
+    # v2.1: widget visibility is permission-based (see dashboard.html,
+    # which checks perms directly). Trust data only loaded for view_trust.
+    _perms = session.get("permissions", {})
 
-    # Trust summary: attorney/admin only. Staff get None (no trust data at
-    # all in the template context) — the frontend must hide the widget.
+    # Trust summary: only for users with view_trust. Others get None (no
+    # trust data at all in the template context) — the frontend hides it.
     trust_summary = None
-    if not is_staff:
+    if user_has_perm(_perms, "view_trust"):
         accounts = []
         total_cents = 0
         for a in db.execute(
@@ -1725,7 +2154,7 @@ def dashboard():
         calendars_url=CLALLAM_CALENDARS_URL,
         today_events=today_events, week_events=week_events,
         trust_summary=trust_summary, caseload_by_type=caseload_by_type,
-        recent_clients=recent_clients, layout=layout, is_staff=is_staff,
+        recent_clients=recent_clients, layout=layout,
         theme=theme,
     )
 
@@ -1782,7 +2211,7 @@ def dashboard_theme():
 # Clients
 # ----------------------------------------------------------------------------
 @app.route("/clients")
-@login_required
+@permission_required("view_clients")
 def client_list():
     q = request.args.get("q", "").strip()
     db = get_db()
@@ -1836,7 +2265,7 @@ def find_conflicts(first_name, last_name, exclude_client_id=None):
 
 
 @app.route("/clients/new", methods=["GET", "POST"])
-@login_required
+@permission_required("manage_clients")
 def client_new():
     if request.method == "POST":
         check_csrf()
@@ -1905,7 +2334,7 @@ def _decrypt_child(row):
 
 
 @app.route("/clients/<int:client_id>")
-@login_required
+@permission_required("view_clients")
 def client_detail(client_id):
     db = get_db()
     client = db.execute(
@@ -1932,7 +2361,7 @@ def client_detail(client_id):
 
 
 @app.route("/clients/<int:client_id>/edit", methods=["GET", "POST"])
-@login_required
+@permission_required("manage_clients")
 def client_edit(client_id):
     db = get_db()
     client = db.execute(
@@ -1971,7 +2400,7 @@ def client_edit(client_id):
 
 
 @app.route("/clients/<int:client_id>/delete", methods=["POST"])
-@can_delete
+@permission_required("delete_records")
 def client_delete(client_id):
     check_csrf()
     db = get_db()
@@ -1995,7 +2424,7 @@ def client_delete(client_id):
 
 
 @app.route("/clients/<int:client_id>/children/add", methods=["POST"])
-@login_required
+@permission_required("manage_clients")
 def child_add(client_id):
     check_csrf()
     name = request.form.get("name", "").strip()
@@ -2016,7 +2445,7 @@ def child_add(client_id):
 
 
 @app.route("/children/<int:child_id>/delete", methods=["POST"])
-@can_delete
+@permission_required("delete_records")
 def child_delete(child_id):
     check_csrf()
     db = get_db()
@@ -2036,7 +2465,7 @@ def child_delete(child_id):
 # Cases / matters
 # ----------------------------------------------------------------------------
 @app.route("/cases")
-@login_required
+@permission_required("view_cases")
 def case_list():
     status = request.args.get("status", "active")
     db = get_db()
@@ -2057,7 +2486,7 @@ def case_list():
 
 
 @app.route("/cases/new", methods=["GET", "POST"])
-@login_required
+@permission_required("manage_cases")
 def case_new():
     db = get_db()
     clients = db.execute(
@@ -2149,7 +2578,7 @@ def case_new():
 
 
 @app.route("/cases/<int:case_id>")
-@login_required
+@permission_required("view_cases")
 def case_detail(case_id):
     db = get_db()
     case = db.execute(
@@ -2185,7 +2614,7 @@ def case_detail(case_id):
 
 
 @app.route("/cases/<int:case_id>/edit", methods=["GET", "POST"])
-@login_required
+@permission_required("manage_cases")
 def case_edit(case_id):
     db = get_db()
     case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
@@ -2225,7 +2654,7 @@ def case_edit(case_id):
 
 
 @app.route("/cases/<int:case_id>/status", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_cases")
 def case_set_status(case_id):
     """Inline status change from the case detail page (no full edit form)."""
     check_csrf()
@@ -2251,7 +2680,7 @@ def case_set_status(case_id):
 
 
 @app.route("/cases/<int:case_id>/delete", methods=["POST"])
-@can_delete
+@permission_required("delete_records")
 def case_delete(case_id):
     check_csrf()
     db = get_db()
@@ -2269,7 +2698,7 @@ def case_delete(case_id):
 # Opposing parties (conflict checking support)
 # ----------------------------------------------------------------------------
 @app.route("/cases/<int:case_id>/parties/add", methods=["POST"])
-@login_required
+@permission_required("manage_cases")
 def party_add(case_id):
     check_csrf()
     db = get_db()
@@ -2300,7 +2729,7 @@ def party_add(case_id):
 
 
 @app.route("/parties/<int:party_id>/delete", methods=["POST"])
-@can_delete
+@permission_required("delete_records")
 def party_delete(party_id):
     check_csrf()
     db = get_db()
@@ -2329,7 +2758,7 @@ def _case_doc_dir(case_id):
 
 
 @app.route("/cases/<int:case_id>/documents", methods=["GET", "POST"])
-@login_required
+@permission_required("view_documents")
 def document_list(case_id):
     db = get_db()
     case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
@@ -2390,7 +2819,7 @@ def document_list(case_id):
 
 
 @app.route("/documents/<int:doc_id>/download")
-@login_required
+@permission_required("view_documents")
 def document_download(doc_id):
     db = get_db()
     doc = db.execute(
@@ -2412,7 +2841,7 @@ def document_download(doc_id):
 
 
 @app.route("/documents/<int:doc_id>/delete", methods=["POST"])
-@can_delete
+@permission_required("delete_records")
 def document_delete(doc_id):
     check_csrf()
     db = get_db()
@@ -2438,7 +2867,7 @@ def document_delete(doc_id):
 # Calendar & deadlines
 # ----------------------------------------------------------------------------
 @app.route("/calendar")
-@login_required
+@permission_required("view_calendar")
 def calendar_view():
     db = get_db()
     # Month navigation: ?y=2026&m=10
@@ -2487,7 +2916,7 @@ def calendar_view():
 
 
 @app.route("/events/new", methods=["GET", "POST"])
-@login_required
+@permission_required("manage_calendar")
 def event_new():
     db = get_db()
     cases = db.execute(
@@ -2533,7 +2962,7 @@ def event_new():
 
 
 @app.route("/events/<int:event_id>/toggle", methods=["POST"])
-@login_required
+@permission_required("manage_calendar")
 def event_toggle(event_id):
     check_csrf()
     db = get_db()
@@ -2555,7 +2984,7 @@ def event_toggle(event_id):
 
 
 @app.route("/events/<int:event_id>/delete", methods=["POST"])
-@can_delete
+@permission_required("delete_records")
 def event_delete(event_id):
     check_csrf()
     db = get_db()
@@ -2575,7 +3004,7 @@ def event_delete(event_id):
 # Court deadline calculator (WA Superior Court rules)
 # ----------------------------------------------------------------------------
 @app.route("/deadlines", methods=["GET"])
-@login_required
+@permission_required("calculate_deadlines")
 def deadline_calculator():
     """Deadline calculator form + results. All roles may calculate."""
     db = get_db()
@@ -2626,7 +3055,7 @@ def deadline_calculator():
 
 
 @app.route("/deadlines/push", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("push_deadlines")
 def deadline_push():
     """Push calculated deadlines to the case calendar. Attorney/admin only."""
     check_csrf()
@@ -2699,7 +3128,7 @@ def deadline_push():
 
 
 @app.route("/clallam/schedule/dismiss", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("push_deadlines")
 def clallam_schedule_dismiss():
     """Dismiss the Clallam schedule-change alert after reviewing."""
     check_csrf()
@@ -2715,7 +3144,7 @@ def clallam_schedule_dismiss():
 # Billing & time tracking
 # ----------------------------------------------------------------------------
 @app.route("/cases/<int:case_id>/time", methods=["GET", "POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_billing")
 def time_list(case_id):
     db = get_db()
     case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
@@ -2773,7 +3202,7 @@ def time_list(case_id):
 
 
 @app.route("/time/<int:entry_id>/delete", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_billing")
 def time_delete(entry_id):
     check_csrf()
     db = get_db()
@@ -2802,7 +3231,7 @@ def time_delete(entry_id):
 
 
 @app.route("/invoices")
-@role_required("admin", "attorney")
+@permission_required("view_billing")
 def invoice_list():
     db = get_db()
     invoices = db.execute(
@@ -2824,7 +3253,7 @@ def invoice_list():
 
 
 @app.route("/invoices/new", methods=["GET", "POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_billing")
 def invoice_new():
     db = get_db()
     clients = db.execute(
@@ -2923,7 +3352,7 @@ def invoice_new():
 
 
 @app.route("/invoices/<int:invoice_id>")
-@role_required("admin", "attorney")
+@permission_required("view_billing")
 def invoice_detail(invoice_id):
     db = get_db()
     inv = db.execute(
@@ -2945,7 +3374,7 @@ def invoice_detail(invoice_id):
 
 
 @app.route("/invoices/<int:invoice_id>/status", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_billing")
 def invoice_status(invoice_id):
     check_csrf()
     db = get_db()
@@ -2956,8 +3385,31 @@ def invoice_status(invoice_id):
     if status not in INVOICE_STATUSES:
         flash("Invalid status.", "error")
     else:
+        was_paid = inv["status"] == "paid"
         db.execute("UPDATE invoices SET status = ? WHERE id = ?",
                    (status, invoice_id))
+        # Auto-book income when an invoice is first marked paid.
+        if status == "paid" and not was_paid:
+            existing = db.execute(
+                "SELECT id FROM op_transactions WHERE invoice_id = ?", (invoice_id,)
+            ).fetchone()
+            if not existing:
+                fees_acct = _get_account_by_code(db, "4000")
+                if fees_acct:
+                    total_cents = _invoice_total_cents(db, invoice_id)
+                    now = datetime.now(timezone.utc).isoformat()
+                    db.execute(
+                        """INSERT INTO op_transactions (account_id, txn_date, amount_cents,
+                            description, client_id, invoice_id, created_by, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (fees_acct["id"], inv["issue_date"] or date.today().isoformat(),
+                         total_cents,
+                         f"Payment received — Invoice {inv['invoice_number']}",
+                         inv["client_id"], invoice_id, session.get("user_id"), now),
+                    )
+                    audit("op_txn_auto",
+                          f"Auto-booked income ${cents_to_str(total_cents)} for paid invoice"
+                          f" {inv['invoice_number']}")
         db.commit()
         audit("invoice_status",
               f"Set invoice {inv['invoice_number']} to {status}")
@@ -2966,7 +3418,7 @@ def invoice_status(invoice_id):
 
 
 @app.route("/invoices/<int:invoice_id>/delete", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_billing")
 def invoice_delete(invoice_id):
     check_csrf()
     db = get_db()
@@ -2997,7 +3449,7 @@ def invoice_delete(invoice_id):
 
 
 @app.route("/invoices/<int:invoice_id>/pdf")
-@role_required("admin", "attorney")
+@permission_required("view_billing")
 def invoice_pdf(invoice_id):
     """Download a professionally formatted PDF of the invoice."""
     db = get_db()
@@ -3161,13 +3613,13 @@ def _save_generated_doc(case_id, original_name, pdf_bytes, category, notes):
 
 
 @app.route("/templates")
-@role_required("admin", "attorney")
+@permission_required("use_templates")
 def template_gallery():
     return render_template("templates.html", templates=template_list())
 
 
 @app.route("/templates/<key>")
-@role_required("admin", "attorney")
+@permission_required("use_templates")
 def template_fill(key):
     tmpl = get_template(key)
     if not tmpl:
@@ -3197,7 +3649,7 @@ def template_fill(key):
 
 
 @app.route("/templates/<key>/preview", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("use_templates")
 def template_preview(key):
     tmpl = get_template(key)
     if not tmpl:
@@ -3222,7 +3674,7 @@ def template_preview(key):
 
 
 @app.route("/templates/<key>/generate", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("use_templates")
 def template_generate(key):
     tmpl = get_template(key)
     if not tmpl:
@@ -3275,7 +3727,7 @@ def template_generate(key):
 # Staff is blocked: trust funds are never visible to the staff role.
 # ----------------------------------------------------------------------------
 @app.route("/trust")
-@role_required("admin", "attorney")
+@permission_required("view_trust")
 def trust_overview():
     db = get_db()
     accounts = db.execute(
@@ -3295,7 +3747,7 @@ def trust_overview():
 
 
 @app.route("/trust/accounts/new", methods=["GET", "POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_trust")
 def trust_account_new():
     if request.method == "POST":
         check_csrf()
@@ -3325,7 +3777,7 @@ def trust_account_new():
 
 
 @app.route("/trust/accounts/<int:account_id>")
-@role_required("admin", "attorney")
+@permission_required("view_trust")
 def trust_account_detail(account_id):
     db = get_db()
     acct = db.execute(
@@ -3357,7 +3809,7 @@ def trust_account_detail(account_id):
 
 
 @app.route("/trust/transactions/new", methods=["GET", "POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_trust")
 def trust_transaction_new():
     """Record a deposit, disbursement, transfer, or reversal. Immutable once saved."""
     db = get_db()
@@ -3517,7 +3969,7 @@ def trust_transaction_new():
 
 
 @app.route("/trust/ledger/<int:client_id>")
-@role_required("admin", "attorney")
+@permission_required("view_trust")
 def trust_client_ledger(client_id):
     """Per-client trust ledger across all accounts, with date-range filter."""
     db = get_db()
@@ -3560,7 +4012,7 @@ def trust_client_ledger(client_id):
 
 
 @app.route("/trust/reconcile/<int:account_id>", methods=["GET", "POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_trust")
 def trust_reconcile(account_id):
     """Monthly reconciliation: bank statement balance vs book balance."""
     db = get_db()
@@ -3621,7 +4073,7 @@ def trust_reconcile(account_id):
 
 
 @app.route("/trust/reports/trial-balance")
-@role_required("admin", "attorney")
+@permission_required("view_trust")
 def trust_trial_balance():
     """Trial balance: every client ledger per account; totals must equal account balances."""
     db = get_db()
@@ -3644,7 +4096,7 @@ def trust_trial_balance():
 
 
 @app.route("/trust/reports/three-way")
-@role_required("admin", "attorney")
+@permission_required("view_trust")
 def trust_three_way():
     """Three-way reconciliation: bank balance = book balance = sum of client ledgers."""
     db = get_db()
@@ -3674,10 +4126,920 @@ def trust_three_way():
 
 
 # ----------------------------------------------------------------------------
+# Operating bookkeeping + payroll (v2.1). Admin and accountant roles via
+# granular permissions: view_accounting / manage_accounting / run_payroll /
+# view_paystubs / use_timeclock.
+# ----------------------------------------------------------------------------
+
+def _coa_balance(db, account_id, from_date=None, to_date=None):
+    q = "SELECT COALESCE(SUM(amount_cents), 0) AS b FROM op_transactions WHERE account_id = ?"
+    args = [account_id]
+    if from_date:
+        q += " AND txn_date >= ?"
+        args.append(from_date)
+    if to_date:
+        q += " AND txn_date <= ?"
+        args.append(to_date)
+    return db.execute(q, args).fetchone()["b"]
+
+
+def _get_account_by_code(db, code):
+    return db.execute(
+        "SELECT * FROM coa_accounts WHERE code = ? AND is_active = 1", (code,)
+    ).fetchone()
+
+
+def _employee_rate_cents(row):
+    """Decrypt the employee's pay rate (stored encrypted)."""
+    try:
+        return int(decrypt_value(row["pay_rate_cents"]) or 0)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _employee_dict(row):
+    d = dict(row)
+    d["pay_rate_cents"] = _employee_rate_cents(row)
+    return d
+
+
+def _invoice_total_cents(db, invoice_id):
+    row = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS t FROM invoice_items WHERE invoice_id = ?",
+        (invoice_id,),
+    ).fetchone()
+    return int(round((row["t"] or 0) * 100))
+
+
+@app.route("/accounting")
+@permission_required("view_accounting")
+def accounting_overview():
+    db = get_db()
+    year = date.today().strftime("%Y")
+    ytd_from = f"{year}-01-01"
+    income = db.execute(
+        """SELECT COALESCE(SUM(t.amount_cents), 0) AS s FROM op_transactions t
+           JOIN coa_accounts a ON t.account_id = a.id
+           WHERE a.type = 'income' AND t.txn_date >= ?""",
+        (ytd_from,),
+    ).fetchone()["s"]
+    expenses = db.execute(
+        """SELECT COALESCE(SUM(t.amount_cents), 0) AS s FROM op_transactions t
+           JOIN coa_accounts a ON t.account_id = a.id
+           WHERE a.type = 'expense' AND t.txn_date >= ?""",
+        (ytd_from,),
+    ).fetchone()["s"]
+    ar_acct = _get_account_by_code(db, "1100")
+    cash_acct = _get_account_by_code(db, "1000")
+    # Unreconciled = asset accounts with no reconciliation in the last 40 days
+    unreconciled = []
+    for a in db.execute(
+        "SELECT * FROM coa_accounts WHERE type = 'asset' AND is_active = 1 ORDER BY code"
+    ).fetchall():
+        last = db.execute(
+            "SELECT MAX(statement_date) AS d FROM op_reconciliations WHERE account_id = ?",
+            (a["id"],),
+        ).fetchone()["d"]
+        if not last or last < (date.today() - timedelta(days=40)).isoformat():
+            unreconciled.append({
+                "id": a["id"], "name": a["name"],
+                "book_cents": _coa_balance(db, a["id"]),
+            })
+    recent = db.execute(
+        """SELECT t.*, a.name AS account_name FROM op_transactions t
+           JOIN coa_accounts a ON t.account_id = a.id
+           ORDER BY t.txn_date DESC, t.id DESC LIMIT 10"""
+    ).fetchall()
+    summary = {
+        "income_ytd_cents": income,
+        "expenses_ytd_cents": -expenses,
+        "net_ytd_cents": income + expenses,
+        "ar_cents": _coa_balance(db, ar_acct["id"]) if ar_acct else 0,
+        "cash_cents": _coa_balance(db, cash_acct["id"]) if cash_acct else 0,
+    }
+    return render_template(
+        "accounting.html", summary=summary, recent_txns=recent,
+        unreconciled=unreconciled, active_tab="overview",
+    )
+
+
+@app.route("/accounting/transactions")
+@permission_required("view_accounting")
+def op_txn_list():
+    db = get_db()
+    f_account = request.args.get("account", "")
+    f_from = request.args.get("from", "")
+    f_to = request.args.get("to", "")
+    q = """SELECT t.*, a.name AS account_name, a.type AS account_type,
+                  c.first_name, c.last_name
+           FROM op_transactions t
+           JOIN coa_accounts a ON t.account_id = a.id
+           LEFT JOIN clients c ON t.client_id = c.id
+           WHERE 1=1"""
+    args = []
+    if f_account:
+        q += " AND t.account_id = ?"
+        args.append(f_account)
+    if f_from:
+        q += " AND t.txn_date >= ?"
+        args.append(f_from)
+    if f_to:
+        q += " AND t.txn_date <= ?"
+        args.append(f_to)
+    q += " ORDER BY t.txn_date DESC, t.id DESC"
+    txns = db.execute(q, args).fetchall()
+    accounts = db.execute(
+        "SELECT id, code, name FROM coa_accounts WHERE is_active = 1 ORDER BY code"
+    ).fetchall()
+    return render_template(
+        "op_transactions.html", txns=txns, accounts=accounts,
+        f_account=f_account, f_from=f_from, f_to=f_to,
+        active_tab="transactions",
+    )
+
+
+@app.route("/accounting/transactions/new", methods=["GET", "POST"])
+@permission_required("manage_accounting")
+def op_txn_new():
+    db = get_db()
+    if request.method == "POST":
+        check_csrf()
+        txn_date = request.form.get("txn_date", "").strip() or date.today().isoformat()
+        account_id = request.form.get("account_id", "").strip()
+        kind = request.form.get("txn_kind", "expense")
+        amount = dollars_to_cents(request.form.get("amount", ""))
+        description = request.form.get("description", "").strip()
+        client_id = request.form.get("client_id", "").strip() or None
+        reference = request.form.get("reference", "").strip() or None
+        if not account_id or amount is None or not description:
+            flash("Account, amount, and description are required.", "error")
+        else:
+            if kind == "expense" and amount > 0:
+                amount = -amount
+            if kind == "income" and amount < 0:
+                amount = -amount
+            now = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                """INSERT INTO op_transactions (account_id, txn_date, amount_cents,
+                    description, client_id, reference, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (account_id, txn_date, amount, description, client_id, reference,
+                 session.get("user_id"), now),
+            )
+            db.commit()
+            audit("op_txn_new", f"Recorded {kind} of ${cents_to_str(abs(amount))}: {description}")
+            flash("Transaction recorded.", "success")
+            return redirect(url_for("op_txn_list"))
+    accounts = db.execute(
+        "SELECT id, code, name, type FROM coa_accounts WHERE is_active = 1 ORDER BY code"
+    ).fetchall()
+    clients = db.execute(
+        "SELECT id, first_name, last_name FROM clients ORDER BY last_name, first_name"
+    ).fetchall()
+    return render_template(
+        "op_transaction_form.html", accounts=accounts, clients=clients,
+        txn=None, today=date.today().isoformat(), active_tab="transactions",
+    )
+
+
+@app.route("/accounting/transactions/<int:txn_id>/delete", methods=["POST"])
+@permission_required("manage_accounting")
+def op_txn_delete(txn_id):
+    check_csrf()
+    db = get_db()
+    txn = db.execute("SELECT * FROM op_transactions WHERE id = ?", (txn_id,)).fetchone()
+    if not txn:
+        abort(404)
+    if txn["invoice_id"]:
+        flash("This transaction was auto-created from a paid invoice and cannot be deleted.", "error")
+        return redirect(url_for("op_txn_list"))
+    db.execute("DELETE FROM op_transactions WHERE id = ?", (txn_id,))
+    db.commit()
+    audit("op_txn_delete", f"Deleted operating transaction #{txn_id}: {txn['description']}")
+    flash("Transaction deleted.", "success")
+    return redirect(url_for("op_txn_list"))
+
+
+@app.route("/accounting/accounts", methods=["GET", "POST"])
+@permission_required("view_accounting")
+def coa_list():
+    db = get_db()
+    if request.method == "POST":
+        if not user_has_perm(session.get("permissions", {}), "manage_accounting"):
+            abort(403)
+        check_csrf()
+        code = request.form.get("code", "").strip()
+        name = request.form.get("name", "").strip()
+        atype = request.form.get("type", "").strip()
+        if not code or not name or atype not in ("income", "expense", "asset", "liability", "equity"):
+            flash("Code, name, and a valid account type are required.", "error")
+        else:
+            try:
+                db.execute(
+                    "INSERT INTO coa_accounts (code, name, type, is_active, created_at)"
+                    " VALUES (?, ?, ?, 1, ?)",
+                    (code, name, atype, datetime.now(timezone.utc).isoformat()),
+                )
+                db.commit()
+                audit("coa_add", f"Added account {code} — {name} ({atype})")
+                flash("Account added.", "success")
+            except sqlite3.IntegrityError:
+                flash("That account code is already in use.", "error")
+        return redirect(url_for("coa_list"))
+    accounts = []
+    for a in db.execute("SELECT * FROM coa_accounts ORDER BY type, code").fetchall():
+        d = dict(a)
+        d["balance_cents"] = _coa_balance(db, a["id"])
+        accounts.append(d)
+    return render_template("coa_accounts.html", accounts=accounts, active_tab="accounts")
+
+
+@app.route("/accounting/accounts/<int:account_id>/toggle", methods=["POST"])
+@permission_required("manage_accounting")
+def coa_toggle(account_id):
+    check_csrf()
+    db = get_db()
+    acct = db.execute("SELECT * FROM coa_accounts WHERE id = ?", (account_id,)).fetchone()
+    if not acct:
+        abort(404)
+    new_state = 0 if acct["is_active"] else 1
+    db.execute("UPDATE coa_accounts SET is_active = ? WHERE id = ?", (new_state, account_id))
+    db.commit()
+    audit("coa_toggle", f"{'Deactivated' if new_state == 0 else 'Reactivated'} account {acct['code']}")
+    flash("Account updated.", "success")
+    return redirect(url_for("coa_list"))
+
+
+@app.route("/accounting/reports/pl")
+@permission_required("view_accounting")
+def report_pl():
+    db = get_db()
+    f_from = request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
+    f_to = request.args.get("to", date.today().isoformat())
+    income_rows = db.execute(
+        """SELECT a.name, COALESCE(SUM(t.amount_cents), 0) AS total
+           FROM coa_accounts a LEFT JOIN op_transactions t
+             ON t.account_id = a.id AND t.txn_date >= ? AND t.txn_date <= ?
+           WHERE a.type = 'income' AND a.is_active = 1
+           GROUP BY a.id ORDER BY a.code""",
+        (f_from, f_to),
+    ).fetchall()
+    expense_rows = db.execute(
+        """SELECT a.name, COALESCE(SUM(t.amount_cents), 0) AS total
+           FROM coa_accounts a LEFT JOIN op_transactions t
+             ON t.account_id = a.id AND t.txn_date >= ? AND t.txn_date <= ?
+           WHERE a.type = 'expense' AND a.is_active = 1
+           GROUP BY a.id ORDER BY a.code""",
+        (f_from, f_to),
+    ).fetchall()
+    total_income = sum(r["total"] for r in income_rows)
+    total_expenses = sum(r["total"] for r in expense_rows)
+    return render_template(
+        "report_pl.html", from_date=f_from, to_date=f_to,
+        period_label=f"{f_from} to {f_to}",
+        income_rows=income_rows, expense_rows=expense_rows,
+        total_income_cents=total_income, total_expenses_cents=-total_expenses,
+        net_cents=total_income + total_expenses, active_tab="reports",
+    )
+
+
+@app.route("/accounting/reports/balance-sheet")
+@permission_required("view_accounting")
+def report_balance_sheet():
+    db = get_db()
+    as_of = request.args.get("as_of", date.today().isoformat())
+    def section(atype):
+        return db.execute(
+            """SELECT a.name, COALESCE(SUM(t.amount_cents), 0) AS total
+               FROM coa_accounts a LEFT JOIN op_transactions t
+                 ON t.account_id = a.id AND t.txn_date <= ?
+               WHERE a.type = ? AND a.is_active = 1
+               GROUP BY a.id ORDER BY a.code""",
+            (as_of, atype),
+        ).fetchall()
+    assets = section("asset")
+    liabilities = section("liability")
+    equity = section("equity")
+    # Net income to date flows into equity
+    net_income = db.execute(
+        """SELECT COALESCE(SUM(CASE WHEN a.type = 'income' THEN t.amount_cents
+                                    ELSE t.amount_cents END), 0) AS n
+           FROM op_transactions t JOIN coa_accounts a ON t.account_id = a.id
+           WHERE a.type IN ('income', 'expense') AND t.txn_date <= ?""",
+        (as_of,),
+    ).fetchone()["n"]
+    total_assets = sum(r["total"] for r in assets)
+    total_liab = sum(r["total"] for r in liabilities)
+    total_equity = sum(r["total"] for r in equity) + net_income
+    return render_template(
+        "report_balance_sheet.html", as_of=as_of,
+        assets=assets, liabilities=liabilities, equity=equity,
+        net_income_cents=net_income,
+        total_assets_cents=total_assets,
+        total_liab_equity_cents=total_liab + total_equity,
+        balanced=(total_assets == total_liab + total_equity),
+        active_tab="reports",
+    )
+
+
+@app.route("/accounting/reports/ledger")
+@permission_required("view_accounting")
+def report_ledger():
+    db = get_db()
+    f_from = request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
+    f_to = request.args.get("to", date.today().isoformat())
+    accounts = []
+    for a in db.execute(
+        "SELECT * FROM coa_accounts WHERE is_active = 1 ORDER BY type, code"
+    ).fetchall():
+        txns = db.execute(
+            """SELECT txn_date, description, amount_cents FROM op_transactions
+               WHERE account_id = ? AND txn_date >= ? AND txn_date <= ?
+               ORDER BY txn_date, id""",
+            (a["id"], f_from, f_to),
+        ).fetchall()
+        accounts.append({
+            "code": a["code"], "name": a["name"], "type": a["type"],
+            "txns": txns,
+            "total_cents": sum(t["amount_cents"] for t in txns),
+        })
+    return render_template(
+        "report_ledger.html", accounts=accounts,
+        from_date=f_from, to_date=f_to, active_tab="reports",
+    )
+
+
+@app.route("/accounting/reports/export")
+@permission_required("view_accounting")
+def report_export_csv():
+    import csv
+    db = get_db()
+    report = request.args.get("report", "pl")
+    f_from = request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
+    f_to = request.args.get("to", date.today().isoformat())
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    if report == "pl":
+        w.writerow(["Profit & Loss", f_from, f_to])
+        w.writerow(["Account", "Amount"])
+        for r in db.execute(
+            """SELECT a.name, COALESCE(SUM(t.amount_cents),0) AS total
+               FROM coa_accounts a LEFT JOIN op_transactions t ON t.account_id = a.id
+                 AND t.txn_date >= ? AND t.txn_date <= ?
+               WHERE a.type IN ('income','expense') AND a.is_active = 1
+               GROUP BY a.id ORDER BY a.type, a.code""",
+            (f_from, f_to),
+        ).fetchall():
+            w.writerow([r["name"], f"{r['total'] / 100:.2f}"])
+    elif report == "ledger":
+        w.writerow(["General Ledger", f_from, f_to])
+        w.writerow(["Date", "Account", "Description", "Amount"])
+        for r in db.execute(
+            """SELECT t.txn_date, a.name, t.description, t.amount_cents
+               FROM op_transactions t JOIN coa_accounts a ON t.account_id = a.id
+               WHERE t.txn_date >= ? AND t.txn_date <= ?
+               ORDER BY t.txn_date, t.id""",
+            (f_from, f_to),
+        ).fetchall():
+            w.writerow([r["txn_date"], r["name"], r["description"], f"{r['amount_cents'] / 100:.2f}"])
+    else:
+        w.writerow(["Balance Sheet", request.args.get("as_of", date.today().isoformat())])
+        w.writerow(["Account", "Type", "Balance"])
+        for r in db.execute(
+            """SELECT a.name, a.type, COALESCE(SUM(t.amount_cents),0) AS total
+               FROM coa_accounts a LEFT JOIN op_transactions t ON t.account_id = a.id
+               WHERE a.is_active = 1 GROUP BY a.id ORDER BY a.type, a.code"""
+        ).fetchall():
+            w.writerow([r["name"], r["type"], f"{r['total'] / 100:.2f}"])
+    audit("report_export", f"Exported {report} report to CSV")
+    return app.response_class(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={report}-{f_from}-to-{f_to}.csv"},
+    )
+
+
+@app.route("/accounting/reconcile/<int:account_id>", methods=["GET", "POST"])
+@permission_required("manage_accounting")
+def op_reconcile(account_id):
+    db = get_db()
+    acct = db.execute("SELECT * FROM coa_accounts WHERE id = ?", (account_id,)).fetchone()
+    if not acct:
+        abort(404)
+    book_cents = _coa_balance(db, account_id)
+    history = db.execute(
+        """SELECT r.*, u.username AS reconciled_by_name FROM op_reconciliations r
+           LEFT JOIN users u ON r.reconciled_by = u.id
+           WHERE r.account_id = ? ORDER BY r.statement_date DESC LIMIT 12""",
+        (account_id,),
+    ).fetchall()
+    if request.method == "POST":
+        check_csrf()
+        statement_date = request.form.get("statement_date", "").strip()
+        statement_bal = dollars_to_cents(request.form.get("statement_balance", ""))
+        notes = request.form.get("notes", "").strip()
+        if not statement_date or statement_bal is None:
+            flash("Enter the statement date and ending balance.", "error")
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            status = "matched" if statement_bal == book_cents else "unmatched"
+            db.execute(
+                """INSERT INTO op_reconciliations (account_id, statement_date,
+                    statement_balance_cents, book_balance_cents, status,
+                    reconciled_by, reconciled_at, notes, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (account_id, statement_date, statement_bal, book_cents, status,
+                 session.get("user_id"), now, notes, now),
+            )
+            db.commit()
+            audit("op_reconcile",
+                  f"Reconciled {acct['name']}: statement ${cents_to_str(statement_bal)}"
+                  f" vs book ${cents_to_str(book_cents)} -> {status}")
+            flash("Reconciliation recorded: " + ("matched." if status == "matched"
+                  else "balances do NOT match — investigate."), 
+                  "success" if status == "matched" else "warning")
+            return redirect(url_for("op_reconcile", account_id=account_id))
+    return render_template(
+        "op_reconcile.html", account=acct, book_cents=book_cents,
+        history=history, active_tab="reconcile",
+    )
+
+
+# --- Employees ---
+@app.route("/accounting/employees")
+@permission_required("run_payroll")
+def employee_list():
+    db = get_db()
+    employees = [_employee_dict(r) for r in db.execute(
+        "SELECT e.*, u.username FROM employees e LEFT JOIN users u ON e.user_id = u.id"
+        " ORDER BY e.is_active DESC, e.full_name"
+    ).fetchall()]
+    return render_template("employees.html", employees=employees, active_tab="employees")
+
+
+@app.route("/accounting/employees/new", methods=["GET", "POST"])
+@permission_required("run_payroll")
+def employee_new():
+    db = get_db()
+    if request.method == "POST":
+        check_csrf()
+        full_name = request.form.get("full_name", "").strip()
+        pay_type = request.form.get("pay_type", "hourly")
+        rate_str = request.form.get("pay_rate", "").strip()
+        pay_frequency = request.form.get("pay_frequency", "biweekly")
+        filing_status = request.form.get("filing_status", "single")
+        try:
+            allowances = int(request.form.get("allowances", "0") or 0)
+        except ValueError:
+            allowances = 0
+        user_id = request.form.get("user_id", "").strip() or None
+        hire_date = request.form.get("hire_date", "").strip() or None
+        try:
+            rate_cents = int(round(float(rate_str) * 100))
+        except ValueError:
+            rate_cents = None
+        if (not full_name or rate_cents is None or rate_cents <= 0
+                or pay_type not in ("hourly", "salary")
+                or pay_frequency not in PAY_PERIODS_PER_YEAR
+                or filing_status not in ("single", "married")):
+            flash("Enter a name, valid pay rate, pay type, frequency, and filing status.", "error")
+        else:
+            db.execute(
+                """INSERT INTO employees (user_id, full_name, pay_type, pay_rate_cents,
+                    pay_frequency, filing_status, allowances, hire_date, is_active, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                (user_id, full_name, pay_type, encrypt_value(str(rate_cents)),
+                 pay_frequency, filing_status, allowances, hire_date,
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            db.commit()
+            audit("employee_new", f"Added employee {full_name}")
+            flash("Employee added.", "success")
+            return redirect(url_for("employee_list"))
+    users = db.execute(
+        "SELECT id, username, full_name FROM users WHERE is_active = 1 ORDER BY username"
+    ).fetchall()
+    return render_template(
+        "employee_form.html", employee=None, users=users,
+        today=date.today().isoformat(), active_tab="employees",
+    )
+
+
+@app.route("/accounting/employees/<int:employee_id>/edit", methods=["GET", "POST"])
+@permission_required("run_payroll")
+def employee_edit(employee_id):
+    db = get_db()
+    emp = db.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    if not emp:
+        abort(404)
+    emp_d = _employee_dict(emp)
+    if request.method == "POST":
+        check_csrf()
+        full_name = request.form.get("full_name", "").strip()
+        pay_type = request.form.get("pay_type", "hourly")
+        rate_str = request.form.get("pay_rate", "").strip()
+        pay_frequency = request.form.get("pay_frequency", "biweekly")
+        filing_status = request.form.get("filing_status", "single")
+        try:
+            allowances = int(request.form.get("allowances", "0") or 0)
+        except ValueError:
+            allowances = 0
+        user_id = request.form.get("user_id", "").strip() or None
+        hire_date = request.form.get("hire_date", "").strip() or None
+        try:
+            rate_cents = int(round(float(rate_str) * 100))
+        except ValueError:
+            rate_cents = None
+        if (not full_name or rate_cents is None or rate_cents <= 0
+                or pay_type not in ("hourly", "salary")
+                or pay_frequency not in PAY_PERIODS_PER_YEAR):
+            flash("Enter a name, valid pay rate, pay type, and frequency.", "error")
+        else:
+            db.execute(
+                """UPDATE employees SET user_id = ?, full_name = ?, pay_type = ?,
+                    pay_rate_cents = ?, pay_frequency = ?, filing_status = ?,
+                    allowances = ?, hire_date = ? WHERE id = ?""",
+                (user_id, full_name, pay_type, encrypt_value(str(rate_cents)),
+                 pay_frequency, filing_status, allowances, hire_date, employee_id),
+            )
+            db.commit()
+            audit("employee_edit", f"Updated employee {full_name}")
+            flash("Employee updated.", "success")
+            return redirect(url_for("employee_list"))
+    users = db.execute(
+        "SELECT id, username, full_name FROM users WHERE is_active = 1 ORDER BY username"
+    ).fetchall()
+    return render_template(
+        "employee_form.html", employee=emp_d, users=users,
+        today=date.today().isoformat(), active_tab="employees",
+    )
+
+
+@app.route("/accounting/employees/<int:employee_id>/toggle", methods=["POST"])
+@permission_required("run_payroll")
+def employee_toggle(employee_id):
+    check_csrf()
+    db = get_db()
+    emp = db.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    if not emp:
+        abort(404)
+    new_state = 0 if emp["is_active"] else 1
+    db.execute("UPDATE employees SET is_active = ? WHERE id = ?", (new_state, employee_id))
+    db.commit()
+    audit("employee_toggle", f"{'Deactivated' if not new_state else 'Reactivated'} employee {emp['full_name']}")
+    flash("Employee updated.", "success")
+    return redirect(url_for("employee_list"))
+
+
+# --- Timeclock ---
+@app.route("/accounting/timeclock", methods=["GET", "POST"])
+@permission_required("use_timeclock")
+def timeclock():
+    db = get_db()
+    if request.method == "POST":
+        # Manual entry requires payroll permission
+        if not user_has_perm(session.get("permissions", {}), "run_payroll"):
+            abort(403)
+        check_csrf()
+        employee_id = request.form.get("employee_id", "").strip()
+        entry_date = request.form.get("entry_date", "").strip() or date.today().isoformat()
+        try:
+            hours = float(request.form.get("hours", "0") or 0)
+        except ValueError:
+            hours = 0
+        notes = request.form.get("notes", "").strip()
+        if not employee_id or hours <= 0 or hours > 168:
+            flash("Select an employee and enter valid hours (0–168).", "error")
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                """INSERT INTO timeclock_entries (employee_id, clock_in, manual_hours,
+                    entry_date, notes, created_by, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (employee_id, entry_date + "T00:00:00", hours, entry_date, notes,
+                 session.get("user_id"), now),
+            )
+            db.commit()
+            audit("timeclock_manual", f"Manual time entry: employee {employee_id}, {hours}h on {entry_date}")
+            flash("Hours recorded.", "success")
+        return redirect(url_for("timeclock"))
+    employees = [_employee_dict(r) for r in db.execute(
+        "SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name"
+    ).fetchall()]
+    open_entries = db.execute(
+        """SELECT t.id, t.clock_in, e.full_name AS employee_name
+           FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
+           WHERE t.clock_out IS NULL AND t.manual_hours IS NULL
+           ORDER BY t.clock_in"""
+    ).fetchall()
+    recent = db.execute(
+        """SELECT t.*, e.full_name AS employee_name
+           FROM timeclock_entries t JOIN employees e ON t.employee_id = e.id
+           ORDER BY t.entry_date DESC, t.id DESC LIMIT 30"""
+    ).fetchall()
+    recent_list = []
+    for r in recent:
+        d = dict(r)
+        d["hours"] = entry_hours(r)
+        recent_list.append(d)
+    return render_template(
+        "timeclock.html", employees=employees, open_entries=open_entries,
+        recent=recent_list, today=date.today().isoformat(), active_tab="timeclock",
+    )
+
+
+@app.route("/accounting/timeclock/clock-in/<int:employee_id>", methods=["POST"])
+@permission_required("use_timeclock")
+def timeclock_clockin(employee_id):
+    check_csrf()
+    db = get_db()
+    emp = db.execute("SELECT * FROM employees WHERE id = ? AND is_active = 1",
+                     (employee_id,)).fetchone()
+    if not emp:
+        abort(404)
+    # Prevent double clock-in
+    existing = db.execute(
+        "SELECT id FROM timeclock_entries WHERE employee_id = ? AND clock_out IS NULL"
+        " AND manual_hours IS NULL",
+        (employee_id,),
+    ).fetchone()
+    if existing:
+        flash(f"{emp['full_name']} is already clocked in.", "warning")
+        return redirect(url_for("timeclock"))
+    now = datetime.now(timezone.utc)
+    db.execute(
+        """INSERT INTO timeclock_entries (employee_id, clock_in, entry_date,
+            created_by, created_at) VALUES (?, ?, ?, ?, ?)""",
+        (employee_id, now.isoformat(), now.date().isoformat(),
+         session.get("user_id"), now.isoformat()),
+    )
+    db.commit()
+    audit("timeclock_in", f"{emp['full_name']} clocked in")
+    flash(f"{emp['full_name']} clocked in.", "success")
+    return redirect(url_for("timeclock"))
+
+
+@app.route("/accounting/timeclock/clock-out/<int:entry_id>", methods=["POST"])
+@permission_required("use_timeclock")
+def timeclock_clockout(entry_id):
+    check_csrf()
+    db = get_db()
+    entry = db.execute(
+        """SELECT t.*, e.full_name FROM timeclock_entries t
+           JOIN employees e ON t.employee_id = e.id WHERE t.id = ?""",
+        (entry_id,),
+    ).fetchone()
+    if not entry or entry["clock_out"]:
+        abort(404)
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute("UPDATE timeclock_entries SET clock_out = ? WHERE id = ?", (now, entry_id))
+    db.commit()
+    hours = entry_hours(dict(entry, clock_out=now))
+    audit("timeclock_out", f"{entry['full_name']} clocked out ({hours}h)")
+    flash(f"{entry['full_name']} clocked out — {hours} hours.", "success")
+    return redirect(url_for("timeclock"))
+
+
+@app.route("/accounting/timeclock/manual", methods=["POST"])
+@permission_required("run_payroll")
+def timeclock_manual():
+    # Alias that posts back to the timeclock view's manual-entry handler
+    return timeclock()
+
+
+# --- Payroll ---
+@app.route("/accounting/payroll", methods=["GET", "POST"])
+@permission_required("run_payroll")
+def payroll_run():
+    db = get_db()
+    employees = [_employee_dict(r) for r in db.execute(
+        "SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name"
+    ).fetchall()]
+    period_start = request.values.get("period_start", "")
+    period_end = request.values.get("period_end", "")
+    pay_date = request.values.get("pay_date", date.today().isoformat())
+    preview = None
+    action = request.values.get("action", "")
+
+    if period_start and period_end and action in ("preview", "generate"):
+        if action == "generate":
+            check_csrf()
+        preview = []
+        for emp in employees:
+            entries = db.execute(
+                """SELECT entry_date, manual_hours, clock_in, clock_out
+                   FROM timeclock_entries
+                   WHERE employee_id = ? AND entry_date >= ? AND entry_date <= ?""",
+                (emp["id"], period_start, period_end),
+            ).fetchall()
+            if emp["pay_type"] == "hourly":
+                hours_list = [{"entry_date": e["entry_date"],
+                               "hours": entry_hours(e)} for e in entries]
+                reg_h, ot_h = weekly_hours(hours_list)
+            else:
+                reg_h, ot_h = 0.0, 0.0
+            calc = calculate_paycheck(db, emp, reg_h, ot_h)
+            calc["employee_id"] = emp["id"]
+            calc["full_name"] = emp["full_name"]
+            preview.append(calc)
+        if action == "generate":
+            now = datetime.now(timezone.utc).isoformat()
+            for calc in preview:
+                emp_id = calc["employee_id"]
+                ytd_before = db.execute(
+                    "SELECT COALESCE(SUM(gross_cents), 0) AS g FROM paychecks WHERE employee_id = ?",
+                    (emp_id,),
+                ).fetchone()["g"]
+                gross_c = int(round(calc["gross"] * 100))
+                db.execute(
+                    """INSERT INTO paychecks (employee_id, pay_period_start, pay_period_end,
+                        pay_date, reg_hours, ot_hours, gross_cents, federal_cents, ss_cents,
+                        medicare_cents, pfml_cents, wacares_cents, net_cents,
+                        ytd_gross_cents, created_by, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (emp_id, period_start, period_end, pay_date,
+                     calc["reg_hours"], calc["ot_hours"], gross_c,
+                     int(round(calc["federal"] * 100)), int(round(calc["ss"] * 100)),
+                     int(round(calc["medicare"] * 100)), int(round(calc["pfml"] * 100)),
+                     int(round(calc["wacares"] * 100)), int(round(calc["net"] * 100)),
+                     ytd_before + gross_c, session.get("user_id"), now),
+                )
+                # Book the payroll: wages expense + payroll tax expense
+                wages_acct = _get_account_by_code(db, "5120")
+                tax_acct = _get_account_by_code(db, "5130")
+                liab_acct = _get_account_by_code(db, "2100")
+                emp_name = calc["full_name"]
+                if wages_acct:
+                    db.execute(
+                        """INSERT INTO op_transactions (account_id, txn_date, amount_cents,
+                            description, created_by, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (wages_acct["id"], pay_date, -gross_c,
+                         f"Payroll wages — {emp_name} ({period_start} to {period_end})",
+                         session.get("user_id"), now),
+                    )
+                if tax_acct:
+                    er_cost_c = int(round(calc["employer_total"] * 100))
+                    db.execute(
+                        """INSERT INTO op_transactions (account_id, txn_date, amount_cents,
+                            description, created_by, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (tax_acct["id"], pay_date, -er_cost_c,
+                         f"Employer payroll taxes — {emp_name}",
+                         session.get("user_id"), now),
+                    )
+                if liab_acct:
+                    ded_c = (int(round(calc["federal"] * 100)) + int(round(calc["ss"] * 100))
+                             + int(round(calc["medicare"] * 100)) + int(round(calc["pfml"] * 100))
+                             + int(round(calc["wacares"] * 100)))
+                    db.execute(
+                        """INSERT INTO op_transactions (account_id, txn_date, amount_cents,
+                            description, created_by, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (liab_acct["id"], pay_date, ded_c,
+                         f"Payroll tax liabilities — {emp_name}",
+                         session.get("user_id"), now),
+                    )
+            db.commit()
+            audit("payroll_generate",
+                  f"Ran payroll for {period_start} to {period_end} ({len(preview)} employees)")
+            flash(f"Payroll generated for {len(preview)} employee(s).", "success")
+            return redirect(url_for("payroll_run"))
+
+    generated = db.execute(
+        """SELECT p.*, e.full_name AS employee_name FROM paychecks p
+           JOIN employees e ON p.employee_id = e.id
+           ORDER BY p.pay_date DESC, p.id DESC LIMIT 20"""
+    ).fetchall()
+    return render_template(
+        "payroll.html", employees=employees, period_start=period_start,
+        period_end=period_end, pay_date=pay_date, preview=preview,
+        generated=generated, active_tab="payroll",
+    )
+
+
+@app.route("/accounting/paychecks/<int:paycheck_id>/paystub")
+@permission_required("view_paystubs", "run_payroll")
+def paystub_pdf(paycheck_id):
+    db = get_db()
+    pc = db.execute("SELECT * FROM paychecks WHERE id = ?", (paycheck_id,)).fetchone()
+    if not pc:
+        abort(404)
+    # Employees with only view_paystubs can only see their own paystub
+    perms = session.get("permissions", {})
+    if not user_has_perm(perms, "run_payroll"):
+        me = db.execute("SELECT id FROM users WHERE id = ?", (session.get("user_id"),)).fetchone()
+        emp = db.execute("SELECT id FROM employees WHERE user_id = ?",
+                         (session.get("user_id"),)).fetchone()
+        if not emp or emp["id"] != pc["employee_id"]:
+            abort(403, description="You can only view your own paystubs.")
+    emp = _employee_dict(db.execute("SELECT * FROM employees WHERE id = ?",
+                                    (pc["employee_id"],)).fetchone())
+    ytd = db.execute(
+        """SELECT COALESCE(SUM(gross_cents),0) AS gross,
+                  COALESCE(SUM(federal_cents),0) AS federal,
+                  COALESCE(SUM(ss_cents),0) AS ss,
+                  COALESCE(SUM(medicare_cents),0) AS medicare,
+                  COALESCE(SUM(pfml_cents),0) AS pfml,
+                  COALESCE(SUM(wacares_cents),0) AS wacares,
+                  COALESCE(SUM(other_deductions_cents),0) AS other
+           FROM paychecks WHERE employee_id = ? AND pay_date <= ?""",
+        (pc["employee_id"], pc["pay_date"]),
+    ).fetchone()
+    ytd_d = {k: ytd[k] for k in ("gross", "federal", "ss", "medicare", "pfml", "wacares", "other")}
+    logo_path = os.path.join(BASE_DIR, "static", "dgm-logo.png")
+    pdf = build_paystub_pdf(pc, emp, ytd_d, logo_path if os.path.exists(logo_path) else None)
+    audit("paystub_view", f"Generated paystub PDF for paycheck #{paycheck_id}")
+    return app.response_class(
+        pdf, mimetype="application/pdf",
+        headers={"Content-Disposition":
+                 f"attachment; filename=paystub-{pc['pay_date']}-{emp['full_name'].replace(' ', '_')}.pdf"},
+    )
+
+
+@app.route("/accounting/payroll/reports")
+@permission_required("run_payroll")
+def payroll_reports():
+    db = get_db()
+    periods = db.execute(
+        """SELECT pay_period_start, pay_period_end, pay_date,
+                  COUNT(*) AS n,
+                  COALESCE(SUM(gross_cents),0) AS gross,
+                  COALESCE(SUM(federal_cents + ss_cents + medicare_cents + pfml_cents
+                               + wacares_cents + other_deductions_cents),0) AS tax,
+                  COALESCE(SUM(net_cents),0) AS net
+           FROM paychecks GROUP BY pay_period_start, pay_period_end
+           ORDER BY pay_period_start DESC LIMIT 12"""
+    ).fetchall()
+    period_list = []
+    for p in periods:
+        d = dict(p)
+        d["label"] = f"{p['pay_period_start']} to {p['pay_period_end']}"
+        # Employer cost estimate for the period
+        d["employer_cost_cents"] = 0
+        period_list.append(d)
+    ytd = db.execute(
+        """SELECT e.full_name,
+                  COALESCE(SUM(p.gross_cents),0) AS ytd_gross_cents,
+                  COALESCE(SUM(p.federal_cents),0) AS ytd_federal_cents,
+                  COALESCE(SUM(p.ss_cents),0) AS ytd_ss_cents,
+                  COALESCE(SUM(p.medicare_cents),0) AS ytd_medicare_cents,
+                  COALESCE(SUM(p.net_cents),0) AS ytd_net_cents
+           FROM employees e LEFT JOIN paychecks p ON p.employee_id = e.id
+           WHERE strftime('%Y', p.pay_date) = strftime('%Y', 'now') OR p.pay_date IS NULL
+           GROUP BY e.id ORDER BY e.full_name"""
+    ).fetchall()
+    # Employer liability YTD (employer share of FICA estimated from gross)
+    er = db.execute(
+        """SELECT COALESCE(SUM(gross_cents),0) AS g FROM paychecks
+           WHERE strftime('%Y', pay_date) = strftime('%Y', 'now')"""
+    ).fetchone()
+    gross_ytd = er["g"]
+    ss_er_rate = get_rate(db, "ss_rate_employer", 6.2) / 100.0
+    med_er_rate = get_rate(db, "medicare_rate_employer", 1.45) / 100.0
+    employer = {
+        "ytd_ss_employer_cents": int(round(gross_ytd * ss_er_rate)),
+        "ytd_medicare_employer_cents": int(round(gross_ytd * med_er_rate)),
+        "ytd_sui_cents": 0,
+        "ytd_li_cents": 0,
+    }
+    return render_template(
+        "payroll_reports.html", periods=period_list, ytd=ytd,
+        employer=employer, active_tab="payroll",
+    )
+
+
+@app.route("/accounting/settings", methods=["GET", "POST"])
+@permission_required("manage_accounting")
+def tax_settings():
+    db = get_db()
+    if request.method == "POST":
+        check_csrf()
+        now = datetime.now(timezone.utc).isoformat()
+        for key, label, value, help_text in DEFAULT_TAX_RATES:
+            new_val = request.form.get(f"rate_{key}")
+            if new_val is not None and new_val.strip() != "":
+                db.execute(
+                    "UPDATE tax_rates SET value = ?, updated_at = ? WHERE key = ?",
+                    (new_val.strip(), now, key),
+                )
+        db.commit()
+        audit("tax_settings", "Updated payroll tax rates")
+        flash("Tax rates updated. Verify them against current IRS/WA publications before running payroll.",
+              "warning")
+        return redirect(url_for("tax_settings"))
+    rates = db.execute(
+        "SELECT key, label, value, help, effective_year FROM tax_rates ORDER BY key"
+    ).fetchall()
+    return render_template("tax_settings.html", rates=rates, active_tab="settings")
+
+
+
+
+# ----------------------------------------------------------------------------
 # Backups (manual trigger + history)
 # ----------------------------------------------------------------------------
 @app.route("/backup/now", methods=["POST"])
-@role_required("admin", "attorney")
+@permission_required("manage_backups")
 def backup_now():
     check_csrf()
     ok, msg = do_backup(manual=True)
@@ -3687,7 +5049,7 @@ def backup_now():
 
 
 @app.route("/backup/history")
-@role_required("admin", "attorney")
+@permission_required("manage_backups")
 def backup_history():
     db = get_db()
     rows = db.execute(
@@ -3702,7 +5064,7 @@ def backup_history():
 # Software update (admin only)
 # ----------------------------------------------------------------------------
 @app.route("/admin/update")
-@admin_required
+@permission_required("manage_users")
 def update_page():
     with _update_lock:
         info = dict(UPDATE_INFO)
@@ -3714,7 +5076,7 @@ def update_page():
 
 
 @app.route("/admin/update/check", methods=["POST"])
-@admin_required
+@permission_required("manage_users")
 def update_check_now():
     check_csrf()
     check_for_updates()
@@ -3723,7 +5085,7 @@ def update_check_now():
 
 
 @app.route("/admin/update/apply", methods=["POST"])
-@admin_required
+@permission_required("manage_users")
 def apply_update():
     check_csrf()
     if not getattr(sys, "frozen", False):
@@ -3750,7 +5112,7 @@ def apply_update():
 # Audit log viewer
 # ----------------------------------------------------------------------------
 @app.route("/audit")
-@role_required("admin", "attorney")
+@permission_required("view_audit_log")
 def audit_view():
     db = get_db()
     entries = db.execute(

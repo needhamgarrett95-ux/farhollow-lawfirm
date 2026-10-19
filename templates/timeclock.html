@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Timeclock — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Timeclock</h1>
+</div>
+{% set active_tab = 'timeclock' %}
+{% include "_accounting_tabs.html" %}
+
+<h2>Clock in / out</h2>
+{% if employees %}
+<div class="detail-grid">
+{% for e in employees %}
+  {% set ns = namespace(open=none) %}
+  {% for o in open_entries %}{% if o.employee_name == e.full_name %}{% set ns.open = o %}{% endif %}{% endfor %}
+  <div class="detail-card">
+    <h2>{{ e.full_name }}</h2>
+    {% if ns.open %}
+    <p class="muted small">Clocked in at {{ ns.open.clock_in }}</p>
+    <form method="post" action="{{ url_for('timeclock_clockout', entry_id=ns.open.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+      <button type="submit" class="btn btn-danger btn-block">Clock out</button>
+    </form>
+    {% else %}
+    <p class="muted small">Not currently clocked in.</p>
+    <form method="post" action="{{ url_for('timeclock_clockin', employee_id=e.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+      <button type="submit" class="btn btn-primary btn-block">{{ icon('clock', 15) }} Clock in</button>
+    </form>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+{% else %}
+<p class="muted">No employees yet. <a href="{{ url_for('employee_new') }}">Add one first</a>.</p>
+{% endif %}
+
+<h2>Manual entry</h2>
+<div class="form-card" style="margin-bottom:18px;">
+  <form method="post" action="{{ url_for('timeclock_manual') }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <div class="form-grid">
+      <label>Employee *
+        <select name="employee_id" required>
+          <option value="">— choose —</option>
+          {% for e in employees %}
+          <option value="{{ e.id }}">{{ e.full_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Date *
+        <input type="date" name="work_date" value="{{ today }}" required>
+      </label>
+      <label>Hours *
+        <input type="number" name="hours" required placeholder="0.00" step="0.01" min="0.01" inputmode="decimal">
+      </label>
+      <label>Notes
+        <input type="text" name="notes" placeholder="e.g. Adjusted for missed clock-in">
+      </label>
+      <div class="form-actions span2">
+        <button type="submit" class="btn btn-primary">Add entry</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<h2>Recent entries</h2>
+{% if recent %}
+<table class="table">
+  <thead><tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th>Hours</th></tr></thead>
+  <tbody>
+  {% for r in recent %}
+    <tr>
+      <td>{{ r.employee_name }}</td>
+      <td class="nowrap">{{ r.clock_in }}</td>
+      <td class="nowrap">{{ r.clock_out or '— still out' }}</td>
+      <td class="nowrap">{{ r.hours }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No time entries yet.</p>
+{% endif %}
+{% endblock %}

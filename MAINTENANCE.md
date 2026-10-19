@@ -1035,3 +1035,60 @@ This is a major visual update. Everything still works the same way — it just l
 **Notification badge:** The Deadlines menu item now shows a red count badge when you have deadlines due within 7 days (including overdue ones). It updates automatically.
 
 **Login screen:** The sign-in page has a fresh look matching the new dashboard. Your username and password work exactly the same.
+
+## 33. Bookkeeping — Accounting tab (admin/accountant)
+
+The Accounting tab tracks the firm's own money (separate from client trust funds).
+
+**Chart of Accounts** — pre-loaded with standard law-firm categories (income, expenses,
+assets, liabilities, equity). You can add your own accounts or deactivate ones you don't use.
+
+**Recording transactions** — date, account, amount, description. Mark each as income or
+expense. When you mark an invoice as "paid," the income is recorded automatically.
+
+**Reports** — Profit & Loss, Balance Sheet, and General Ledger, all exportable to CSV
+for your CPA.
+
+**Reconciliation** — like trust reconciliation: enter your bank statement balance each
+month and confirm it matches the books.
+
+## 34. Payroll (admin/accountant)
+
+**Setup (do this first):**
+1. Go to Accounting → Tax Settings. **Verify every rate** against current IRS Publication 15-T,
+   WA Employment Security Department, and WA Labor & Industries publications. Rates change
+   every year — this is the most important step.
+2. Add employees: name, hourly wage or annual salary, pay frequency, filing status.
+
+**Timeclock** — employees click Clock In / Clock Out. You can also enter hours manually.
+Overtime (over 40 hours/week) is calculated at 1.5x automatically for hourly staff.
+
+**Running payroll:**
+1. Go to Accounting → Payroll, enter the pay period and pay date.
+2. Click Preview — check every number carefully.
+3. Click Generate — this creates paychecks, books the wage/tax expenses, and records
+   payroll tax liabilities.
+
+**Paystubs** — click any paycheck to download a printable PDF paystub.
+
+**Washington notes:** WA has no state income tax. Deductions include federal income tax,
+Social Security, Medicare, WA Paid Family & Medical Leave, and WA Cares. Unemployment
+insurance and workers' comp are employer-paid (tracked as employer costs, not deducted
+from paychecks).
+
+**IMPORTANT:** This tool calculates payroll using the rates you enter in Tax Settings.
+It does not replace a CPA. Verify rates annually before running payroll.
+
+## 35. User permissions (admin only)
+
+Roles (Admin, Attorney, Accountant, Staff) are starting presets. On the user edit page,
+you can customize individual permissions with checkboxes — for example, letting an
+assistant print paystubs while they're covering for a sick accountant.
+
+**Safety rules:**
+- Only users with "Manage users" permission can edit permissions.
+- You cannot remove your own "Manage users" permission.
+- The system prevents removing the last user with "Manage users" permission.
+
+**"Reset to role defaults"** restores the checkboxes to the selected role's preset.
+Changes take effect immediately — no re-login needed.

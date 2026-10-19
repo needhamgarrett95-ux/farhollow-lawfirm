@@ -32,8 +32,34 @@
   <p class="muted small">
     <strong>Admin</strong> — full access, can manage users. &nbsp;
     <strong>Attorney</strong> — everything except user management. &nbsp;
-    <strong>Staff</strong> — no billing, no deleting records, no audit log.
+    <strong>Accountant</strong> — billing, trust, and accounting/payroll. &nbsp;
+    <strong>Staff</strong> — clients, cases, calendar, documents.
   </p>
+  <p class="muted small">
+    Roles are starting presets — you can customize individual permissions below.
+    Changing the role above resets the checkboxes to that role's defaults.
+  </p>
+
+  <h2 style="margin-top: 1.5em;">Permissions</h2>
+  <div style="margin-bottom: 0.75em;">
+    <button type="button" class="btn btn-small" id="resetPerms">Reset to role defaults</button>
+  </div>
+  {% for group in perm_groups %}
+  {% set group_perms = permissions | selectattr('1', 'equalto', group) | list %}
+  {% if group_perms %}
+  <fieldset class="perm-group">
+    <legend>{{ group }}</legend>
+    {% for key, grp, label in group_perms %}
+    <label class="checkbox-row">
+      <input type="checkbox" name="perm_{{ key }}" value="1"
+             {% if current_perms.get(key) %}checked{% endif %}
+             data-perm="{{ key }}">
+      {{ label }}
+    </label>
+    {% endfor %}
+  </fieldset>
+  {% endif %}
+  {% endfor %}
   {% if user %}
   <label class="checkbox-row">
     <input type="checkbox" name="is_active" value="1" {% if user.is_active %}checked{% endif %}>
@@ -47,4 +73,23 @@
     <a href="{{ url_for('user_list') }}" class="btn btn-link">Cancel</a>
   </div>
 </form>
+<script>
+(function () {
+  var presets = {{ role_presets | tojson }};
+  var roleSelect = document.querySelector('select[name="role"]');
+  function applyPreset(role) {
+    var preset = presets[role] || {};
+    document.querySelectorAll('input[data-perm]').forEach(function (cb) {
+      cb.checked = !!preset[cb.getAttribute('data-perm')];
+    });
+  }
+  if (roleSelect) {
+    roleSelect.addEventListener('change', function () { applyPreset(roleSelect.value); });
+  }
+  var resetBtn = document.getElementById('resetPerms');
+  if (resetBtn && roleSelect) {
+    resetBtn.addEventListener('click', function () { applyPreset(roleSelect.value); });
+  }
+})();
+</script>
 {% endblock %}

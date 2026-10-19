@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Chart of Accounts — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Chart of Accounts</h1>
+</div>
+{% set active_tab = 'coa' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="form-card" style="margin-bottom:18px;">
+  <h2 style="margin-top:0;">Add account</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <div class="form-grid">
+      <label>Code *
+        <input type="text" name="code" required placeholder="e.g. 4000">
+      </label>
+      <label>Name *
+        <input type="text" name="name" required placeholder="e.g. Fee income">
+      </label>
+      <label>Type *
+        <select name="type" required>
+          <option value="">— choose —</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+          <option value="asset">Asset</option>
+          <option value="liability">Liability</option>
+          <option value="equity">Equity</option>
+        </select>
+      </label>
+      <div class="form-actions" style="margin-top:0;align-self:end;">
+        <button type="submit" class="btn btn-primary">{{ icon('plus', 15) }} Add account</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% for gtype in ['asset', 'liability', 'equity', 'income', 'expense'] %}
+<h2>{{ gtype|capitalize }}</h2>
+<table class="table">
+  <thead><tr><th>Code</th><th>Name</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% set ns = namespace(any=false) %}
+  {% for a in accounts if a.type == gtype %}
+    {% set ns.any = true %}
+    <tr{% if not a.is_active %} class="row-inactive"{% endif %}>
+      <td class="nowrap">{{ a.code }}</td>
+      <td>{{ a.name }}</td>
+      <td class="nowrap">${{ a.balance_cents|cents }}</td>
+      <td>
+        {% if a.is_active %}<span class="badge badge-active">Active</span>
+        {% else %}<span class="badge badge-closed">Inactive</span>{% endif %}
+      </td>
+      <td class="nowrap">
+        <a href="{{ url_for('op_reconcile', account_id=a.id) }}" class="btn btn-small">Reconcile</a>
+        <form method="post" action="{{ url_for('coa_toggle', account_id=a.id) }}" class="inline"
+              {% if a.is_active %}onsubmit="return modalConfirmSubmit(this, 'Deactivate {{ a.code }} — {{ a.name }}? It will no longer appear in transaction forms. This can be undone.', {title: 'Deactivate account', confirmText: 'Deactivate', danger: true});"{% endif %}>
+          <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+          <button type="submit" class="btn btn-small {% if a.is_active %}btn-danger{% else %}btn-primary{% endif %}">
+            {% if a.is_active %}Deactivate{% else %}Reactivate{% endif %}
+          </button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  {% if not ns.any %}
+    <tr><td colspan="5" class="muted">No {{ gtype }} accounts yet.</td></tr>
+  {% endif %}
+  </tbody>
+</table>
+{% endfor %}
+{% endblock %}

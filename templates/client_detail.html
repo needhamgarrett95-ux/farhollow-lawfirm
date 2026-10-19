@@ -3,7 +3,9 @@
 {% block content %}
 <div class="page-head">
   <h1>{{ client.first_name }} {{ client.last_name }}</h1>
+  {% if perms.get('manage_clients') %}
   <a href="{{ url_for('client_edit', client_id=client.id) }}" class="btn">Edit</a>
+  {% endif %}
 </div>
 
 <div class="detail-grid">
@@ -13,22 +15,31 @@
       <dt>Email</dt><dd>{{ client.email or '—' }}</dd>
       <dt>Phone</dt><dd>{{ client.phone or '—' }}</dd>
       <dt>Address</dt><dd>{{ client.address or '—' }}</dd>
+      {% if perms.get('view_client_ssn') %}
       <dt>Date of birth</dt><dd>{{ client.date_of_birth or '—' }}</dd>
       <dt>SSN</dt><dd>{{ client.ssn or '—' }}</dd>
+      {% else %}
+      <dt>Date of birth</dt><dd class="muted">Hidden — no permission</dd>
+      <dt>SSN</dt><dd class="muted">Hidden — no permission</dd>
+      {% endif %}
     </dl>
   </div>
   <div class="detail-card">
     <h2>Family</h2>
     <dl>
       <dt>Spouse / partner</dt><dd>{{ client.spouse_name or '—' }}</dd>
+      {% if perms.get('view_client_ssn') %}
       <dt>Spouse date of birth</dt><dd>{{ client.spouse_dob or '—' }}</dd>
+      {% else %}
+      <dt>Spouse date of birth</dt><dd class="muted">Hidden — no permission</dd>
+      {% endif %}
     </dl>
     <h3>Children</h3>
     {% if children %}
     <ul class="plain-list">
       {% for k in children %}
       <li>{{ k.name }}{% if k.date_of_birth %} (DOB: {{ k.date_of_birth }}){% endif %}
-        {% if user_role in ('admin', 'attorney') %}
+        {% if perms.get('delete_records') %}
         <form method="post" action="{{ url_for('child_delete', child_id=k.id) }}" class="inline"
               onsubmit="return modalConfirmSubmit(this, 'Remove this child?', {title: 'Remove child', confirmText: 'Remove', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
@@ -41,12 +52,14 @@
     {% else %}
     <p class="muted">No children on file.</p>
     {% endif %}
+    {% if perms.get('manage_clients') %}
     <form method="post" action="{{ url_for('child_add', client_id=client.id) }}" class="child-form">
       <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
       <input type="text" name="name" placeholder="Child name" required>
       <input type="date" name="date_of_birth">
       <button type="submit" class="btn btn-small">Add child</button>
     </form>
+    {% endif %}
   </div>
 </div>
 

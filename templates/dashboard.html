@@ -38,7 +38,7 @@
 
   <div class="masonry" id="dashMasonry">
     {% for w in layout %}
-    {% if w.visible and not (w.id in ('trust', 'backup') and is_staff) %}
+    {% if w.visible and not (w.id == 'trust' and not perms.get('view_trust')) and not (w.id == 'backup' and not perms.get('manage_backups')) %}
 
     {% if w.id == 'alerts' and (overdue or schedule_alert) %}
     <div class="dash-card accent-red" data-widget="alerts">
@@ -98,12 +98,22 @@
     <div class="dash-card" data-widget="actions">
       <h3>{{ icon('plus', 18) }} Quick Actions</h3>
       <div class="act-list">
+        {% if perms.get('manage_clients') %}
         <a class="act" href="{{ url_for('client_new') }}">{{ icon('clients', 22) }}New client</a>
+        {% endif %}
+        {% if perms.get('manage_cases') %}
         <a class="act" href="{{ url_for('case_new') }}">{{ icon('cases', 22) }}New case</a>
+        {% endif %}
+        {% if perms.get('manage_calendar') %}
         <a class="act" href="{{ url_for('event_new') }}">{{ icon('calendar', 22) }}New event</a>
+        {% endif %}
+        {% if perms.get('calculate_deadlines') %}
         <a class="act" href="{{ url_for('deadline_calculator') }}">{{ icon('deadlines', 22) }}Deadlines</a>
-        {% if not is_staff %}
+        {% endif %}
+        {% if perms.get('use_templates') %}
         <a class="act" href="{{ url_for('template_gallery') }}">{{ icon('templates', 22) }}Template</a>
+        {% endif %}
+        {% if perms.get('view_trust') %}
         <a class="act" href="{{ url_for('trust_overview') }}">{{ icon('trust', 22) }}Trust</a>
         {% endif %}
       </div>
@@ -191,7 +201,7 @@
     </div>
     {% endif %}
 
-    {% if w.id == 'backup' and not is_staff %}
+    {% if w.id == 'backup' and perms.get('manage_backups') %}
     <div class="dash-card" data-widget="backup">
       <h3>{{ icon('checkmark', 18) }} Backup Status</h3>
       {% if last_backup and last_backup.status == 'ok' %}

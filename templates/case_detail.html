@@ -12,7 +12,7 @@
     <dl>
       <dt>Type</dt><dd>{{ case.case_type|capitalize }}</dd>
       <dt>Status</dt><dd>
-        {% if user_role in ('admin', 'attorney') %}
+        {% if perms.get('delete_records') %}
         <form method="post" action="{{ url_for('case_set_status', case_id=case.id) }}" class="inline">
           <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
           <select name="status" onchange="this.form.submit()" class="status-select">
@@ -64,7 +64,7 @@
     {% for p in parties %}
     <li>
       <span><strong>{{ p.first_name }} {{ p.last_name }}</strong>{% if p.role %} <span class="muted">— {{ p.role }}</span>{% endif %}</span>
-      {% if user_role in ('admin', 'attorney') %}
+      {% if perms.get('delete_records') %}
       <form method="post" action="{{ url_for('party_delete', party_id=p.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Remove this opposing party?', {title: 'Remove opposing party', confirmText: 'Remove', danger: true});">
         <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
         <button type="submit" class="btn btn-small btn-danger">Remove</button>

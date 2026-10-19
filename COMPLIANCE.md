@@ -173,6 +173,16 @@ The software cannot do these things. They are operational and legal duties:
    this software) still satisfy current obligations.
 7. **Malware / network security.** Keep Windows updated, use reputable
    antivirus, and do not install untrusted software on the office computer.
+8. **Payroll tax accuracy.** The payroll module calculates withholdings using
+   the rates entered in Tax Settings. Those rates change annually — the owner
+   must verify them against current IRS (Publication 15-T), WA Employment
+   Security Department, and WA Labor & Industries publications before each
+   year's first payroll run. Incorrect withholdings are the employer's legal
+   liability. This software does not replace a CPA or payroll professional.
+9. **User permission assignments.** The admin decides who gets which
+   permissions. Granting overly broad access (e.g., giving billing access to
+   someone who doesn't need it) is an administrative decision with
+   confidentiality consequences under RPC 1.6.
 
 ---
 

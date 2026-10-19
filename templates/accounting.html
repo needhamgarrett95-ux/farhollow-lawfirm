@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Accounting Overview — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Accounting</h1>
+</div>
+{% set active_tab = 'overview' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="stat-row">
+  <div class="stat">
+    <span class="stat-num">${{ summary.income_ytd_cents|cents }}</span>
+    <span class="stat-label">Income, YTD</span>
+  </div>
+  <div class="stat">
+    <span class="stat-num">${{ summary.expenses_ytd_cents|cents }}</span>
+    <span class="stat-label">Expenses, YTD</span>
+  </div>
+  <div class="stat">
+    <span class="stat-num">${{ summary.net_ytd_cents|cents }}</span>
+    <span class="stat-label">Net income, YTD</span>
+  </div>
+  <div class="stat">
+    <span class="stat-num">${{ summary.ar_cents|cents }}</span>
+    <span class="stat-label">Accounts receivable</span>
+  </div>
+  <div class="stat">
+    <span class="stat-num">${{ summary.cash_cents|cents }}</span>
+    <span class="stat-label">Cash on hand</span>
+  </div>
+</div>
+
+{% if unreconciled %}
+<div class="alert alert-warning">
+  <strong>{{ unreconciled|length }} account{{ 's' if unreconciled|length > 1 }} not yet reconciled:</strong>
+  <ul>
+  {% for a in unreconciled %}
+    <li>{{ a.name }} — book balance ${{ a.book_cents|cents }}
+      — <a href="{{ url_for('op_reconcile', account_id=a.id) }}">Reconcile now</a></li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<h2>Recent transactions</h2>
+{% if recent_txns %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Account</th><th>Description</th><th>Amount</th></tr></thead>
+  <tbody>
+  {% for t in recent_txns %}
+    <tr>
+      <td class="nowrap">{{ t.txn_date }}</td>
+      <td>{{ t.account_name }}</td>
+      <td class="muted">{{ t.description or '—' }}</td>
+      <td class="nowrap">${{ t.amount_cents|cents }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No operating transactions recorded yet. <a href="{{ url_for('op_txn_new') }}">Record the first one</a>.</p>
+{% endif %}
+{% endblock %}

@@ -41,7 +41,7 @@
       <td>{{ d.uploaded_by }}</td>
       <td class="nowrap">
         <a href="{{ url_for('document_download', doc_id=d.id) }}" class="btn btn-small">Download</a>
-        {% if user_role in ('admin', 'attorney') %}
+        {% if perms.get('delete_records') %}
         <form method="post" action="{{ url_for('document_delete', doc_id=d.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this document version?', {title: 'Delete document', confirmText: 'Delete', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
           <button type="submit" class="btn btn-small btn-danger">Delete</button>

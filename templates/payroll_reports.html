@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Payroll Reports — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Payroll Reports</h1>
+  <a href="{{ url_for('payroll_run') }}" class="btn btn-link">Run payroll</a>
+</div>
+{% set active_tab = 'payroll' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="alert alert-warning">
+  <strong>Verify before you report.</strong> Payroll tax rates change annually — confirm current IRS
+  and WA ESD/L&amp;I rates in <a href="{{ url_for('tax_settings') }}">Tax Settings</a> before filing
+  anything from these numbers. This tool does not replace a CPA.
+</div>
+
+<h2>Pay periods</h2>
+{% if periods %}
+<table class="table">
+  <thead><tr><th>Period</th><th>Gross</th><th>Employee taxes</th><th>Net paid</th><th>Employer cost</th></tr></thead>
+  <tbody>
+  {% for p in periods %}
+    <tr>
+      <td>{{ p.label }}</td>
+      <td class="nowrap">${{ p.gross_cents|cents }}</td>
+      <td class="nowrap">${{ p.tax_cents|cents }}</td>
+      <td class="nowrap">${{ p.net_cents|cents }}</td>
+      <td class="nowrap">${{ p.employer_cost_cents|cents }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No payroll periods yet.</p>
+{% endif %}
+
+<h2>Year-to-date by employee</h2>
+{% if ytd %}
+<table class="table">
+  <thead><tr><th>Employee</th><th>Gross</th><th>Federal</th><th>SS</th><th>Medicare</th><th>Net</th></tr></thead>
+  <tbody>
+  {% for y in ytd %}
+    <tr>
+      <td>{{ y.full_name }}</td>
+      <td class="nowrap">${{ y.ytd_gross_cents|cents }}</td>
+      <td class="nowrap">${{ y.ytd_federal_cents|cents }}</td>
+      <td class="nowrap">${{ y.ytd_ss_cents|cents }}</td>
+      <td class="nowrap">${{ y.ytd_medicare_cents|cents }}</td>
+      <td class="nowrap">${{ y.ytd_net_cents|cents }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No year-to-date payroll data yet.</p>
+{% endif %}
+
+<h2>Employer taxes, year-to-date</h2>
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>SS (employer share)</h2>
+    <p><span class="stat-num">${{ employer.ytd_ss_employer_cents|cents }}</span></p>
+  </div>
+  <div class="detail-card">
+    <h2>Medicare (employer share)</h2>
+    <p><span class="stat-num">${{ employer.ytd_medicare_employer_cents|cents }}</span></p>
+  </div>
+  <div class="detail-card">
+    <h2>WA SUI</h2>
+    <p><span class="stat-num">${{ employer.ytd_sui_cents|cents }}</span></p>
+  </div>
+  <div class="detail-card">
+    <h2>WA L&amp;I</h2>
+    <p><span class="stat-num">${{ employer.ytd_li_cents|cents }}</span></p>
+  </div>
+</div>
+{% endblock %}

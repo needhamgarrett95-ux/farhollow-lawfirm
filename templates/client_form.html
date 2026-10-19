@@ -43,7 +43,7 @@
   </div>
 </form>
 {% if client %}
-{% if user_role in ('admin', 'attorney') %}
+{% if perms.get('delete_records') %}
 <form method="post" action="{{ url_for('client_delete', client_id=client.id) }}" class="danger-zone"
       onsubmit="return modalConfirmSubmit(this, 'Delete this client? This cannot be undone.', {title: 'Delete client', confirmText: 'Delete', danger: true});">
   <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">

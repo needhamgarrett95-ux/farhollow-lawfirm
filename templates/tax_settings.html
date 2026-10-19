@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Tax Settings — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Tax Settings</h1>
+</div>
+{% set active_tab = 'tax' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="alert alert-danger">
+  <strong>Payroll tax rates change annually. Verify current IRS and WA ESD/L&amp;I rates before running payroll. This tool does not replace a CPA.</strong>
+</div>
+
+<div class="form-card">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    {% if rates %}
+    <div class="form-grid">
+    {% for r in rates %}
+      <label>{{ r.label }} <span class="muted small">({{ r.effective_year }})</span> *
+        <input type="text" name="{{ r.key }}" value="{{ r.value }}" required inputmode="decimal">
+        {% if r.help %}<span class="muted small">{{ r.help }}</span>{% endif %}
+      </label>
+    {% endfor %}
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">{{ icon('checkmark', 15) }} Save tax rates</button>
+    </div>
+    {% else %}
+    <p class="muted">No tax rates configured yet.</p>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

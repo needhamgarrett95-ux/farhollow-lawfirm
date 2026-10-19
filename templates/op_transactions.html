@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Operating Transactions — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Operating Transactions</h1>
+  <a href="{{ url_for('op_txn_new') }}" class="btn btn-primary">{{ icon('plus', 15) }} Record transaction</a>
+</div>
+{% set active_tab = 'transactions' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="form-card" style="margin-bottom:18px;">
+  <form method="get">
+    <div class="form-grid">
+      <label>Account
+        <select name="account_id">
+          <option value="">— all accounts —</option>
+          {% for a in accounts %}
+          <option value="{{ a.id }}" {% if f_account and f_account|string == a.id|string %}selected{% endif %}>{{ a.code }} — {{ a.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>From
+        <input type="date" name="from" value="{{ f_from or '' }}">
+      </label>
+      <label>To
+        <input type="date" name="to" value="{{ f_to or '' }}">
+      </label>
+      <div class="form-actions" style="margin-top:0;align-self:end;">
+        <button type="submit" class="btn btn-primary">{{ icon('search', 15) }} Filter</button>
+        <a href="{{ url_for('op_txn_list') }}" class="btn btn-link">Clear</a>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% if txns %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Account</th><th>Description</th><th>Client</th><th>Reference</th><th>Amount</th><th></th></tr></thead>
+  <tbody>
+  {% for t in txns %}
+    <tr>
+      <td class="nowrap">{{ t.txn_date }}</td>
+      <td><span class="muted small">{{ t.account_name }}</span></td>
+      <td>{{ t.description or '—' }}</td>
+      <td class="muted">{{ t.client_name or '—' }}</td>
+      <td class="muted small">{{ t.reference or '—' }}</td>
+      <td class="nowrap">{% if t.amount_cents >= 0 %}+{% endif %}${{ t.amount_cents|cents }}</td>
+      <td class="nowrap">
+        <form method="post" action="{{ url_for('op_txn_delete', txn_id=t.id) }}" class="inline"
+              onsubmit="return modalConfirmSubmit(this, 'Delete this transaction of ${{ t.amount_cents|cents }} on {{ t.txn_date }}? It will be permanently removed.', {title: 'Delete transaction', confirmText: 'Delete', danger: true});">
+          <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+          <button type="submit" class="btn btn-small btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No transactions match these filters.</p>
+{% endif %}
+{% endblock %}

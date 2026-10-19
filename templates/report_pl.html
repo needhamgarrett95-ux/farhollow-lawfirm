@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Profit &amp; Loss — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Profit &amp; Loss</h1>
+  <a href="{{ url_for('report_export_csv', report='pl', from_date=from_date, to_date=to_date) }}" class="btn">{{ icon('download', 15) }} Export CSV</a>
+</div>
+{% set active_tab = 'reports' %}
+{% include "_accounting_tabs.html" %}
+<p class="muted small">View: <strong>P&amp;L</strong> · <a href="{{ url_for('report_balance_sheet') }}">Balance sheet</a> · <a href="{{ url_for('report_ledger', from_date=from_date, to_date=to_date) }}">General ledger</a></p>
+
+<div class="form-card" style="margin-bottom:18px;">
+  <form method="get">
+    <div class="form-grid">
+      <label>From
+        <input type="date" name="from_date" value="{{ from_date or '' }}">
+      </label>
+      <label>To
+        <input type="date" name="to_date" value="{{ to_date or '' }}">
+      </label>
+      <div class="form-actions span2">
+        <button type="submit" class="btn btn-primary">Run report</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<h2>Income <span class="muted small">{{ period_label }}</span></h2>
+{% if income_rows %}
+<table class="table">
+  <thead><tr><th>Account</th><th>Total</th></tr></thead>
+  <tbody>
+  {% for r in income_rows %}
+    <tr><td>{{ r.name }}</td><td class="nowrap">${{ r.total_cents|cents }}</td></tr>
+  {% endfor %}
+    <tr><td><strong>Total income</strong></td><td class="nowrap"><strong>${{ total_income_cents|cents }}</strong></td></tr>
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No income in this period.</p>
+{% endif %}
+
+<h2>Expenses <span class="muted small">{{ period_label }}</span></h2>
+{% if expense_rows %}
+<table class="table">
+  <thead><tr><th>Account</th><th>Total</th></tr></thead>
+  <tbody>
+  {% for r in expense_rows %}
+    <tr><td>{{ r.name }}</td><td class="nowrap">${{ r.total_cents|cents }}</td></tr>
+  {% endfor %}
+    <tr><td><strong>Total expenses</strong></td><td class="nowrap"><strong>${{ total_expenses_cents|cents }}</strong></td></tr>
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No expenses in this period.</p>
+{% endif %}
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Net {% if net_cents >= 0 %}income{% else %}loss{% endif %}</h2>
+    <p><span class="stat-num">${{ net_cents|cents }}</span></p>
+    <p class="muted small">{{ period_label }}</p>
+  </div>
+</div>
+{% endblock %}

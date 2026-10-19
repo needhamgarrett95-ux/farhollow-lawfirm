@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}General Ledger — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>General Ledger</h1>
+  <a href="{{ url_for('report_export_csv', report='ledger', from_date=from_date, to_date=to_date) }}" class="btn">{{ icon('download', 15) }} Export CSV</a>
+</div>
+{% set active_tab = 'reports' %}
+{% include "_accounting_tabs.html" %}
+<p class="muted small">View: <a href="{{ url_for('report_pl', from_date=from_date, to_date=to_date) }}">P&amp;L</a> · <a href="{{ url_for('report_balance_sheet') }}">Balance sheet</a> · <strong>General ledger</strong></p>
+
+<div class="form-card" style="margin-bottom:18px;">
+  <form method="get">
+    <div class="form-grid">
+      <label>From
+        <input type="date" name="from_date" value="{{ from_date or '' }}">
+      </label>
+      <label>To
+        <input type="date" name="to_date" value="{{ to_date or '' }}">
+      </label>
+      <div class="form-actions span2">
+        <button type="submit" class="btn btn-primary">Run report</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% if accounts %}
+{% for a in accounts %}
+<h2>{{ a.code }} — {{ a.name }} <span class="muted small">{{ a.type|capitalize }}</span></h2>
+{% if a.txns %}
+<table class="table">
+  <thead><tr><th>Date</th><th>Description</th><th>Amount</th></tr></thead>
+  <tbody>
+  {% for t in a.txns %}
+    <tr>
+      <td class="nowrap">{{ t.txn_date }}</td>
+      <td>{{ t.description or '—' }}</td>
+      <td class="nowrap">{% if t.amount_cents >= 0 %}+{% endif %}${{ t.amount_cents|cents }}</td>
+    </tr>
+  {% endfor %}
+    <tr><td colspan="2"><strong>Account total</strong></td><td class="nowrap"><strong>{% if a.total_cents >= 0 %}+{% endif %}${{ a.total_cents|cents }}</strong></td></tr>
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No entries in this period.</p>
+{% endif %}
+{% endfor %}
+{% else %}
+<p class="muted">No accounts to display.</p>
+{% endif %}
+{% endblock %}

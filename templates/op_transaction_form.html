@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{% if txn %}Edit{% else %}Record{% endif %} Operating Transaction — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{% if txn %}Edit Transaction{% else %}Record Transaction{% endif %}</h1>
+</div>
+{% set active_tab = 'transactions' %}
+{% include "_accounting_tabs.html" %}
+
+<div class="form-card">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <div class="form-grid">
+      <label>Date *
+        <input type="date" name="txn_date" value="{{ txn.txn_date if txn else today }}" required>
+      </label>
+      <label>Account *
+        <select name="account_id" required>
+          <option value="">— choose —</option>
+          {% for a in accounts %}
+          <option value="{{ a.id }}" {% if txn and txn.account_id|string == a.id|string %}selected{% endif %}>{{ a.code }} — {{ a.name }} ({{ a.type }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Type *
+        <select name="txn_kind" required>
+          <option value="income" {% if txn and txn.txn_kind == 'income' %}selected{% endif %}>Income (money in)</option>
+          <option value="expense" {% if txn and txn.txn_kind == 'expense' %}selected{% endif %}>Expense (money out)</option>
+        </select>
+      </label>
+      <label>Amount ($) *
+        <input type="number" name="amount" required placeholder="0.00" step="0.01" min="0.01" inputmode="decimal"
+               {% if txn %}value="{{ txn.amount_cents|cents }}"{% endif %}>
+      </label>
+      <label>Client (optional)
+        <select name="client_id">
+          <option value="">— none —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if txn and txn.client_id and txn.client_id|string == c.id|string %}selected{% endif %}>{{ c.last_name }}, {{ c.first_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Reference (optional)
+        <input type="text" name="reference" placeholder="Check #, invoice #, etc."
+               {% if txn %}value="{{ txn.reference or '' }}"{% endif %}>
+      </label>
+      <label class="span2">Description *
+        <textarea name="description" rows="2" required
+                  placeholder="What was this transaction for?">{% if txn %}{{ txn.description or '' }}{% endif %}</textarea>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">{% if txn %}Save changes{% else %}Record transaction{% endif %}</button>
+      <a href="{{ url_for('op_txn_list') }}" class="btn btn-link">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
