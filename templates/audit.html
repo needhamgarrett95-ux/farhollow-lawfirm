@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — Case Management{% endblock %}
+{% block content %}
+<h1>Audit Log</h1>
+<p class="muted">Every login and every record viewed, created, changed, or deleted is recorded here.</p>
+{% if entries %}
+<table class="table">
+  <thead><tr><th>When (UTC)</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for e in entries %}
+    <tr>
+      <td class="nowrap">{{ e.timestamp[:19].replace('T', ' ') }}</td>
+      <td>{{ e.username or '—' }}</td>
+      <td>{{ e.action }}</td>
+      <td>{{ e.details }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No audit entries yet.</p>
+{% endif %}
+{% endblock %}

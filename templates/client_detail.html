@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ client.last_name }}, {{ client.first_name }} — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ client.first_name }} {{ client.last_name }}</h1>
+  <a href="{{ url_for('client_edit', client_id=client.id) }}" class="btn">Edit</a>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Contact</h2>
+    <dl>
+      <dt>Email</dt><dd>{{ client.email or '—' }}</dd>
+      <dt>Phone</dt><dd>{{ client.phone or '—' }}</dd>
+      <dt>Address</dt><dd>{{ client.address or '—' }}</dd>
+      <dt>Date of birth</dt><dd>{{ client.date_of_birth or '—' }}</dd>
+      <dt>SSN</dt><dd>{{ client.ssn or '—' }}</dd>
+    </dl>
+  </div>
+  <div class="detail-card">
+    <h2>Family</h2>
+    <dl>
+      <dt>Spouse / partner</dt><dd>{{ client.spouse_name or '—' }}</dd>
+      <dt>Spouse date of birth</dt><dd>{{ client.spouse_dob or '—' }}</dd>
+    </dl>
+    <h3>Children</h3>
+    {% if children %}
+    <ul class="plain-list">
+      {% for k in children %}
+      <li>{{ k.name }}{% if k.date_of_birth %} (DOB: {{ k.date_of_birth }}){% endif %}
+        <form method="post" action="{{ url_for('child_delete', child_id=k.id) }}" class="inline"
+              onsubmit="return confirm('Remove this child?');">
+          <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+          <button type="submit" class="btn btn-link btn-small">Remove</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No children on file.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('child_add', client_id=client.id) }}" class="child-form">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <input type="text" name="name" placeholder="Child name" required>
+      <input type="date" name="date_of_birth">
+      <button type="submit" class="btn btn-small">Add child</button>
+    </form>
+  </div>
+</div>
+
+<div class="detail-card">
+  <h2>Notes</h2>
+  <p class="pre">{{ client.notes or '—' }}</p>
+</div>
+
+<h2>Cases</h2>
+{% if cases %}
+<table class="table">
+  <thead><tr><th>Case #</th><th>Title</th><th>Type</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for c in cases %}
+    <tr>
+      <td>{{ c.case_number }}</td>
+      <td>{{ c.title }}</td>
+      <td>{{ c.case_type|capitalize }}</td>
+      <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
+      <td><a href="{{ url_for('case_detail', case_id=c.id) }}">Open</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No cases for this client yet.</p>
+{% endif %}
+{% endblock %}

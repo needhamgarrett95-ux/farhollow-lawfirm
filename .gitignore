@@ -1,0 +1,4 @@
+# Never commit the database, keys, or caches
+instance/
+__pycache__/
+*.pyc

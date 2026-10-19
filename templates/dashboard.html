@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Case Management{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="stat-row">
+  <div class="stat"><span class="stat-num">{{ stats.active_cases }}</span><span class="stat-label">Active cases</span></div>
+  <div class="stat"><span class="stat-num">{{ stats.pending_cases }}</span><span class="stat-label">Pending cases</span></div>
+  <div class="stat"><span class="stat-num">{{ stats.total_clients }}</span><span class="stat-label">Clients</span></div>
+</div>
+
+<h2>Active cases</h2>
+{% if active_cases %}
+<table class="table">
+  <thead><tr><th>Case #</th><th>Title</th><th>Client</th><th>Type</th><th></th></tr></thead>
+  <tbody>
+  {% for c in active_cases %}
+    <tr>
+      <td>{{ c.case_number }}</td>
+      <td>{{ c.title }}</td>
+      <td>{{ c.first_name }} {{ c.last_name }}</td>
+      <td>{{ c.case_type|capitalize }}</td>
+      <td><a href="{{ url_for('case_detail', case_id=c.id) }}">Open</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No active cases.</p>
+{% endif %}
+
+<h2>Recent activity</h2>
+{% if recent %}
+<table class="table">
+  <thead><tr><th>When</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for r in recent %}
+    <tr>
+      <td class="nowrap">{{ r.timestamp[:19].replace('T', ' ') }}</td>
+      <td>{{ r.username }}</td>
+      <td>{{ r.action }}</td>
+      <td>{{ r.details }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No activity yet.</p>
+{% endif %}
+{% endblock %}

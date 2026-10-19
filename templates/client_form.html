@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit client' if client else 'New client' }} — Case Management{% endblock %}
+{% block content %}
+<h1>{{ 'Edit client' if client else 'New client' }}</h1>
+<form method="post" action="{{ url_for('client_edit', client_id=client.id) if client else url_for('client_new') }}" class="form-card">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+  <div class="form-grid">
+    <label>First name *
+      <input type="text" name="first_name" value="{{ client.first_name if client else '' }}" required>
+    </label>
+    <label>Last name *
+      <input type="text" name="last_name" value="{{ client.last_name if client else '' }}" required>
+    </label>
+    <label>Email
+      <input type="email" name="email" value="{{ client.email if client else '' }}">
+    </label>
+    <label>Phone
+      <input type="tel" name="phone" value="{{ client.phone if client else '' }}">
+    </label>
+    <label class="span2">Address
+      <input type="text" name="address" value="{{ client.address if client else '' }}">
+    </label>
+    <label>Date of birth
+      <input type="date" name="date_of_birth" value="{{ client.date_of_birth if client else '' }}">
+    </label>
+    <label>SSN <span class="muted small">(encrypted at rest)</span>
+      <input type="text" name="ssn" value="{{ client.ssn if client else '' }}" autocomplete="off"
+             placeholder="XXX-XX-XXXX" pattern="\d{3}-?\d{2}-?\d{4}" title="Format: XXX-XX-XXXX">
+    </label>
+    <label>Spouse / partner name
+      <input type="text" name="spouse_name" value="{{ client.spouse_name if client else '' }}">
+    </label>
+    <label>Spouse / partner date of birth
+      <input type="date" name="spouse_dob" value="{{ client.spouse_dob if client else '' }}">
+    </label>
+    <label class="span2">Notes
+      <textarea name="notes" rows="4">{{ client.notes if client else '' }}</textarea>
+    </label>
+  </div>
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a href="{{ url_for('client_detail', client_id=client.id) if client else url_for('client_list') }}" class="btn btn-link">Cancel</a>
+  </div>
+</form>
+{% if client %}
+<form method="post" action="{{ url_for('client_delete', client_id=client.id) }}" class="danger-zone"
+      onsubmit="return confirm('Delete this client? This cannot be undone.');">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+  <button type="submit" class="btn btn-danger">Delete client</button>
+</form>
+{% endif %}
+{% endblock %}

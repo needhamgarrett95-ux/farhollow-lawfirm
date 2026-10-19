@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ case.case_number }} — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ case.case_number }} — {{ case.title }}</h1>
+  <a href="{{ url_for('case_edit', case_id=case.id) }}" class="btn">Edit</a>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Details</h2>
+    <dl>
+      <dt>Type</dt><dd>{{ case.case_type|capitalize }}</dd>
+      <dt>Status</dt><dd><span class="badge badge-{{ case.status }}">{{ case.status }}</span></dd>
+      <dt>Date opened</dt><dd>{{ case.date_opened or '—' }}</dd>
+      <dt>Date closed</dt><dd>{{ case.date_closed or '—' }}</dd>
+    </dl>
+  </div>
+  <div class="detail-card">
+    <h2>Client</h2>
+    {% if case.first_name %}
+    <p><a href="{{ url_for('client_detail', client_id=case.client_id) }}">{{ case.first_name }} {{ case.last_name }}</a></p>
+    {% else %}
+    <p class="muted">No client assigned.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="detail-card">
+  <h2>Notes</h2>
+  <p class="pre">{{ case.notes or '—' }}</p>
+</div>
+{% endblock %}

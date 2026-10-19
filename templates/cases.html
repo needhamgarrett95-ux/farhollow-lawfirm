@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Cases — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Cases</h1>
+  <a href="{{ url_for('case_new') }}" class="btn btn-primary">+ New case</a>
+</div>
+
+<div class="tabs">
+  <a href="{{ url_for('case_list', status='active') }}" class="{% if status == 'active' %}active{% endif %}">Active</a>
+  <a href="{{ url_for('case_list', status='pending') }}" class="{% if status == 'pending' %}active{% endif %}">Pending</a>
+  <a href="{{ url_for('case_list', status='closed') }}" class="{% if status == 'closed' %}active{% endif %}">Closed</a>
+  <a href="{{ url_for('case_list', status='all') }}" class="{% if status == 'all' %}active{% endif %}">All</a>
+</div>
+
+{% if cases %}
+<table class="table">
+  <thead><tr><th>Case #</th><th>Title</th><th>Client</th><th>Type</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for c in cases %}
+    <tr>
+      <td>{{ c.case_number }}</td>
+      <td>{{ c.title }}</td>
+      <td>{% if c.first_name %}{{ c.last_name }}, {{ c.first_name }}{% else %}—{% endif %}</td>
+      <td>{{ c.case_type|capitalize }}</td>
+      <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
+      <td><a href="{{ url_for('case_detail', case_id=c.id) }}">Open</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No cases here.</p>
+{% endif %}
+{% endblock %}

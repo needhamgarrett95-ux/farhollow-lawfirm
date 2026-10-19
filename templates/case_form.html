@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit case' if case else 'New case' }} — Case Management{% endblock %}
+{% block content %}
+<h1>{{ 'Edit case' if case else 'New case' }}</h1>
+<form method="post" action="{{ url_for('case_edit', case_id=case.id) if case else url_for('case_new') }}" class="form-card">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+  <div class="form-grid">
+    <label>Case number *
+      <input type="text" name="case_number" value="{{ case.case_number if case else '' }}" {% if case %}disabled{% endif %} required>
+      {% if case %}<span class="muted small">Case number cannot be changed.</span>{% endif %}
+    </label>
+    <label>Client
+      <select name="client_id">
+        <option value="">— No client —</option>
+        {% for cl in clients %}
+        <option value="{{ cl.id }}" {% if case and case.client_id == cl.id %}selected{% endif %}>
+          {{ cl.last_name }}, {{ cl.first_name }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="span2">Title *
+      <input type="text" name="title" value="{{ case.title if case else '' }}" required>
+    </label>
+    <label>Case type
+      <select name="case_type">
+        {% for t in case_types %}
+        <option value="{{ t }}" {% if case and case.case_type == t %}selected{% endif %}>{{ t|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Status
+      <select name="status">
+        {% for s in statuses %}
+        <option value="{{ s }}" {% if case and case.status == s %}selected{% endif %}>{{ s|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Date opened
+      <input type="date" name="date_opened" value="{{ case.date_opened if case else '' }}">
+    </label>
+    <label>Date closed
+      <input type="date" name="date_closed" value="{{ case.date_closed if case else '' }}">
+    </label>
+    <label class="span2">Notes
+      <textarea name="notes" rows="4">{{ case.notes if case else '' }}</textarea>
+    </label>
+  </div>
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a href="{{ url_for('case_detail', case_id=case.id) if case else url_for('case_list') }}" class="btn btn-link">Cancel</a>
+  </div>
+</form>
+{% if case %}
+<form method="post" action="{{ url_for('case_delete', case_id=case.id) }}" class="danger-zone"
+      onsubmit="return confirm('Delete this case? This cannot be undone.');">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+  <button type="submit" class="btn btn-danger">Delete case</button>
+</form>
+{% endif %}
+{% endblock %}

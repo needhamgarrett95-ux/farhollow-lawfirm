@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Clients — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Clients</h1>
+  <a href="{{ url_for('client_new') }}" class="btn btn-primary">+ New client</a>
+</div>
+
+<form method="get" action="{{ url_for('client_list') }}" class="search-row">
+  <input type="text" name="q" placeholder="Search by name…" value="{{ q }}">
+  <button type="submit" class="btn">Search</button>
+  {% if q %}<a href="{{ url_for('client_list') }}" class="btn btn-link">Clear</a>{% endif %}
+</form>
+
+{% if clients %}
+<table class="table">
+  <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th></th></tr></thead>
+  <tbody>
+  {% for c in clients %}
+    <tr>
+      <td>{{ c.last_name }}, {{ c.first_name }}</td>
+      <td>{{ c.phone or '—' }}</td>
+      <td>{{ c.email or '—' }}</td>
+      <td><a href="{{ url_for('client_detail', client_id=c.id) }}">Open</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No clients found.</p>
+{% endif %}
+{% endblock %}
