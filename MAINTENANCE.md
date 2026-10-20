@@ -1203,3 +1203,11 @@ Each dropdown only shows items you have permission for. If you have zero items i
 3. Reviewer can **Approve** (the correction is applied to the time entry right then) or **Deny** (a reason is required, and the employee sees it).
 4. The employee's own requests are listed on their Timeclock page with their status (pending / approved / denied).
 5. Every request, approval, and denial is written to the Audit Log.
+
+## 41. Timeclock day view + quick notes (v2.4.1)
+
+**Day view:** On the Timeclock page, the **Day view** tab shows every punch for one date. Flip days with the arrow buttons, pick a date from the calendar, or jump back with **Today**. Each employee gets a card with their punches, total hours for the day, and a visual timeline bar (6 AM–8 PM) showing when they were clocked in. A summary footer shows total hours across everyone and who's currently clocked in. Staff/accountants only ever see their own day; admin/attorney see everyone.
+
+**Print:** The **Print** button on the day view opens a clean, letterheaded daily time sheet (DGM logo, firm name and address, date) in a new tab — black on white, signature lines at the bottom, ready to file or hand to an employee. Staff printing see only their own punches.
+
+**Quick notes:** Client, case, and invoice pages now have a **Notes** section — click **Add note**, type, save. Notes appear in a timeline with the author and timestamp. Notes are append-only (no editing); only an admin can delete one (with a confirmation), and every add/delete goes to the Audit Log. Individual timeclock punches can also get notes, right from the day view — click the note chip under any punch.

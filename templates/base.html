@@ -206,6 +206,21 @@ if ('serviceWorker' in navigator) {
 // Segmented pill selectors — click a pill to set the paired hidden input.
 // Markup: <div class="seg" data-seg="inputId"><button class="seg-btn" data-val="x">…</button>…</div>
 //         <input type="hidden" id="inputId" name="…" value="…">
+
+/* Quick notes (v2.4.1): toggle the inline note form / thread within a block.
+   Usage: onclick="toggleNoteForm(this)" — toggles the first
+   .note-form or .punch-notes-body inside the closest [data-notes-block]. */
+function toggleNoteForm(btn) {
+  var block = btn.closest('[data-notes-block]');
+  if (!block) return;
+  var target = block.querySelector('.note-form, .punch-notes-body');
+  if (!target) return;
+  target.hidden = !target.hidden;
+  if (!target.hidden) {
+    var ta = target.querySelector('textarea');
+    if (ta) ta.focus();
+  }
+}
 (function () {
   document.querySelectorAll('.seg[data-seg]').forEach(function (seg) {
     var target = document.getElementById(seg.getAttribute('data-seg'));

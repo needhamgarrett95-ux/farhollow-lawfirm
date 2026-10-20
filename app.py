@@ -423,6 +423,17 @@ CREATE TABLE IF NOT EXISTS timeclock_corrections (
     applied_entry_id INTEGER REFERENCES timeclock_entries(id),
     created_at TEXT NOT NULL
 );
+-- Quick notes (v2.4.1): append-only timestamped notes attached to any
+-- record. entity_type: client | case | invoice | timeclock_entry.
+-- No editing; only admin may delete (audit-logged).
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    note_text TEXT NOT NULL,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS paychecks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_id INTEGER NOT NULL REFERENCES employees(id),
@@ -750,6 +761,14 @@ def init_db():
             reviewed_at TEXT, review_notes TEXT,
             applied_entry_id INTEGER REFERENCES timeclock_entries(id),
             created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL,
+            note_text TEXT NOT NULL,
+            created_by INTEGER NOT NULL REFERENCES users(id),
+            created_at TEXT NOT NULL)""",
+        """CREATE INDEX IF NOT EXISTS idx_notes_entity
+            ON notes(entity_type, entity_id)""",
         """CREATE TABLE IF NOT EXISTS paychecks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL REFERENCES employees(id),
@@ -2610,7 +2629,8 @@ def client_detail(client_id):
     ).fetchall()
     audit("client_view", f"Viewed client record (id={client_id})")
     return render_template(
-        "client_detail.html", client=client, children=kids, cases=cases
+        "client_detail.html", client=client, children=kids, cases=cases,
+        notes=get_notes(db, "client", client_id),
     )
 
 
@@ -2881,7 +2901,8 @@ def case_detail(case_id):
                            doc_count=doc_count, upcoming=upcoming,
                            time_totals=time_totals, emails=emails,
                            unlinked=unlinked,
-                           email_connected=email_connected)
+                           email_connected=email_connected,
+                           notes=get_notes(db, "case", case_id))
 
 
 @app.route("/cases/<int:case_id>/edit", methods=["GET", "POST"])
@@ -3641,6 +3662,7 @@ def invoice_detail(invoice_id):
     return render_template(
         "invoice_detail.html", invoice=inv, items=items, total=total,
         statuses=INVOICE_STATUSES,
+        notes=get_notes(db, "invoice", invoice_id),
     )
 
 
@@ -4973,6 +4995,142 @@ def _can_view_all_timeclocks():
     return user_has_perm(session.get("permissions", {}), "view_all_timeclocks")
 
 
+# --- Timeclock day view (v2.4.1) ---
+# Timeline window: 6 AM – 8 PM local display (14 hours). Segments are
+# positioned as percentages of that window.
+DAY_WINDOW_START_H = 6   # 6 AM
+DAY_WINDOW_END_H = 20    # 8 PM
+
+
+def _parse_tc_dt(value):
+    """Parse a timeclock ISO timestamp into a naive UTC datetime.
+
+    Stored values are timezone-aware UTC (datetime.now(timezone.utc)); older
+    data may be naive. Normalizing keeps comparisons crash-free.
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _day_timeline_segments(entries, day_date, now_dt):
+    """Build timeline bar segments for one employee's day.
+
+    Each timed entry (clock_in/clock_out) becomes a segment positioned in the
+    6 AM–8 PM window. Open entries (still clocked in) extend to 'now' when
+    the day is today, otherwise to the window end. Manual entries have no
+    times and get no segment. Returns (segments, manual_entries).
+    """
+    window_start = datetime.combine(day_date, datetime.min.time()).replace(
+        hour=DAY_WINDOW_START_H)
+    window_end = datetime.combine(day_date, datetime.min.time()).replace(
+        hour=DAY_WINDOW_END_H)
+    window_secs = (window_end - window_start).total_seconds()
+    segments, manual = [], []
+    for e in entries:
+        if e["manual_hours"] is not None:
+            manual.append(e)
+            continue
+        start = _parse_tc_dt(e["clock_in"])
+        if not start:
+            continue
+        end = _parse_tc_dt(e["clock_out"]) if e["clock_out"] else None
+        if end:
+            open_ended = False
+        else:
+            # Still clocked in: extend to now (today) or window end.
+            end = now_dt if day_date == now_dt.date() else window_end
+            open_ended = True
+        left = max(0.0, min(100.0,
+                     (start - window_start).total_seconds() / window_secs * 100))
+        right = max(0.0, min(100.0,
+                      (end - window_start).total_seconds() / window_secs * 100))
+        segments.append({
+            "left": round(left, 2),
+            "width": round(max(right - left, 0.8), 2),
+            "open": open_ended,
+            "title": "%s → %s" % (
+                start.strftime("%I:%M %p").lstrip("0"),
+                "still in" if open_ended else end.strftime("%I:%M %p").lstrip("0")),
+        })
+    return segments, manual
+
+
+def _build_day_view(db, day_date, can_view_all, my_employee_id):
+    """Assemble per-employee punch data for one calendar day.
+
+    Privacy: callers without view_all_timeclocks only ever get their own
+    record (filtered by my_employee_id). Returns (day_employees, summary).
+    """
+    now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
+    if can_view_all:
+        emp_rows = db.execute(
+            "SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name"
+        ).fetchall()
+    elif my_employee_id:
+        emp_rows = db.execute(
+            "SELECT * FROM employees WHERE id = ? AND is_active = 1",
+            (my_employee_id,),
+        ).fetchall()
+    else:
+        emp_rows = []
+    day_employees = []
+    total_hours = 0.0
+    clocked_in_count = 0
+    for emp_row in emp_rows:
+        emp = _employee_dict(emp_row)
+        rows = db.execute(
+            """SELECT * FROM timeclock_entries
+               WHERE employee_id = ? AND entry_date = ?
+               ORDER BY clock_in ASC, id ASC""",
+            (emp["id"], day_date.isoformat()),
+        ).fetchall()
+        entries = []
+        emp_hours = 0.0
+        emp_open = False
+        for r in rows:
+            d = dict(r)
+            d["hours"] = entry_hours(r)
+            d["notes_list"] = get_notes(db, "timeclock_entry", r["id"])
+            d["is_open"] = r["clock_out"] is None and r["manual_hours"] is None
+            if d["is_open"]:
+                emp_open = True
+                # Live elapsed for an open punch.
+                ci = _parse_tc_dt(r["clock_in"])
+                d["elapsed_hours"] = round(
+                    (now_dt - ci).total_seconds() / 3600.0, 2) if ci else 0.0
+                emp_hours += d["elapsed_hours"]
+            else:
+                emp_hours += d["hours"]
+            entries.append(d)
+        segments, manual = _day_timeline_segments(
+            [dict(r) for r in rows], day_date, now_dt)
+        emp_hours = round(emp_hours, 2)
+        total_hours += emp_hours
+        if emp_open:
+            clocked_in_count += 1
+        day_employees.append({
+            "employee": emp,
+            "entries": entries,
+            "manual_entries": manual,
+            "segments": segments,
+            "total_hours": emp_hours,
+            "is_clocked_in": emp_open,
+        })
+    summary = {
+        "total_hours": round(total_hours, 2),
+        "clocked_in_count": clocked_in_count,
+        "employee_count": len([d for d in day_employees if d["entries"]]),
+    }
+    return day_employees, summary
+
+
 @app.route("/timeclock", methods=["GET", "POST"])
 @permission_required("use_timeclock")
 def timeclock():
@@ -5072,12 +5230,57 @@ def timeclock():
                WHERE c.status = 'pending'
                ORDER BY c.requested_at ASC""",
         ).fetchall()]
+    # --- Day view (v2.4.1): all punches for one calendar day ---
+    view = request.args.get("view", "overview")
+    if view not in ("overview", "day"):
+        view = "overview"
+    day_str = request.args.get("date", "").strip()
+    try:
+        day_date = date.fromisoformat(day_str) if day_str else date.today()
+    except ValueError:
+        day_date = date.today()
+    day_employees, day_summary = _build_day_view(
+        db, day_date, can_view_all, my_employee_id)
+    day_is_today = day_date == date.today()
     return render_template(
         "timeclock.html", employees=employees, open_entries=open_entries,
         recent=recent_list, today=date.today().isoformat(),
         can_view_all=can_view_all, my_employee_id=my_employee_id,
         my_corrections=my_corrections,
         pending_corrections=pending_corrections,
+        view=view, day_date=day_date, day_is_today=day_is_today,
+        day_prev=(day_date - timedelta(days=1)).isoformat(),
+        day_next=(day_date + timedelta(days=1)).isoformat(),
+        day_employees=day_employees, day_summary=day_summary,
+    )
+
+
+@app.route("/timeclock/day/print")
+@permission_required("use_timeclock")
+def timeclock_day_print():
+    """Printable one-day punch sheet (letterhead, clean table).
+
+    Same privacy as the screen day view: without view_all_timeclocks the
+    sheet contains only the requester's own punches.
+    """
+    db = get_db()
+    can_view_all = _can_view_all_timeclocks()
+    my_employee_id = _my_employee_id(db)
+    day_str = request.args.get("date", "").strip()
+    try:
+        day_date = date.fromisoformat(day_str) if day_str else date.today()
+    except ValueError:
+        day_date = date.today()
+    day_employees, day_summary = _build_day_view(
+        db, day_date, can_view_all, my_employee_id)
+    return render_template(
+        "timeclock_day_print.html",
+        day_date=day_date,
+        day_is_today=day_date == date.today(),
+        day_employees=day_employees, day_summary=day_summary,
+        can_view_all=can_view_all,
+        printed_by=session.get("username", ""),
+        printed_at=datetime.now(timezone.utc).strftime("%b %d, %Y %I:%M %p UTC"),
     )
 
 
@@ -5388,6 +5591,119 @@ def timeclock_correction_deny(correction_id):
           f"{corr['employee_name']} on {corr['correction_date']}: {review_notes}")
     flash(f"Correction request from {corr['employee_name']} denied.", "success")
     return redirect(url_for("timeclock"))
+
+
+# --- Quick notes (v2.4.1): append-only timestamped notes on any record ---
+NOTE_ENTITY_PERMS = {
+    "client": "view_clients",
+    "case": "view_cases",
+    "invoice": "view_billing",
+    "timeclock_entry": "use_timeclock",
+}
+NOTE_LABELS = {
+    "client": "client",
+    "case": "case",
+    "invoice": "invoice",
+    "timeclock_entry": "timeclock entry",
+}
+
+
+def get_notes(db, entity_type, entity_id):
+    """Notes for a record, newest first, with author names."""
+    return [dict(r) for r in db.execute(
+        """SELECT n.*, u.username AS author
+           FROM notes n JOIN users u ON n.created_by = u.id
+           WHERE n.entity_type = ? AND n.entity_id = ?
+           ORDER BY n.created_at DESC, n.id DESC""",
+        (entity_type, entity_id),
+    ).fetchall()]
+
+
+def _note_entity_access(db, entity_type, entity_id):
+    """Verify the session user may view (and thus note on) the entity.
+
+    Returns (ok, label, redirect_endpoint, redirect_kwargs). For timeclock
+    entries, staff may only note their own punches.
+    """
+    perms = session.get("permissions", {})
+    needed = NOTE_ENTITY_PERMS.get(entity_type)
+    if not needed or not user_has_perm(perms, needed):
+        return False, None, None, {}
+    if entity_type == "client":
+        row = db.execute("SELECT id FROM clients WHERE id = ?", (entity_id,)).fetchone()
+        return (True, "client", "client_detail", {"client_id": entity_id}) if row else (False, None, None, {})
+    if entity_type == "case":
+        row = db.execute("SELECT id FROM cases WHERE id = ?", (entity_id,)).fetchone()
+        return (True, "case", "case_detail", {"case_id": entity_id}) if row else (False, None, None, {})
+    if entity_type == "invoice":
+        row = db.execute("SELECT id FROM invoices WHERE id = ?", (entity_id,)).fetchone()
+        return (True, "invoice", "invoice_detail", {"invoice_id": entity_id}) if row else (False, None, None, {})
+    if entity_type == "timeclock_entry":
+        row = db.execute(
+            "SELECT id, employee_id, entry_date FROM timeclock_entries WHERE id = ?",
+            (entity_id,)
+        ).fetchone()
+        if not row:
+            return False, None, None, {}
+        # Privacy: without view_all_timeclocks, only your own punches.
+        if not _can_view_all_timeclocks():
+            if row["employee_id"] != _my_employee_id(db):
+                return False, None, None, {}
+        return (True, "timeclock entry", "timeclock",
+                {"view": "day", "date": row["entry_date"]})
+    return False, None, None, {}
+
+
+@app.route("/notes/add", methods=["POST"])
+def note_add():
+    db = get_db()
+    check_csrf()
+    entity_type = request.form.get("entity_type", "").strip()
+    try:
+        entity_id = int(request.form.get("entity_id", "0") or 0)
+    except ValueError:
+        entity_id = 0
+    text = request.form.get("note_text", "").strip()
+    ok, label, endpoint, rkwargs = _note_entity_access(db, entity_type, entity_id)
+    if not ok:
+        abort(403)
+    if not text:
+        flash("Note can't be empty.", "error")
+    elif len(text) > 5000:
+        flash("Note is too long (max 5000 characters).", "error")
+    else:
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            """INSERT INTO notes (entity_type, entity_id, note_text,
+                created_by, created_at) VALUES (?, ?, ?, ?, ?)""",
+            (entity_type, entity_id, text, session.get("user_id"), now),
+        )
+        db.commit()
+        audit("note_added", f"Note added to {label} #{entity_id}")
+        flash("Note added.", "success")
+    return redirect(url_for(endpoint, **rkwargs))
+
+
+@app.route("/notes/<int:note_id>/delete", methods=["POST"])
+def note_delete(note_id):
+    # Admin-only: notes are append-only for everyone else.
+    if not is_admin():
+        abort(403)
+    check_csrf()
+    db = get_db()
+    note = db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+    if not note:
+        abort(404)
+    db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    db.commit()
+    audit("note_deleted",
+          f"Deleted note #{note_id} on {NOTE_LABELS.get(note['entity_type'], 'record')} #{note['entity_id']}")
+    flash("Note deleted.", "success")
+    ok, _label, endpoint, rkwargs = _note_entity_access(
+        db, note["entity_type"], note["entity_id"])
+    if ok and endpoint:
+        return redirect(url_for(endpoint, **rkwargs))
+    return redirect(url_for("dashboard"))
 
 
 # --- Payroll ---

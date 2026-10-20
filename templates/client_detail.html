@@ -96,4 +96,8 @@
   <p>Cases opened for this client will appear here.</p>
 </div>
 {% endif %}
+
+{# Quick notes (v2.4.1) #}
+{% from "_notes.html" import notes_section %}
+{{ notes_section(notes, 'client', client.id) }}
 {% endblock %}

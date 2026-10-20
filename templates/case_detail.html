@@ -171,4 +171,8 @@
   <p class="pre">{{ case.notes or '—' }}</p>
 </div>
 {% endif %}
+
+{# Quick notes timeline (v2.4.1) — append-only #}
+{% from "_notes.html" import notes_section %}
+{{ notes_section(notes, 'case', case.id) }}
 {% endblock %}

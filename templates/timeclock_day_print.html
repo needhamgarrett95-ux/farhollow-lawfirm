@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Timeclock — {{ day_date.strftime('%B %d, %Y') }} — Law Office of Derek G. Medina</title>
+<style>
+  /* ---- Print punch sheet: clean black-on-white, letterhead ---- */
+  * { box-sizing: border-box; }
+  @page { margin: 0.7in 0.6in; }
+  body {
+    font-family: "Segoe UI", -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color: #111; background: #fff; margin: 0; font-size: 11pt; line-height: 1.45;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .sheet { max-width: 7.5in; margin: 0 auto; }
+  /* Letterhead */
+  .letterhead {
+    display: flex; align-items: center; gap: 14px;
+    border-bottom: 3px solid #1a365d; padding-bottom: 12px; margin-bottom: 18px;
+  }
+  .lh-mark {
+    width: 52px; height: 52px; border-radius: 12px; flex: none;
+    background: linear-gradient(135deg, #c9a227, #e3c766); color: #1a365d;
+    font-weight: 800; font-size: 15px; display: flex;
+    align-items: center; justify-content: center; letter-spacing: .5px;
+  }
+  .lh-name { font-size: 16pt; font-weight: 700; color: #1a365d; line-height: 1.2; }
+  .lh-sub { font-size: 9.5pt; color: #555; }
+  .lh-right { margin-left: auto; text-align: right; }
+  .lh-right .doc-title { font-size: 14pt; font-weight: 700; color: #1a365d; }
+  .lh-right .doc-date { font-size: 11pt; color: #333; margin-top: 2px; }
+  /* Table */
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  thead th {
+    text-align: left; font-size: 9pt; text-transform: uppercase; letter-spacing: .6px;
+    color: #444; border-bottom: 2px solid #1a365d; padding: 7px 8px;
+  }
+  tbody td { padding: 8px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  .emp-name { font-weight: 700; }
+  .punch-line { white-space: nowrap; }
+  .punch-line .arrow { color: #777; }
+  .open-tag { font-style: italic; color: #555; }
+  .notes { font-size: 9.5pt; color: #555; font-style: italic; margin-top: 2px; }
+  .manual-tag {
+    display: inline-block; font-size: 8.5pt; font-weight: 700; color: #1a365d;
+    border: 1px solid #1a365d; border-radius: 4px; padding: 1px 6px; margin-top: 3px;
+  }
+  .hours { text-align: right; font-weight: 700; white-space: nowrap; }
+  tfoot td {
+    border-top: 2px solid #1a365d; padding: 9px 8px; font-weight: 700; font-size: 12pt;
+  }
+  tfoot .hours { font-size: 13pt; }
+  /* Footer */
+  .sheet-foot {
+    margin-top: 26px; border-top: 1px solid #ccc; padding-top: 10px;
+    font-size: 8.5pt; color: #777; display: flex; justify-content: space-between;
+  }
+  .sig-line { margin-top: 44px; display: flex; gap: 40px; }
+  .sig { flex: 1; border-top: 1px solid #111; padding-top: 4px; font-size: 9pt; color: #444; }
+  /* Screen-only helpers */
+  .screen-bar {
+    background: #1a365d; color: #fff; padding: 10px 18px; display: flex;
+    align-items: center; gap: 12px; margin-bottom: 18px; border-radius: 8px;
+  }
+  .screen-bar button {
+    background: #fff; color: #1a365d; border: none; border-radius: 6px;
+    padding: 8px 16px; font-size: 10pt; font-weight: 700; cursor: pointer;
+  }
+  .screen-bar button:hover { background: #e8eef6; }
+  .screen-bar .hint { font-size: 9.5pt; opacity: .85; }
+  @media print {
+    .screen-bar { display: none !important; }
+    body { font-size: 10.5pt; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="screen-bar">
+    <button onclick="window.print()">Print this sheet</button>
+    <span class="hint">Letterhead preview — prints clean black-on-white. You can close this tab when done.</span>
+  </div>
+
+  <div class="letterhead">
+    <div class="lh-mark">DGM</div>
+    <div>
+      <div class="lh-name">Law Office of Derek G. Medina</div>
+      <div class="lh-sub">210 East Fifth Street, Port Angeles, WA 98362</div>
+    </div>
+    <div class="lh-right">
+      <div class="doc-title">Daily Time Sheet</div>
+      <div class="doc-date">{{ day_date.strftime('%A, %B %d, %Y') }}</div>
+    </div>
+  </div>
+
+  {% if day_employees %}
+  <table>
+    <thead>
+      <tr>
+        <th style="width:22%">Employee</th>
+        <th>Punches</th>
+        <th style="width:12%;text-align:right">Hours</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in day_employees %}
+      <tr>
+        <td class="emp-name">{{ d.employee.full_name }}</td>
+        <td>
+          {% for e in d.entries %}
+          <div class="punch-line">
+            {% if e.manual_hours is not none %}
+            Manual entry <span style="color:#555">({{ e.hours }}h)</span>
+            {% else %}
+            {{ e.clock_in[11:16] if e.clock_in and e.clock_in|length > 16 else '—' }}
+            <span class="arrow">→</span>
+            {% if e.is_open %}
+            <span class="open-tag">still clocked in</span>
+            {% elif e.clock_out %}
+            {{ e.clock_out[11:16] if e.clock_out|length > 16 else '—' }}
+            {% endif %}
+            <span style="color:#555">({{ e.elapsed_hours if e.is_open else e.hours }}h)</span>
+            {% endif %}
+          </div>
+          {% if e.notes %}<div class="notes">{{ e.notes }}</div>{% endif %}
+          {% endfor %}
+        </td>
+        <td class="hours">{{ d.total_hours }}h</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2">Total — {{ day_summary.employee_count }} employee{{ 's' if day_summary.employee_count != 1 }}</td>
+        <td class="hours">{{ day_summary.total_hours }}h</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="sig-line">
+    <div class="sig">Employee signature / date</div>
+    <div class="sig">Supervisor signature / date</div>
+  </div>
+  {% else %}
+  <p style="margin-top:24px;color:#555">No time punches recorded for this date.</p>
+  {% endif %}
+
+  <div class="sheet-foot">
+    <span>Generated {{ printed_at }}{% if printed_by %} by {{ printed_by }}{% endif %}</span>
+    <span>Law Office of Derek G. Medina</span>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,94 @@
+{# Quick notes section (v2.4.1) — reusable on client / case / invoice pages.
+   Usage: {% from "_notes.html" import notes_section %}
+          {{ notes_section(notes, 'client', client.id) }}
+   Notes are append-only; admins (is_admin) get a delete button. #}
+{% from "_icons.html" import icon %}
+{% macro notes_section(notes, entity_type, entity_id, compact=false) %}
+<div class="notes-block {{ 'notes-compact' if compact }}" data-notes-block>
+  <div class="notes-head">
+    {{ icon('note', 17) }}
+    <span class="notes-title">Notes</span>
+    <span class="badge badge-closed">{{ notes|length }}</span>
+    <button type="button" class="btn btn-small btn-primary" style="margin-left:auto"
+            onclick="toggleNoteForm(this)">{{ icon('plus', 13) }} Add note</button>
+  </div>
+  <form class="note-form" method="post" action="{{ url_for('note_add') }}" hidden>
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <input type="hidden" name="entity_type" value="{{ entity_type }}">
+    <input type="hidden" name="entity_id" value="{{ entity_id }}">
+    <textarea name="note_text" rows="3" required maxlength="5000"
+              placeholder="Type a note… (append-only — notes can't be edited)"></textarea>
+    <div class="form-actions">
+      <button type="button" class="btn btn-small" onclick="toggleNoteForm(this.closest('.notes-block').querySelector('.notes-head .btn'))">Cancel</button>
+      <button type="submit" class="btn btn-small btn-primary">{{ icon('checkmark', 14) }} Save note</button>
+    </div>
+  </form>
+  {% if notes %}
+  <div class="notes-timeline">
+    {% for n in notes %}
+    <div class="note-item">
+      <div class="note-dot"></div>
+      <div class="note-body">
+        <div class="note-text">{{ n.note_text }}</div>
+        <div class="note-meta">
+          {{ n.author }} · {{ n.created_at[:16].replace('T', ' ') }}
+          {% if is_admin %}
+          <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" class="note-del"
+                onsubmit="return modalConfirmSubmit(this, 'Delete this note? This cannot be undone.', {title: 'Delete note', confirmText: 'Delete', danger: true});">
+            <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+            <button type="submit" class="note-del-btn" title="Delete note (admin)">{{ icon('trash', 13) }}</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted small" style="margin:6px 0 2px">No notes yet — add the first one above.</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# Compact per-punch note thread for the timeclock day view #}
+{% macro punch_notes(entry) %}
+<div class="punch-notes" data-notes-block>
+  <button type="button" class="btn btn-small note-chip-btn" onclick="toggleNoteForm(this)">
+    {{ icon('note', 13) }} {% if entry.notes_list %}{{ entry.notes_list|length }} note{{ 's' if entry.notes_list|length != 1 }}{% else %}Add note{% endif %}
+  </button>
+  <div class="punch-notes-body" hidden>
+    {% if entry.notes_list %}
+    <div class="notes-timeline">
+      {% for n in entry.notes_list %}
+      <div class="note-item">
+        <div class="note-dot"></div>
+        <div class="note-body">
+          <div class="note-text">{{ n.note_text }}</div>
+          <div class="note-meta">
+            {{ n.author }} · {{ n.created_at[:16].replace('T', ' ') }}
+            {% if is_admin %}
+            <form method="post" action="{{ url_for('note_delete', note_id=n.id) }}" class="note-del"
+                  onsubmit="return modalConfirmSubmit(this, 'Delete this note? This cannot be undone.', {title: 'Delete note', confirmText: 'Delete', danger: true});">
+              <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+              <button type="submit" class="note-del-btn" title="Delete note (admin)">{{ icon('trash', 13) }}</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <form class="note-form" method="post" action="{{ url_for('note_add') }}">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+      <input type="hidden" name="entity_type" value="timeclock_entry">
+      <input type="hidden" name="entity_id" value="{{ entry.id }}">
+      <textarea name="note_text" rows="2" required maxlength="5000"
+                placeholder="Note on this punch…"></textarea>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-small btn-primary">Save note</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endmacro %}
