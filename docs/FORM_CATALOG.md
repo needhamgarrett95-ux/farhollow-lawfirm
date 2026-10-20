@@ -37,7 +37,7 @@ DOH 422-027** — a vital-statistics form, not an FL form at all.
 | FL Divorce 200 | Summons: Notice About a Marriage or Domestic Partnership | No (catalog) |
 | FL All Family 119 | Agreement to Join Petition (Joinder) | No (catalog) |
 | FL All Family 001 | Confidential Information Form | **Full wizard** |
-| FL All Family 002 | Attachment to Confidential Information | No (catalog) |
+| FL All Family 002 | Attachment to Confidential Information | **Full wizard** (v2.9.0) — client flags protected facts/documents |
 | DOH 422-027 | Certificate of Dissolution / Invalidity / Legal Separation | **Full wizard** (data) |
 | FL All Family 131 | Financial Declaration | **Full wizard** |
 | FL All Family 135 | Declaration | **Full wizard** (the flagship) |
@@ -61,7 +61,36 @@ Divorce series (200/201/211/231/241) covers dissolution, legal
 separation, and invalidity by its own titles — verified against the
 official form titles.
 
-## Uncommon tier — catalog only in v2.8.0 (wizards/packets in v2.9.0)
+**Legal separation and invalidity are not separate packets.** The
+Divorce series (200/201/211/231/241) covers dissolution, legal
+separation, and invalidity by its own titles — verified against the
+official form titles. *(v2.9.0: the petition wizard asks which of
+the three the client is filing as its first question; the variant
+rides the same capture and is named on the generated petition and
+data sheet.)*
+
+## Uncommon tier — implemented in v2.9.0 (portal wizards live)
+
+**Implemented in v2.9.0** (client data capture + DRAFT data sheets,
+on the same vault/wizard machinery as the Common tier):
+
+| Form | Title | Notes |
+|---|---|---|
+| FL Divorce 211 | Response to Petition About a Marriage | Per-topic agree/disagree + counter-requests |
+| FL Modify 501 | Petition to Modify Child Support Order | Reuses Financial Declaration figures as confirm cards |
+| FL Modify 601 | Petition to Modify Parenting Plan | Substantial-change narrative is the core |
+| FL Relocate 701 | Notice of Intent to Relocate | Verified on the official PDF |
+| FL Relocate 721 | Objection to Relocation | Other-side capture; ~30-day statutory deadline flagged |
+| FL Parentage 301 | Petition to Decide Parentage | Verified on the official PDF |
+| DOH 422-159 | Acknowledgment of Parentage | Vital-records form (Dept. of Health, rev. 03/2021) — a confirm-flow from vault facts; NOT an FL form |
+| GR 34.0300 | Financial Statement (fee waiver / IFP) | Vault-financials confirm-flow; sheet states the court decides |
+
+*Number corrections pinned by the registry:* the Modify series is
+**501 = child support, 601 = parenting plan** (an earlier plan draft
+had them swapped). The **Acknowledgment of Parentage is DOH 422-159**
+— it is not FL Parentage 303 (see the discrepancy note below).
+
+The rest of the tier remains catalog-only:
 
 Responses: FL Divorce 211 (marriage), FL Divorce 212 (registered
 domestic partnership). Temporary/safety: FL Divorce 224, FL Divorce 221
@@ -139,10 +168,14 @@ v1.9.0) — the library reconciles rather than duplicates them:
 
 ## How the tiers map to releases
 
-- **v2.8.0 (this release):** Common tier implemented end-to-end —
-  vault, wizard engine, staff library with per-document portal
-  switches. Uncommon/Rare are catalog-only (staff-visible, labeled
-  "in a later release," never client-facing).
-- **v2.9.0 (planned):** scenario packets + staff packet assignment,
-  Uncommon tier wizards.
+- **v2.8.0:** Common tier implemented end-to-end — vault, wizard
+  engine, staff library with per-document portal switches.
+  Uncommon/Rare are catalog-only (staff-visible, labeled "in a
+  later release," never client-facing).
+- **v2.9.0 (this release):** scenario packets (8 guided checklists —
+  starting a divorce, responding to service, uncontested, temporary
+  orders, changing an order, relocation, protection, parentage)
+  with staff assignment from the client record or the Library, plus
+  the Uncommon tier wizards listed above and the FL All Family 002
+  sealed-attachment wizard. Rare stays catalog-only.
 - **v2.10.0 (planned):** Rare tier + polish.

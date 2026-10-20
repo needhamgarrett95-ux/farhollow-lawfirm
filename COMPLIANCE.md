@@ -294,3 +294,28 @@ worksheets, and temporary orders). Points for counsel's review:
   safety needs to the office (and, in the portal generally, to 911)
   rather than into a document queue; protection filings remain a
   staff-handled, same-day matter.
+
+## 6. Addendum (v2.9.0) — scenario packets
+
+- **Packets are guidance, not legal advice.** A scenario packet is
+  an administrative checklist: it sequences the firm's own document
+  requests for a client's situation. It does not assess the client's
+  legal position, and packet assignment is a staff workflow action,
+  not a legal determination. Every packet shown to a client carries
+  the plain line, verbatim: *"This checklist is guidance from our
+  office, not legal advice about your situation."* Info-step text
+  that mentions deadlines (service/response, relocation) is hedged
+  in the copy itself — the deadline that governs is the one the
+  attorney confirms for that client.
+- **No new data flows.** Packet state is derived entirely from the
+  client's own existing records (wizard submissions, document
+  requests/uploads, read acknowledgments); assignment adds two small
+  tables and two link columns. Cross-client isolation is enforced
+  the same way as the rest of the portal (every packet route
+  resolves through the session client) and is covered by the v2.9.0
+  boundary tests.
+- **Sensitive-information flags.** The FL All Family 002 wizard
+  lets a client flag facts/documents as sensitive with reasons;
+  flags surface to staff in Portal Review. The wizard instructs
+  clients not to re-type full account numbers (institutions and
+  last-four only), consistent with §5.

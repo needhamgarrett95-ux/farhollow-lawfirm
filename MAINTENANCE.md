@@ -1695,3 +1695,114 @@ client record (or confirming their pending update on import), not
 the wizard. A client swears they submitted and staff can't see it?
 Drafts are invisible to staff by design; only submitted wizards
 appear in Portal Review.
+
+## 51. Guided checklists (packets) and the Uncommon documents (v2.9.0)
+
+**What a packet is.** A packet is a guided checklist for one
+situation in a client's case — "Responding to papers you were
+served," "Moving with the kids," "Proving parentage." Each packet is
+an ordered list of steps. A step is one of three things: a library
+**form** the client completes, an **upload** the office needs, or a
+short **reading** the client marks as read. There are eight packets:
+Starting a divorce · Responding to papers you were served · We
+agree on everything · Temporary orders while we wait · Changing an
+existing order · Moving with the kids · Protection order · Proving
+parentage.
+
+**Assigning one.** Two places: on the client's record, in the Portal
+card under "Guided checklists (packets)," or on the **Library**
+page, in the packets card at the top. Pick the client, the
+checklist, and (optionally) the case it belongs to. If the case you
+pick belongs to a different client, the checklist is simply assigned
+at client level instead — it never attaches to the wrong case.
+Assigning needs the Manage Clients permission, is written to the
+audit log, and posts a note to the client's activity feed. A client
+can only have one active copy of the same checklist; assigning it
+again just tells you it's already there. **Unassign** is on the
+client's record next to the checklist; it removes the checklist from
+the client's portal and cancels any of its upload requests that are
+still open (ones already fulfilled stay fulfilled — the documents
+are already in the file).
+
+**What the client sees.** Assigned checklists sit at the very top
+of the client's portal home, above everything else, with a progress
+bar ("3 of 5 steps done") and the next step named. Opening one shows
+the steps in order: finished steps are checked, the current step is
+highlighted, and a step counts as done only when it's really done —
+the form was **sent**, the upload was **accepted** by staff (sending
+it is not enough), or the reading was **marked read**. Clients can
+work ahead in any order, with one exception: a step marked
+*sequential* (the "read this first" steps in the Responding and
+Protection packets — deadlines and safety) locks the steps behind
+it inside the checklist until it's done. The forms themselves also
+live in the general Document Library, which stays open as usual.
+Every checklist carries the line "This checklist is guidance from
+our office, not legal advice about your situation." — that's on
+purpose (see COMPLIANCE §6).
+
+**Progress and completion.** Progress is computed live from the
+client's real records — there is no separate progress to maintain
+or fix. Optional steps (marked "only if it applies to you," like
+the two change-petitions in Changing an existing order, where a
+client usually needs just one) show on the checklist but never
+count toward the total. When every counted step is done, the
+checklist stamps itself complete and posts "Completed the '…'
+checklist" to the client's activity feed, which is also the latest
+entry shown in the dashboard's Client Portal widget. Staff see
+live progress in three places: the client's record (Portal card),
+and the Library page's "Assigned now" table.
+
+**The Uncommon documents.** Nine more wizards went live on the same
+machinery as §50, all client-data capture with DRAFT data sheets —
+nothing files itself, same as always:
+
+- **Response to the Petition (FL Divorce 211)** — the client answers
+  topic by topic (children, property, support) and lists their
+  counter-requests; the office drafts the formal response.
+- **Legal separation** is not a separate form or packet — the
+  Divorce series covers it. The petition wizard's first question
+  now asks what they're filing (dissolution, legal separation, or
+  invalidity); the choice is printed on the generated petition and
+  data sheet so the right findings/order track is used.
+- **Relocation** — Notice of Intent to Move (FL Relocate 701) for
+  the moving parent and the Objection (FL Relocate 721) for the
+  other side. Both wizards warn about the statutory deadlines
+  (usually 60 days' notice out, about 30 days to object).
+- **Modification** — Petition to Modify Parenting Plan is
+  **FL Modify 601** and Petition to Modify Child Support is
+  **FL Modify 501** (the registry pins this; an early plan draft
+  had them swapped). Both lead with "what changed and why" — the
+  substantial-change story is the case. The support one reuses the
+  client's Financial Declaration figures as confirm cards.
+- **Parentage** — Petition to Decide Parentage (FL Parentage 301),
+  plus the **Acknowledgment of Parentage**, which is a Department of
+  Health form, **DOH 422-159** — not an FL form, and not "303"
+  (303 is the Parentage Residential Schedule). The acknowledgment
+  wizard is mostly confirming names/dates/places from the vault,
+  because the paper form has to match birth records exactly; both
+  parents still sign the paper form before a notary or witness.
+- **Sealed / protected information (FL All Family 002)** — the
+  client flags which facts or documents are sensitive (address,
+  accounts, the children's school…) and why; staff see the flags in
+  Portal Review, and the generated sheet is what the office works
+  from to prepare the sealed attachment. Sealing is never
+  automatic — the court needs the reason, which is why the wizard
+  asks for it.
+- **Fee waiver (GR 34)** — the financial statement behind a waiver
+  request (GR 34.0300; the office files the GR 34.0100 motion from
+  it). It's almost entirely a confirm-flow over the client's saved
+  financials, household size, and benefits. The generated sheet
+  states plainly that **the court decides** — completing it never
+  guarantees a waiver.
+
+**Troubleshooting.** A client says a step won't complete? Check the
+underlying record: a form step needs the wizard **submitted** (a
+draft doesn't count); an upload step needs the upload **accepted**
+in Portal Review (a rejected or still-quarantined upload doesn't
+count); a reading step needs the client to tap "I've read this." A
+checklist that was completed and then shows incomplete again means
+a newer draft replaced nothing — completion is stamped once and
+kept; look at the assignment's dates on the Library page. A client
+can't find their checklist? It only exists while assigned — check
+the client's record; if someone unassigned it, the activity feed
+says so.

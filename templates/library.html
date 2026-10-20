@@ -5,7 +5,58 @@
 <div class="page-head">
   <h1>{{ icon('documents', 22) }} Document Library</h1>
 </div>
-<p class="muted">The verified Washington family-law catalog this firm works from. <strong>Common</strong> documents are live in the client portal as guided wizards (clients confirm facts from their profile vault instead of retyping them). Uncommon and Rare entries are catalog-only in this release — they arrive as wizards/packets in later releases and are <strong>not</strong> client-facing. Catalog verified October 2026 against the Washington Courts forms list; see <code>docs/FORM_CATALOG.md</code>. Nothing a client completes files itself — every wizard output is a staff-reviewed draft.</p>
+<p class="muted">The verified Washington family-law catalog this firm works from. <strong>Common and Uncommon</strong> documents are live in the client portal as guided wizards (clients confirm facts from their profile vault instead of retyping them). Rare entries are catalog-only in this release and are <strong>not</strong> client-facing. Catalog verified October 2026 against the Washington Courts forms list; see <code>docs/FORM_CATALOG.md</code>. Nothing a client completes files itself — every wizard output is a staff-reviewed draft.</p>
+
+<div class="detail-card">
+  <h2>Guided checklists (scenario packets)</h2>
+  <p class="muted">A packet bundles the right documents, uploads, and readings into one ordered checklist for a client's situation. Assign one from here or from the client's record — it appears at the top of their portal home. Packet progress below is live (a step counts when the form is sent, the upload is accepted, or the reading is marked read). Every packet a client sees carries the line: <em>“This checklist is guidance from our office, not legal advice about your situation.”</em></p>
+  <table class="table">
+    <thead><tr><th>Checklist</th><th>For</th><th>Steps</th></tr></thead>
+    <tbody>
+    {% for slug, pdef in packet_defs.items() %}
+      <tr>
+        <td><strong>{{ pdef.title }}</strong></td>
+        <td>{{ scenarios.get(pdef.scenario, pdef.scenario) }}</td>
+        <td>{{ pdef.steps | length }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if packet_assignments %}
+  <h3 style="margin-top:14px;">Assigned now</h3>
+  <table class="table">
+    <thead><tr><th>Client</th><th>Checklist</th><th>Case</th><th>Progress</th><th>Assigned</th></tr></thead>
+    <tbody>
+    {% for row in packet_assignments %}
+      <tr>
+        <td><a href="{{ url_for('client_detail', client_id=row.assignment.client_id) }}">{{ row.assignment.first_name }} {{ row.assignment.last_name }}</a></td>
+        <td>{{ row.progress.pdef.title }}</td>
+        <td>{{ row.assignment.case_number or '—' }}</td>
+        <td>{{ row.progress.done }}/{{ row.progress.total }} steps{{ ' · <strong>complete</strong>' | safe if row.progress.complete }}</td>
+        <td>{{ row.assignment.assigned_at[:10] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <form method="post" action="{{ url_for('library_packet_assign') }}" class="portal-request-form" style="margin-top:12px;">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <select name="client_id" required>
+      <option value="">Choose a client…</option>
+      {% for cl in all_clients %}<option value="{{ cl.id }}">{{ cl.last_name }}, {{ cl.first_name }}</option>{% endfor %}
+    </select>
+    <select name="packet_slug" required>
+      <option value="">Choose a checklist…</option>
+      {% for slug, pdef in packet_defs.items() %}<option value="{{ slug }}">{{ pdef.title }}</option>{% endfor %}
+    </select>
+    <select name="case_id">
+      <option value="">Any case / client-level</option>
+      {% for cs in all_cases %}<option value="{{ cs.id }}">{{ cs.last_name }} — {{ cs.case_number }}{{ ' · ' + cs.title if cs.title }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-small btn-primary">Assign checklist</button>
+  </form>
+  <p class="muted">Assigning needs the Manage Clients permission. If the chosen case doesn't belong to the chosen client, the checklist is assigned at client level instead.</p>
+</div>
 
 {% if drafts %}
 <div class="detail-card">

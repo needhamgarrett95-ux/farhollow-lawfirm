@@ -176,8 +176,12 @@ check("catalog has 50+ entries", len(fl.LIBRARY) >= 50,
 tiers = {e["tier"] for e in fl.LIBRARY}
 check("all three tiers present", tiers == {"common", "uncommon", "rare"})
 impl = [e for e in fl.LIBRARY if e["implemented"]]
-check("exactly the 8 common wizards are implemented", len(impl) == 8
-      and all(e["tier"] == "common" for e in impl))
+check("8 common wizards + sealed attachment (v2.9.0: +8 uncommon "
+      "= 17 live)",
+      len(impl) == 17
+      and sum(1 for e in impl if e["tier"] == "common") == 9
+      and sum(1 for e in impl if e["tier"] == "uncommon") == 8
+      and all(e["tier"] in ("common", "uncommon") for e in impl))
 check("every implemented entry has a wizard def",
       all(e["wizard"] in fl.WIZARD_DEFS for e in impl))
 check("wizard def keys and entry wizards line up",
@@ -231,7 +235,7 @@ r = staff.get("/portal/library")
 check("staff session hitting the portal library -> portal login",
       r.status_code == 302
       and "/portal/login" in r.headers.get("Location", ""))
-r = A.get("/portal/library/response-marriage")
+r = A.get("/portal/library/summons-marriage")
 check("catalog-only entry is NOT client-facing (404)",
       r.status_code == 404)
 r = A.get("/portal/library/no-such-doc")
@@ -244,8 +248,10 @@ r = A.get("/portal/library")
 check("A's library lists the implemented common tier",
       b"Declaration" in r.data and b"FL All Family 135" in r.data
       and b"Parenting Plan" in r.data and b"DOH 422-027" in r.data)
-check("A's library shows NO uncommon/rare entries",
-      b"FL Divorce 211" not in r.data and b"PO 001" not in r.data)
+check("A's library shows uncommon live but NO rare/unverified "
+      "entries (v2.9.0)",
+      b"FL Divorce 211" in r.data and b"PO 001" not in r.data
+      and b"FL Relocate 706" not in r.data)
 r = A.get("/portal/documents")
 check("Documents area shows 'Forms to complete'",
       b"Forms to complete" in r.data and b"FL All Family 135" in r.data)

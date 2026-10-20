@@ -27,6 +27,23 @@
 </div>
 {% endif %}
 
+{% for pkt in packets %}
+<div class="p-card">
+  <div class="p-card-head">
+    <h2>{{ pkt.progress.pdef.title }}</h2>
+    <span class="p-progress">{{ pkt.progress.done }} of {{ pkt.progress.total }} steps done</span>
+  </div>
+  <div class="p-progressbar"><span style="width: {{ (pkt.progress.done * 100 // pkt.progress.total) if pkt.progress.total else 0 }}%"></span></div>
+  <p class="p-muted">{{ pkt.progress.pdef.description }}</p>
+  {% if pkt.progress.complete %}
+  <p class="p-muted"><strong>All done — thank you!</strong> The office has everything in this checklist.</p>
+  {% elif pkt.progress.current is not none %}
+  <p class="p-muted">Next step: <strong>{{ pkt.progress.steps[pkt.progress.current].title }}</strong></p>
+  {% endif %}
+  <a class="btn btn-primary" href="{{ url_for('portal_packet', assignment_id=pkt.assignment.id) }}">{{ 'Review the checklist' if pkt.progress.complete else 'Open the checklist' }}</a>
+</div>
+{% endfor %}
+
 <div class="p-card">
   <h2>Your cases</h2>
   {% if cases %}

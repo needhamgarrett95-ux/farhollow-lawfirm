@@ -31,7 +31,8 @@ Three data structures live here:
    Health form DOH 422-027.
 
 3. ``WIZARD_DEFS`` — data-driven portal wizards for the implemented
-   (common-tier) documents. Shape mirrors PORTAL_FORM_DEFS in app.py
+   documents (common tier in v2.8.0; uncommon tier added in v2.9.0).
+   Shape mirrors PORTAL_FORM_DEFS in app.py
    (steps -> fields) with extensions: a field may carry ``vault``
    (the fact key it confirms/edits), ``prompt`` / ``guidance``
    (writing help for textareas), and new types: money, select,
@@ -39,6 +40,18 @@ Three data structures live here:
    True (declaration) to require a typed-name attestation on the
    review step, and ``generate`` describing how staff turn an
    approved submission into a case document.
+
+4. ``PACKET_DEFS`` (v2.9.0) — scenario packets: guided checklists
+   staff assign to a client. Each packet has a plain-language title
+   and description, the standing guidance line (guidance from the
+   office, not legal advice), and ordered steps. A step is one of:
+   ``{"type": "wizard", "doc": <catalog slug>}``, ``{"type":
+   "upload", "title": ..., "note": ..., "doc_type": <portal doc
+   type>}`` (tracked through the v2.6.0 document-request machinery),
+   or ``{"type": "info", "title": ..., "body": ...}`` (read and
+   acknowledge). A step may set ``sequential`` True (later steps
+   lock until it is done — used sparingly) or ``optional`` True
+   (shown, but not counted toward packet completion).
 
 Field targets reuse the portal import tuples:
   ("client", <clients column>)  ("financial", <case_financials key>)
@@ -141,6 +154,14 @@ VAULT_FACTS = {
                        "store": "financial", "fkey": "accounts_notes"},
     "notes.other_income": {"label": "Other income", "store": "financial",
                            "fkey": "other_income_notes"},
+    "household.size": {"label": "People in your household",
+                       "store": "vault"},
+    "benefits.receiving": {"label": "Receiving public benefits "
+                                    "(SNAP, TANF, SSI, Medicaid…)?",
+                           "store": "vault"},
+    "benefits.details": {"label": "Public benefits — which programs "
+                                  "and monthly amounts",
+                         "store": "vault"},
 }
 
 
@@ -173,7 +194,11 @@ LIBRARY = [
                    "spouse.name"],
        implemented=True, wizard="petition_divorce",
        note="The wizard captures everything the client supplies; the "
-            "attorney completes and files the petition."),
+            "attorney completes and files the petition. One capture "
+            "serves the whole series: the wizard's first question "
+            "asks whether this is a dissolution, a legal separation, "
+            "or an invalidity (annulment) — the Divorce series covers "
+            "all three, so there is no separate separation wizard."),
     _e("summons-marriage", "FL Divorce 200", "Summons: Notice About a "
        "Marriage or Domestic Partnership", "common",
        ["starting_divorce", "responding"], "none"),
@@ -190,7 +215,11 @@ LIBRARY = [
        note="GR 22: filed under seal; never part of the public file."),
     _e("cif-attachment", "FL All Family 002", "Attachment to Confidential "
        "Information (Additional Parties or Children)", "common",
-       ["starting_divorce"], "none"),
+       ["starting_divorce"], "partial",
+       implemented=True, wizard="sealed_attachment",
+       note="The wizard has the client flag which of their facts and "
+            "documents are sensitive (and why) so staff can assemble "
+            "the sealed attachment and any GR 22 requests."),
     _e("certificate-dissolution", "DOH 422-027", "Certificate of "
        "Dissolution, Declaration of Invalidity of Marriage, or Legal "
        "Separation (WA Dept. of Health)", "common",
@@ -291,9 +320,12 @@ LIBRARY = [
     _e("response-marriage", "FL Divorce 211", "Response to Petition "
        "about a Marriage", "uncommon", ["responding"], "partial",
        ["spouse.name"],
+       implemented=True, wizard="response_marriage",
        note="The other half of the 211 confusion: this IS FL Divorce "
             "211. Clallam County's own response packet (Superior Court, "
-            "DocumentCenter) is built around it."),
+            "DocumentCenter) is built around it. The wizard captures "
+            "the client's agrees/disagrees and counter-requests; the "
+            "attorney drafts the response."),
     _e("response-domestic-partnership", "FL Divorce 212", "Response to "
        "Petition about a Registered Domestic Partnership", "uncommon",
        ["responding"], "partial", ["spouse.name"]),
@@ -315,7 +347,13 @@ LIBRARY = [
     _e("fee-waiver-statement", "GR 34.0300", "Financial Statement (Fee "
        "Waiver)", "uncommon", ["starting_divorce"], "partial",
        ["income.client_gross", "income.client_net",
-        "expenses.monthly_total", "notes.assets", "notes.debts"]),
+        "expenses.monthly_total", "notes.assets", "notes.debts",
+        "household.size", "benefits.receiving", "benefits.details"],
+       implemented=True, wizard="fee_waiver",
+       note="The client-completed half of the GR 34 fee-waiver "
+            "application (the GR 34.0100 motion is prepared by the "
+            "office from this data). The court decides — the wizard "
+            "says so."),
     _e("fee-waiver-order", "GR 34.0500", "Order Re Waiver of Civil Fees "
        "and Surcharges", "uncommon", ["starting_divorce"], "none"),
     _e("public-assistance-declaration", "FL All Family 132", "Public "
@@ -338,13 +376,20 @@ LIBRARY = [
     _e("modify-support-petition", "FL Modify 501", "Petition to Modify "
        "Child Support Order", "uncommon", ["changing_order"], "partial",
        ["income.client_gross", "income.client_net",
-        "income.other_parent_net"]),
+        "income.other_parent_net"],
+       implemented=True, wizard="modify_support",
+       note="Registry note: FL Modify 501 is the CHILD SUPPORT "
+            "modification petition; the parenting-plan petition is "
+            "FL Modify 601 (below). The support wizard re-uses the "
+            "Financial Declaration's vault financials as confirm "
+            "cards."),
     _e("modify-parenting-summons", "FL Modify 600", "Summons: Notice "
        "about Petition to Change a Parenting Plan, Residential Schedule "
        "or Custody Order", "uncommon", ["changing_order"], "none"),
     _e("modify-parenting-petition", "FL Modify 601", "Petition to "
        "Change a Parenting Plan, Residential Schedule or Custody Order",
-       "uncommon", ["changing_order"], "partial"),
+       "uncommon", ["changing_order"], "partial",
+       implemented=True, wizard="modify_parenting"),
     _e("modify-adequate-cause-motion", "FL Modify 603", "Motion for "
        "Adequate Cause Decision (to Change a Parenting/Custody Order)",
        "uncommon", ["changing_order"], "partial"),
@@ -363,7 +408,11 @@ LIBRARY = [
        "partial", ["client.address"],
        source_url="https://www.courts.wa.gov/forms/documents/"
                   "FL%20Relocate%20701%20Notice%20of%20Intent%20to%20Move"
-                  "%20with%20Children_2022%2001%20(2).pdf"),
+                  "%20with%20Children_2022%2001%20(2).pdf",
+       implemented=True, wizard="relocation_notice",
+       note="Deadlines in relocation are short and statutory — the "
+            "wizard urges the client to send it promptly and the "
+            "office tracks the actual dates."),
     _e("relocate-objection-summons", "FL Relocate 720", "Summons: "
        "Notice of Objection about Moving with Children and Petition "
        "about Changing a Parenting/Custody Order (Relocation)",
@@ -371,7 +420,10 @@ LIBRARY = [
     _e("relocate-objection", "FL Relocate 721", "Objection about "
        "Moving with Children and Petition about Changing a "
        "Parenting/Custody Order (Relocation)", "uncommon",
-       ["relocation"], "partial"),
+       ["relocation"], "partial",
+       implemented=True, wizard="relocation_objection",
+       note="The other side of relocation: the wizard captures the "
+            "objection and the client's counter-proposal."),
     _e("relocate-prevent-move-motion", "FL Relocate 725", "Motion for "
        "Temporary Order Preventing Move with Children", "uncommon",
        ["relocation", "temporary_orders"], "partial"),
@@ -379,7 +431,23 @@ LIBRARY = [
        "Parentage", "uncommon", ["parentage"], "partial",
        source_url="https://www.courts.wa.gov/forms/documents/"
                   "FL%20Parentage%20301%20Petition%20to%20Decide%20"
-                  "Parentage_2019%2001.pdf"),
+                  "Parentage_2019%2001.pdf",
+       implemented=True, wizard="parentage_petition"),
+    _e("parentage-acknowledgment", "DOH 422-159", "Acknowledgment of "
+       "Parentage (WA Dept. of Health)", "uncommon", ["parentage"],
+       "partial",
+       ["spouse.name", "spouse.date_of_birth", "spouse.birth_place",
+        "client.date_of_birth", "client.birth_place", "client.address",
+        "client.phone"],
+       source_url="https://doh.wa.gov/sites/default/files/legacy/"
+                  "Documents/Pubs/422-159-AcknowledgmentOfParentage.pdf",
+       implemented=True, wizard="parentage_acknowledgment",
+       note="The voluntary acknowledgment both parents sign (usually "
+            "at the hospital) — a vital-records form, NOT an FL form; "
+            "it has the legal effect of a court finding of parentage "
+            "once filed. Number and title verified on the official "
+            "DOH form PDF (rev. 03/2021). (FL Parentage 303 is the "
+            "Residential Schedule — see below — not this form.)"),
     _e("parentage-residential-schedule", "FL Parentage 303",
        "Residential Schedule", "uncommon", ["parentage"], "partial",
        source_url="https://www.courts.wa.gov/forms/documents/"
@@ -986,6 +1054,18 @@ WIZARD_DEFS = {
              "explainer": "Confirm the marriage facts and your "
                           "current living situation.",
              "fields": [
+                 {"name": "action_type", "label": "What are we "
+                  "filing?", "type": "radio_cards",
+                  "options": [
+                      "Dissolution — end the marriage (divorce)",
+                      "Legal separation",
+                      "Invalidity — declare the marriage invalid "
+                      "(annulment)"],
+                  "help": "All three use the same court forms (the "
+                          "FL Divorce series). If you're not sure, "
+                          "choose dissolution and talk it through "
+                          "with the office — the choice can be "
+                          "changed before filing."},
                  {"name": "marriage_date", "label": "Date of "
                   "marriage", "type": "date", "required": True,
                   "vault": "marriage.date",
@@ -1295,7 +1375,1070 @@ WIZARD_DEFS = {
              ]},
         ],
     },
+
+    # ==================================================================
+    # UNCOMMON TIER (v2.9.0) — responses, modification, relocation,
+    # parentage, sealed attachment, fee waiver
+    # ==================================================================
+
+    # ------------------------------------------------------------------
+    # 9. Response to Petition + counter-requests (FL Divorce 211)
+    # ------------------------------------------------------------------
+    "response_marriage": {
+        "key": "response_marriage",
+        "slug": "response-marriage",
+        "title": "Response to the Petition — Your Answers",
+        "official": "FL Divorce 211",
+        "minutes": 15,
+        "description": "You were served with a petition. This walks "
+                       "through it topic by topic — what you agree "
+                       "with, what you don't, and what you're asking "
+                       "for instead. Your attorney drafts the formal "
+                       "response (FL Divorce 211) from your answers.",
+        "explainer": "A response is due on a deadline the court "
+                     "counts from the day you were served — your "
+                     "attorney will confirm your exact date. Don't "
+                     "wait to start this: rough answers now beat "
+                     "perfect answers late.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Response_Client_Data"},
+        "steps": [
+            {"title": "The big picture",
+             "explainer": "Overall, where do you stand on what the "
+                          "petition asks for?",
+             "fields": [
+                 {"name": "spouse_name", "label": "The petitioner "
+                  "(the person who filed) — full legal name",
+                  "type": "text", "vault": "spouse.name",
+                  "target": ("client", "spouse_name")},
+                 {"name": "overall_stance", "label": "Overall, I…",
+                  "type": "radio_cards",
+                  "options": [
+                      "Agree with most of the petition",
+                      "Agree with some parts and disagree with "
+                      "others",
+                      "Disagree with most of the petition",
+                      "Haven't been able to read it all yet"]},
+                 {"name": "agree_divorce", "label": "Do you agree "
+                  "the marriage should end?", "type": "radio_cards",
+                  "options": ["Yes", "No", "Not sure yet"],
+                  "help": "Washington is no-fault: the court can "
+                          "grant the divorce even if one spouse "
+                          "disagrees. Your answer still matters for "
+                          "how the office plans."},
+             ]},
+            {"title": "The children",
+             "fields": [
+                 dict(CHILDREN_REPEATER),
+                 {"name": "children_stance", "label": "What the "
+                  "petition says about the children — I…",
+                  "type": "radio_cards",
+                  "options": ["Agree", "Disagree", "Partly agree",
+                              "The petition doesn't mention children"]},
+                 {"name": "children_details", "label": "What do you "
+                  "agree or disagree with, and what do you want "
+                  "instead?", "type": "textarea", "rows": 5,
+                  "prompt": "Where the children live, the schedule, "
+                            "who decides what, support for them — "
+                            "anything in the petition about the "
+                            "children that doesn't work, say why and "
+                            "what you'd propose.",
+                  "guidance": "Be specific; 'his schedule ignores "
+                              "school nights' helps more than 'it's "
+                              "unfair'."},
+             ]},
+            {"title": "Property and debts",
+             "fields": [
+                 {"name": "property_stance", "label": "What the "
+                  "petition says about property and debts — I…",
+                  "type": "radio_cards",
+                  "options": ["Agree", "Disagree", "Partly agree",
+                              "It doesn't say / I don't understand it"]},
+                 {"name": "property_details", "label": "What's "
+                  "missing, wrong, or unfair — and what you'd "
+                  "propose instead", "type": "textarea", "rows": 5,
+                  "prompt": "Property the petition leaves out, debts "
+                            "that aren't yours, a division that "
+                            "doesn't reflect who owns what."},
+             ]},
+            {"title": "Support and money",
+             "fields": [
+                 {"name": "support_stance", "label": "Child support "
+                  "in the petition — I…", "type": "radio_cards",
+                  "options": ["Agree", "Disagree",
+                              "Partly agree",
+                              "It doesn't mention support"]},
+                 {"name": "maintenance_stance", "label": "Spousal "
+                  "support (maintenance) — the petition…",
+                  "type": "radio_cards",
+                  "options": [
+                      "Asks for maintenance for the other party",
+                      "Asks for maintenance for me",
+                      "Says no maintenance for either of us",
+                      "Doesn't mention it"]},
+                 {"name": "money_details", "label": "Anything about "
+                  "the money the office should know",
+                  "type": "textarea", "rows": 4,
+                  "prompt": "Income the petition gets wrong, bills "
+                            "you're covering alone, support figures "
+                            "that don't match reality."},
+             ]},
+            {"title": "What you're asking for (counter-requests)",
+             "explainer": "Your response can ask the court for "
+                          "things too. Check what applies.",
+             "fields": [
+                 {"name": "counter_asks", "label": "I'm asking the "
+                  "court to…", "type": "checkboxes",
+                  "options": [
+                      "Approve a different parenting plan (mine)",
+                      "Recalculate child support",
+                      "Divide property and debts differently",
+                      "Order spousal support (maintenance) for me",
+                      "Order the other party to help with legal fees",
+                      "Restore my former name",
+                      "Dismiss or slow down the case while we talk",
+                      "Something else (explained below)"]},
+                 {"name": "counter_details", "label": "Explain your "
+                  "asks", "type": "textarea", "rows": 5,
+                  "prompt": "In your own words: if the judge gave "
+                            "you exactly what you're asking for, "
+                            "what would that look like?"},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 10. Relocation — Notice of Intent to Move (FL Relocate 701)
+    # ------------------------------------------------------------------
+    "relocation_notice": {
+        "key": "relocation_notice",
+        "slug": "relocate-notice",
+        "title": "Notice of Intent to Move — Your Information",
+        "official": "FL Relocate 701",
+        "minutes": 12,
+        "description": "You're planning to move with the children. "
+                       "Washington law requires formal written "
+                       "notice (FL Relocate 701) — usually at least "
+                       "60 days before the move. This collects what "
+                       "the notice needs; the office prepares and "
+                       "serves it.",
+        "explainer": "Relocation deadlines are set by statute "
+                     "(RCW 26.09.430–.480) and they are unforgiving "
+                     "— if your move is coming up fast, call the "
+                     "office today rather than waiting on this form.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Relocation_Notice_Client_Data"},
+        "steps": [
+            {"title": "The move",
+             "fields": [
+                 {"name": "move_date", "label": "When do you plan "
+                  "to move?", "type": "date", "required": True},
+                 {"name": "new_address", "label": "New address (or "
+                  "city and state, if the exact address isn't set "
+                  "yet)", "type": "textarea", "rows": 2,
+                  "required": True},
+                 {"name": "move_reason", "label": "Why are you "
+                  "moving?", "type": "textarea", "rows": 5,
+                  "prompt": "A new job, family support, housing "
+                            "costs, remarriage, safety — the court "
+                            "looks at the real reasons, so be "
+                            "straightforward.",
+                  "guidance": "Judges are told to look at whether "
+                              "the move is made in good faith."},
+             ]},
+            {"title": "The children and the move",
+             "fields": [
+                 dict(CHILDREN_REPEATER),
+                 {"name": "schools_plan", "label": "School and "
+                  "childcare at the new home", "type": "textarea",
+                  "rows": 4,
+                  "prompt": "What school(s) would they attend? "
+                            "How do they compare with where they are "
+                            "now?"},
+                 {"name": "best_interest", "label": "Why is this "
+                  "move good for the children?", "type": "textarea",
+                  "rows": 5,
+                  "prompt": "Write this the way you would in a "
+                            "declaration: family nearby, better "
+                            "schools, stability, your support "
+                            "network — concrete facts about their "
+                            "lives.",
+                  "guidance": "These answers often become part of "
+                              "your declaration if the move is "
+                              "objected to."},
+             ]},
+            {"title": "Time with the other parent",
+             "fields": [
+                 {"name": "schedule_proposal", "label": "The "
+                  "schedule you're proposing after the move",
+                  "type": "textarea", "rows": 5,
+                  "prompt": "Longer blocks in summer and holidays? "
+                            "Who travels, and who pays for travel? "
+                            "Virtual visits in between?"},
+                 {"name": "notice_given", "label": "Have you "
+                  "already told the other parent about the move?",
+                  "type": "radio_cards",
+                  "options": ["Not yet",
+                              "Yes — informally (talked or texted)",
+                              "Yes — in writing"],
+                  "help": "Informal notice doesn't replace the "
+                          "formal notice the law requires — the "
+                          "office handles that."},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 11. Relocation — Objection (FL Relocate 721)
+    # ------------------------------------------------------------------
+    "relocation_objection": {
+        "key": "relocation_objection",
+        "slug": "relocate-objection",
+        "title": "Objection to a Move — Your Information",
+        "official": "FL Relocate 721",
+        "minutes": 12,
+        "description": "You received notice that the other parent "
+                       "plans to move with the children, and you "
+                       "object. Objections have a short statutory "
+                       "deadline — this collects your reasons and "
+                       "your counter-proposal so the office can file "
+                       "in time.",
+        "explainer": "An objection must be filed within about 30 "
+                     "days of receiving the notice (RCW 26.09.470) "
+                     "— your attorney will confirm your exact "
+                     "deadline. Start this now, even if your answers "
+                     "are rough.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Relocation_Objection_Client_Data"},
+        "steps": [
+            {"title": "The notice you received",
+             "fields": [
+                 {"name": "notice_date", "label": "When did you "
+                  "receive the notice of intent to move?",
+                  "type": "date", "required": True,
+                  "help": "Your deadline runs from this date — "
+                          "your best memory is fine, the office "
+                          "will verify."},
+                 {"name": "move_summary", "label": "Where are they "
+                  "planning to move, and when?", "type": "textarea",
+                  "rows": 3},
+             ]},
+            {"title": "Why you object",
+             "explainer": "The court weighs the effect on the "
+                          "children most of all. Stick to facts "
+                          "about their lives.",
+             "fields": [
+                 dict(CHILDREN_REPEATER),
+                 {"name": "objection_reasons", "label": "How would "
+                  "this move affect the children?",
+                  "type": "textarea", "rows": 6,
+                  "prompt": "Their school, friends, activities, "
+                            "medical care, your role in their "
+                            "day-to-day lives — what would actually "
+                            "change for them?",
+                  "guidance": "Write this the way you would in a "
+                              "declaration: facts and examples, "
+                              "not conclusions."},
+                 {"name": "other_parent_reasons", "label": "Do you "
+                  "believe the move is being made in good faith?",
+                  "type": "textarea", "rows": 4,
+                  "prompt": "Optional. If you think the move is "
+                            "really about cutting you out rather "
+                            "than the stated reason, say why — "
+                            "with facts."},
+             ]},
+            {"title": "What you propose instead",
+             "fields": [
+                 {"name": "counter_proposal", "label": "If the "
+                  "court lets the move happen, what arrangement "
+                  "would you ask for?", "type": "textarea",
+                  "rows": 5,
+                  "prompt": "Longer blocks of time, holidays, "
+                            "travel costs, virtual visits — your "
+                            "realistic best alternative."},
+                 {"name": "children_stay", "label": "Are you asking "
+                  "that the children stay here — with you, or with "
+                  "another arrangement?", "type": "textarea",
+                  "rows": 4,
+                  "prompt": "Some objections ask for the children "
+                            "to remain in this area even if the "
+                            "other parent moves. Say if that's what "
+                            "you want and how it would work."},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 12. Modify Parenting Plan (FL Modify 601)
+    # ------------------------------------------------------------------
+    "modify_parenting": {
+        "key": "modify_parenting",
+        "slug": "modify-parenting-petition",
+        "title": "Changing a Parenting Plan — Your Information",
+        "official": "FL Modify 601",
+        "minutes": 15,
+        "description": "You have a parenting plan (or custody "
+                       "order) and something substantial has changed. "
+                       "This captures what changed and what you're "
+                       "asking for; your attorney drafts the petition "
+                       "to change it (FL Modify 601).",
+        "explainer": "Washington courts only change a parenting "
+                     "plan when there's been a substantial change in "
+                     "circumstances — the 'what changed' story below "
+                     "is the heart of the case, so take your time "
+                     "with it.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Modify_Parenting_Client_Data"},
+        "steps": [
+            {"title": "The order you have now",
+             "fields": [
+                 {"name": "current_order_date", "label": "When was "
+                  "your current parenting plan/order signed?",
+                  "type": "date"},
+                 {"name": "current_arrangement", "label": "What "
+                  "does the current plan say, in short?",
+                  "type": "textarea", "rows": 4,
+                  "prompt": "Who the children live with, the "
+                            "schedule, who decides what — the "
+                            "current setup as ordered."},
+             ]},
+            {"title": "What changed",
+             "explainer": "Check everything that's changed since "
+                          "the order, then tell the story.",
+             "fields": [
+                 {"name": "changes", "label": "What's changed?",
+                  "type": "checkboxes",
+                  "options": [
+                      "My work schedule or job",
+                      "The other parent's work schedule or job",
+                      "A move (mine or theirs)",
+                      "The children's needs, age, or school",
+                      "Health — mine, theirs, or a child's",
+                      "Safety concerns that weren't there before",
+                      "The other parent isn't following the plan",
+                      "The children are asking for a change",
+                      "Something else (explained below)"]},
+                 {"name": "change_story", "label": "Tell us what "
+                  "changed", "type": "textarea", "rows": 6,
+                  "required": True,
+                  "prompt": "Write this the way you would in a "
+                            "declaration: what was true when the "
+                            "order was signed, what's true now, with "
+                            "dates and examples.",
+                  "guidance": "This narrative becomes the core of "
+                              "your petition and declaration — "
+                              "specific beats general."},
+             ]},
+            {"title": "What you're asking for",
+             "fields": [
+                 dict(CHILDREN_REPEATER),
+                 {"name": "proposed_changes", "label": "The "
+                  "changes you want", "type": "textarea", "rows": 5,
+                  "prompt": "The schedule, decision-making, or other "
+                            "terms you want instead — be as "
+                            "specific as you can."},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 13. Modify Child Support (FL Modify 501)
+    # ------------------------------------------------------------------
+    "modify_support": {
+        "key": "modify_support",
+        "slug": "modify-support-petition",
+        "title": "Changing Child Support — Your Information",
+        "official": "FL Modify 501",
+        "minutes": 10,
+        "description": "Support is based on incomes and the "
+                       "children's costs — when those change "
+                       "substantially, the order can change too. "
+                       "Confirm your current figures and tell us "
+                       "what's different.",
+        "explainer": "Your saved financial figures are shown below "
+                     "to confirm or update — the same numbers your "
+                     "Financial Declaration uses, so you only ever "
+                     "keep one set current.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Modify_Support_Client_Data"},
+        "steps": [
+            {"title": "The order you have now",
+             "fields": [
+                 {"name": "current_support", "label": "Current "
+                  "monthly child support amount ($)", "type": "money"},
+                 {"name": "changes", "label": "What's changed?",
+                  "type": "checkboxes",
+                  "options": [
+                      "My income went up",
+                      "My income went down or I lost work",
+                      "The other parent's income changed",
+                      "A child turned 18 or graduated",
+                      "Daycare or health insurance costs changed",
+                      "The children's living arrangement changed",
+                      "A new child or dependent",
+                      "Something else (explained below)"]},
+                 {"name": "change_story", "label": "Tell us what "
+                  "changed", "type": "textarea", "rows": 5,
+                  "required": True,
+                  "prompt": "When it changed, and how the numbers "
+                            "moved — dates and amounts help."},
+             ]},
+            {"title": "Your income now",
+             "explainer": "Confirm or update the figures from your "
+                          "file.",
+             "fields": [
+                 {"name": "client_gross_income",
+                  "label": "Your monthly GROSS income ($)",
+                  "type": "money", "vault": "income.client_gross",
+                  "target": ("financial", "client_gross_income")},
+                 {"name": "client_net_income",
+                  "label": "Your monthly NET (take-home) income ($)",
+                  "type": "money", "vault": "income.client_net",
+                  "target": ("financial", "client_net_income")},
+                 {"name": "other_parent_net_income",
+                  "label": "Other parent's monthly NET income ($, "
+                         "best estimate)", "type": "money",
+                  "vault": "income.other_parent_net",
+                  "target": ("financial", "other_parent_net_income")},
+             ]},
+            {"title": "The children and their costs",
+             "fields": [
+                 dict(CHILDREN_REPEATER),
+                 {"name": "daycare", "label": "Monthly daycare "
+                  "costs ($)", "type": "money",
+                  "vault": "costs.daycare",
+                  "target": ("financial", "daycare")},
+                 {"name": "health_insurance",
+                  "label": "Monthly health insurance for the "
+                         "children ($)", "type": "money",
+                  "vault": "costs.health_insurance",
+                  "target": ("financial", "health_insurance")},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 14. Parentage — Petition to Decide Parentage (FL Parentage 301)
+    # ------------------------------------------------------------------
+    "parentage_petition": {
+        "key": "parentage_petition",
+        "slug": "parentage-petition",
+        "title": "Petition to Decide Parentage — Your Information",
+        "official": "FL Parentage 301",
+        "minutes": 15,
+        "description": "For parents who weren't married when a "
+                       "child was born and don't have a signed "
+                       "acknowledgment — a court case (FL Parentage "
+                       "301) establishes legal parentage, and with "
+                       "it a parenting plan and child support. This "
+                       "collects your information; your attorney "
+                       "drafts the petition.",
+        "explainer": "Until parentage is established, an "
+                     "unmarried father may have no legal right to "
+                     "time with his child, and support can't be "
+                     "ordered. This case fixes that — for both "
+                     "parents.",
+        "case_required": False,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Parentage_Petition_Client_Data"},
+        "steps": [
+            {"title": "The other parent",
+             "fields": [
+                 {"name": "spouse_name", "label": "The other "
+                  "parent's full legal name", "type": "text",
+                  "vault": "spouse.name",
+                  "target": ("client", "spouse_name")},
+                 {"name": "spouse_dob", "label": "Their date of "
+                  "birth", "type": "date",
+                  "vault": "spouse.date_of_birth",
+                  "target": ("client", "spouse_dob")},
+                 {"name": "service_address", "label": "Address "
+                  "where they can be served papers",
+                  "type": "textarea", "rows": 2,
+                  "vault": "service.address",
+                  "target": ("vault", "service.address")},
+             ]},
+            {"title": "Your children",
+             "fields": [
+                 dict(CHILDREN_REPEATER),
+                 {"name": "birth_certificate", "label": "Is the "
+                  "other parent named on the birth certificate(s)?",
+                  "type": "radio_cards",
+                  "options": ["Yes", "No", "For some children",
+                              "Don't know"]},
+                 {"name": "ack_signed", "label": "Did both parents "
+                  "ever sign an Acknowledgment of Parentage (often "
+                  "at the hospital)?", "type": "radio_cards",
+                  "options": ["Yes", "No", "Not sure"],
+                  "help": "If one was signed and filed, parentage "
+                          "may already be established — the office "
+                          "will check."},
+             ]},
+            {"title": "The facts",
+             "fields": [
+                 {"name": "relationship_facts", "label": "The "
+                  "background the court needs", "type": "textarea",
+                  "rows": 6,
+                  "prompt": "Were you in a relationship with the "
+                            "other parent when the children were "
+                            "conceived/born? Have they acted as a "
+                            "parent — lived with the children, "
+                            "supported them, held themselves out as "
+                            "a parent? Is anyone's parentage in "
+                            "dispute?",
+                  "guidance": "Facts with dates. If genetic "
+                              "testing is an issue, say so here."},
+                 {"name": "genetic_testing", "label": "Should the "
+                  "court order genetic (DNA) testing?",
+                  "type": "radio_cards",
+                  "options": ["Yes — parentage is disputed",
+                              "No — we agree who the parents are",
+                              "Not sure — advise me"]},
+             ]},
+            {"title": "What you're asking for",
+             "fields": [
+                 {"name": "asks", "label": "I'm asking the court "
+                  "to…", "type": "checkboxes",
+                  "options": [
+                      "Decide who the legal parents are",
+                      "Make a parenting plan / residential schedule",
+                      "Order child support (including back support)",
+                      "Add or correct the birth certificate",
+                      "Change a child's last name",
+                      "Something else (explained below)"]},
+                 {"name": "asks_details", "label": "Anything else "
+                  "the office should know", "type": "textarea",
+                  "rows": 4},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 15. Acknowledgment of Parentage data (DOH 422-159)
+    # ------------------------------------------------------------------
+    "parentage_acknowledgment": {
+        "key": "parentage_acknowledgment",
+        "slug": "parentage-acknowledgment",
+        "title": "Acknowledgment of Parentage — Your Details",
+        "official": "DOH 422-159",
+        "minutes": 8,
+        "description": "The Acknowledgment of Parentage is the "
+                       "voluntary form both parents sign so a "
+                       "parent is added to the birth certificate — "
+                       "it has the legal effect of a court finding "
+                       "of parentage. This collects the details "
+                       "exactly as the state form (DOH 422-159) "
+                       "needs them.",
+        "explainer": "Almost everything below should match birth "
+                     "records exactly — that's why most of it is "
+                     "confirming what's already on your file. Both "
+                     "parents must sign the paper form in front of "
+                     "a notary or witness; the office will walk "
+                     "you through that part.",
+        "case_required": False,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Acknowledgment_of_Parentage_Data"},
+        "steps": [
+            {"title": "The child",
+             "fields": [
+                 dict(CHILDREN_REPEATER),
+                 {"name": "birth_place_child", "label": "City or "
+                  "county where the child was born", "type": "text"},
+                 {"name": "hospital", "label": "Hospital or place "
+                  "of birth (name)", "type": "text"},
+             ]},
+            {"title": "The birth parent (mother)",
+             "explainer": "As it appears on the birth parent's own "
+                          "birth certificate.",
+             "fields": [
+                 {"name": "birth_name", "label": "Birth parent's "
+                  "name as on their birth certificate",
+                  "type": "text", "vault": "client.birth_name",
+                  "target": ("vault", "client.birth_name"),
+                  "help": "If you are the other parent rather than "
+                          "the birth parent, enter her details as "
+                          "best you know and the office will verify."},
+                 {"name": "date_of_birth", "label": "Birth parent's "
+                  "date of birth", "type": "date",
+                  "vault": "client.date_of_birth",
+                  "target": ("client", "date_of_birth")},
+                 {"name": "birth_place", "label": "Birth parent's "
+                  "place of birth (state or country)",
+                  "type": "text", "vault": "client.birth_place",
+                  "target": ("vault", "client.birth_place")},
+             ]},
+            {"title": "The parent being added",
+             "fields": [
+                 {"name": "spouse_name", "label": "Their full "
+                  "legal name", "type": "text", "vault": "spouse.name",
+                  "target": ("client", "spouse_name")},
+                 {"name": "spouse_dob", "label": "Their date of "
+                  "birth", "type": "date",
+                  "vault": "spouse.date_of_birth",
+                  "target": ("client", "spouse_dob")},
+                 {"name": "spouse_birth_place", "label": "Their "
+                  "place of birth (state or country)",
+                  "type": "text", "vault": "spouse.birth_place",
+                  "target": ("vault", "spouse.birth_place")},
+                 {"name": "address", "label": "Your mailing "
+                  "address", "type": "textarea", "rows": 3,
+                  "vault": "client.address",
+                  "target": ("client", "address")},
+                 {"name": "phone", "label": "Your phone number",
+                  "type": "tel", "vault": "client.phone",
+                  "target": ("client", "phone")},
+                 {"name": "parent_labels", "label": "Parent "
+                  "labels for the birth certificate",
+                  "type": "radio_cards",
+                  "options": ["Mother / Father", "Parent / Parent"],
+                  "help": "Leave unchosen for the state's default "
+                          "(Mother/Father)."},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 16. Sealed / protected information attachment (FL All Family 002)
+    # ------------------------------------------------------------------
+    "sealed_attachment": {
+        "key": "sealed_attachment",
+        "slug": "cif-attachment",
+        "title": "Protecting Your Private Information",
+        "official": "FL All Family 002",
+        "minutes": 8,
+        "description": "Some information has to be given to the "
+                       "court but shouldn't sit in the public file "
+                       "— and some shouldn't be shared with the "
+                       "other party at all. Tell us what needs "
+                       "protecting and why; the office prepares the "
+                       "sealed attachment (FL All Family 002) and "
+                       "any protection requests.",
+        "explainer": "Court files are public records. Sealing "
+                     "isn't automatic — the court needs a reason — "
+                     "so the 'why' below matters as much as the "
+                     "'what'.",
+        "case_required": False,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Sealed_Attachment_Client_Data"},
+        "steps": [
+            {"title": "What needs protecting",
+             "fields": [
+                 {"name": "protected_items", "label": "I need the "
+                  "following protected…", "type": "checkboxes",
+                  "options": [
+                      "My home address",
+                      "My phone number or email",
+                      "Social Security numbers",
+                      "Financial account information",
+                      "The children's school or childcare location",
+                      "Health or counseling records",
+                      "My workplace or work schedule",
+                      "Something else (explained below)"]},
+                 {"name": "protected_details", "label": "The "
+                  "specifics (what exactly, and where it appears)",
+                  "type": "textarea", "rows": 4,
+                  "prompt": "e.g. 'My new address in Sequim — it "
+                            "appears on my declaration.' Don't "
+                            "re-type full account numbers here; "
+                            "institutions and last-4 digits only."},
+             ]},
+            {"title": "Why it needs protecting",
+             "fields": [
+                 {"name": "protection_reasons", "label": "Why?",
+                  "type": "checkboxes",
+                  "options": [
+                      "Safety — the other party must not learn "
+                      "where I/we live",
+                      "History of threats, stalking, or violence",
+                      "Identity theft / financial fraud risk",
+                      "The children's safety or privacy",
+                      "Court already ordered it protected",
+                      "Another reason (explained below)"]},
+                 {"name": "reasons_details", "label": "Explain "
+                  "briefly", "type": "textarea", "rows": 5,
+                  "prompt": "Facts the court can rely on: what "
+                            "happened, when, and what you're afraid "
+                            "will happen if the information is "
+                            "public or shared.",
+                  "guidance": "If you're in danger now, call 911 "
+                              "or the office — don't wait on this "
+                              "form."},
+                 {"name": "existing_orders", "label": "Is there "
+                  "already a protection or no-contact order in "
+                  "place?", "type": "radio_cards",
+                  "options": ["Yes", "No", "Not sure"]},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 17. Fee waiver (IFP) — GR 34 financial statement
+    # ------------------------------------------------------------------
+    "fee_waiver": {
+        "key": "fee_waiver",
+        "slug": "fee-waiver-statement",
+        "title": "Fee Waiver — Financial Statement",
+        "official": "GR 34.0300",
+        "minutes": 10,
+        "description": "Court filing fees can be waived for "
+                       "people who can't afford them. This is the "
+                       "financial statement (GR 34.0300) behind the "
+                       "waiver request — mostly confirming figures "
+                       "already on your file. The office files the "
+                       "motion; the court decides.",
+        "explainer": "Be complete and honest — the judge reads "
+                     "this closely, and the waiver can be revisited "
+                     "if finances change. Public-benefit recipients "
+                     "usually qualify on that basis alone.",
+        "case_required": False,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Fee_Waiver_Client_Data",
+                     "sheet_note": "The court decides whether court "
+                                   "fees are waived. This statement "
+                                   "supports the GR 34.0100 motion "
+                                   "the office files — completing it "
+                                   "does not guarantee a waiver."},
+        "steps": [
+            {"title": "Your household",
+             "fields": [
+                 {"name": "household_size", "label": "How many "
+                  "people are in your household (you, children, "
+                  "others you support)?", "type": "text",
+                  "vault": "household.size",
+                  "target": ("vault", "household.size")},
+                 {"name": "benefits_receiving", "label": "Do you "
+                  "receive public benefits (SNAP/food, TANF/cash, "
+                  "SSI, Medicaid/Apple Health)?",
+                  "type": "radio_cards",
+                  "options": ["Yes", "No"],
+                  "vault": "benefits.receiving",
+                  "target": ("vault", "benefits.receiving")},
+                 {"name": "benefits_details", "label": "If yes — "
+                  "which programs, and the monthly amounts",
+                  "type": "textarea", "rows": 3,
+                  "vault": "benefits.details",
+                  "target": ("vault", "benefits.details")},
+             ]},
+            {"title": "Income and expenses",
+             "explainer": "Confirm or update the figures from "
+                          "your file.",
+             "fields": [
+                 {"name": "client_employer", "label": "Your "
+                  "employer (or 'not employed')", "type": "text",
+                  "vault": "client.employer",
+                  "target": ("vault", "client.employer")},
+                 {"name": "client_gross_income",
+                  "label": "Your monthly GROSS income ($)",
+                  "type": "money", "vault": "income.client_gross",
+                  "target": ("financial", "client_gross_income")},
+                 {"name": "client_net_income",
+                  "label": "Your monthly NET (take-home) income ($)",
+                  "type": "money", "vault": "income.client_net",
+                  "target": ("financial", "client_net_income")},
+                 {"name": "monthly_expenses",
+                  "label": "Your total monthly expenses ($)",
+                  "type": "money", "vault": "expenses.monthly_total",
+                  "target": ("financial", "monthly_expenses")},
+             ]},
+            {"title": "What you own and owe",
+             "fields": [
+                 {"name": "assets_notes",
+                  "label": "Assets — home, vehicles (year/make), "
+                         "accounts, valuables", "type": "textarea",
+                  "rows": 4, "vault": "notes.assets",
+                  "target": ("financial", "assets_notes"),
+                  "prompt": "With rough values — the court expects "
+                            "your vehicles and any money in "
+                            "accounts to be listed."},
+                 {"name": "debts_notes",
+                  "label": "Debts — what you owe and to whom",
+                  "type": "textarea", "rows": 4,
+                  "vault": "notes.debts",
+                  "target": ("financial", "debts_notes")},
+                 {"name": "hardship", "label": "Anything else "
+                  "about your finances the judge should know",
+                  "type": "textarea", "rows": 4,
+                  "prompt": "Recent job loss, medical bills, "
+                            "caring for a family member — whatever "
+                            "explains why the fee is a hardship."},
+             ]},
+        ],
+    },
 }
+
+
+# ----------------------------------------------------------------------------
+# Scenario packets (v2.9.0) — guided checklists staff assign to a client
+# ----------------------------------------------------------------------------
+# The line COMPLIANCE requires on every packet a client sees.
+PACKET_GUIDANCE = ("This checklist is guidance from our office, not "
+                   "legal advice about your situation.")
+
+_W = "wizard"
+_U = "upload"
+_I = "info"
+
+
+def _step(kind, **kw):
+    step = {"type": kind}
+    step.update(kw)
+    return step
+
+
+PACKET_DEFS = {
+    "starting-divorce": {
+        "slug": "starting-divorce",
+        "title": "Starting a divorce",
+        "scenario": "starting_divorce",
+        "description": "You're starting a divorce — here's "
+                       "everything we need from you, in order. Work "
+                       "at your own pace; your answers save as you "
+                       "go.",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_W, doc="petition-divorce"),
+            _step(_W, doc="confidential-information"),
+            _step(_W, doc="financial-declaration"),
+            _step(_W, doc="declaration"),
+            _step(_W, doc="parenting-plan"),
+            _step(_W, doc="child-support-worksheet"),
+            _step(_U, title="Your last two pay stubs",
+                  doc_type="pay_stubs",
+                  note="Photos or scans are fine — all pages, "
+                       "including the year-to-date totals."),
+            _step(_U, title="Your most recent tax return",
+                  doc_type="tax_return",
+                  note="The full return with all schedules, if you "
+                       "have it."),
+            _step(_W, doc="certificate-dissolution"),
+        ],
+    },
+    "responding": {
+        "slug": "responding",
+        "title": "Responding to papers you were served",
+        "scenario": "responding",
+        "description": "You were served with divorce papers — "
+                       "here's everything we need from you, in "
+                       "order. A response is due on a deadline, so "
+                       "start with the first step today.",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_I, title="How service works — read this first",
+                  sequential=True,
+                  body="Being 'served' starts the court's clock. In "
+                       "Washington, a response is usually due 20 "
+                       "days after you were personally served in "
+                       "this state (60 days if you were served "
+                       "outside Washington) — your attorney will "
+                       "confirm your exact deadline, because it "
+                       "controls everything else.\n\n"
+                       "Three things to do right away:\n"
+                       "1. Keep every page you were handed, including "
+                       "the envelope.\n"
+                       "2. Note the date, time, and place you "
+                       "received them.\n"
+                       "3. Don't sign anything the other party gives "
+                       "you until the office has seen it.\n\n"
+                       "Missing the deadline can let the court enter "
+                       "orders against you by default — that's why "
+                       "the steps below matter, and why rough "
+                       "answers now beat perfect answers late."),
+            _step(_U, title="The papers you were served",
+                  doc_type="other",
+                  note="A photo or scan of EVERY page, including "
+                       "the summons on top. Blurry is better than "
+                       "missing — the office can ask for a rescan."),
+            _step(_W, doc="response-marriage"),
+            _step(_W, doc="declaration"),
+            _step(_W, doc="financial-declaration"),
+        ],
+    },
+    "uncontested": {
+        "slug": "uncontested",
+        "title": "We agree on everything",
+        "scenario": "uncontested",
+        "description": "You and your spouse agree on the terms — "
+                       "here's everything we need from you, in "
+                       "order, to turn that agreement into final "
+                       "court orders.",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_W, doc="petition-divorce"),
+            _step(_W, doc="confidential-information"),
+            _step(_W, doc="financial-declaration"),
+            _step(_W, doc="parenting-plan"),
+            _step(_W, doc="child-support-worksheet"),
+            _step(_W, doc="certificate-dissolution"),
+            _step(_I, title="What happens next",
+                  body="Once your forms are in, the office drafts "
+                       "the final orders from your agreement — the "
+                       "Findings, the Final Divorce Order, and (if "
+                       "there are children) the Parenting Plan and "
+                       "Child Support Order.\n\n"
+                       "Your spouse will sign an Agreement to Join "
+                       "Petition (Joinder), which the office "
+                       "prepares — it says they agree with the "
+                       "petition as filed, so no response or hearing "
+                       "is usually needed.\n\n"
+                       "Washington has a 90-day waiting period from "
+                       "filing before a divorce can be finalized. "
+                       "The office will tell you the earliest date "
+                       "your decree can be signed and will review "
+                       "every document with you before anything is "
+                       "filed."),
+        ],
+    },
+    "temporary-orders": {
+        "slug": "temporary-orders",
+        "title": "Temporary orders while we wait",
+        "scenario": "temporary_orders",
+        "description": "Your case is underway and you need the "
+                       "court to order some things NOW — support, "
+                       "a schedule, who stays in the home — while "
+                       "the case runs. Here's what we need from you.",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_W, doc="temporary-orders"),
+            _step(_W, doc="declaration"),
+            _step(_W, doc="financial-declaration"),
+            _step(_U, title="Your last two pay stubs",
+                  doc_type="pay_stubs",
+                  note="The judge sets temporary support from "
+                       "these — all pages, including year-to-date "
+                       "totals."),
+            _step(_U, title="Bills or statements that back up your "
+                            "requests",
+                  doc_type="other",
+                  note="Mortgage or rent statements, the bills "
+                       "you're asking to have covered, insurance "
+                       "notices — whatever documents what you wrote "
+                       "in step 1."),
+        ],
+    },
+    "changing-order": {
+        "slug": "changing-order",
+        "title": "Changing an existing order",
+        "scenario": "changing_order",
+        "description": "You already have court orders and "
+                       "something substantial has changed — here's "
+                       "everything we need from you, in order. The "
+                       "first two steps cover the two kinds of "
+                       "change; complete the one that matches yours "
+                       "(or both).",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_W, doc="modify-parenting-petition", optional=True),
+            _step(_W, doc="modify-support-petition", optional=True),
+            _step(_W, doc="financial-declaration"),
+            _step(_W, doc="declaration"),
+        ],
+    },
+    "relocation": {
+        "slug": "relocation",
+        "title": "Moving with the kids",
+        "scenario": "relocation",
+        "description": "A move with the children is coming — "
+                       "yours, or one you've been told about. "
+                       "Relocation law runs on short deadlines, so "
+                       "start the step that matches your side today.",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_I, title="Which side are you on? — read this "
+                            "first",
+                  body="If YOU are planning to move with the "
+                       "children: Washington law (RCW 26.09.430) "
+                       "requires formal written notice to the other "
+                       "parent — usually at least 60 days before "
+                       "the intended move (less only in narrow "
+                       "emergencies). Complete the 'Notice of "
+                       "Intent to Move' step below.\n\n"
+                       "If you RECEIVED a notice that the other "
+                       "parent is moving: you generally have about "
+                       "30 days from receiving it to file an "
+                       "objection. Complete the 'Objection to a "
+                       "Move' step below instead.\n\n"
+                       "Either way, your attorney will confirm your "
+                       "exact deadline — these dates are statutory "
+                       "and missing one can decide the case."),
+            _step(_W, doc="relocate-notice", optional=True),
+            _step(_W, doc="relocate-objection", optional=True),
+            _step(_W, doc="declaration"),
+            _step(_U, title="Anything that documents the move or "
+                            "your objection",
+                  doc_type="other",
+                  note="A job offer or transfer letter, a lease, "
+                       "school information — or, if you're "
+                       "objecting, the notice you received."),
+        ],
+    },
+    "protection": {
+        "slug": "protection",
+        "title": "Protection order",
+        "scenario": "protection",
+        "description": "You need the court's protection — here's "
+                       "what we need from you. If you are in danger "
+                       "right now, call 911 first; this checklist "
+                       "can wait, your safety can't.",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_I, title="Getting protection — read this first",
+                  sequential=True,
+                  body="If you or your children are in immediate "
+                       "danger, call 911.\n\n"
+                       "A protection order (RCW 7.105) is a court "
+                       "order that can require a person to stay away "
+                       "from you, your home, your work, and your "
+                       "children's school, and to surrender "
+                       "firearms. The office files these the same "
+                       "day whenever possible — call the office as "
+                       "soon as you've read this, and don't wait to "
+                       "finish the steps below first.\n\n"
+                       "The steps below help the office build the "
+                       "strongest petition: your own statement (the "
+                       "declaration), protection for your private "
+                       "information, and whatever documentation you "
+                       "have. Write facts and dates — what happened, "
+                       "when, and who saw it."),
+            _step(_W, doc="declaration"),
+            _step(_W, doc="cif-attachment"),
+            _step(_U, title="Anything that documents what happened",
+                  doc_type="other",
+                  note="Photos of injuries or damage, screenshots "
+                       "of messages, police reports, medical "
+                       "paperwork — whatever you have. Originals "
+                       "stay safe with you; send copies here."),
+        ],
+    },
+    "parentage": {
+        "slug": "parentage",
+        "title": "Proving parentage",
+        "scenario": "parentage",
+        "description": "For parents who weren't married when a "
+                       "child was born — here's everything we need "
+                       "from you, in order, to establish legal "
+                       "parentage and everything that flows from "
+                       "it: a parenting plan and child support.",
+        "guidance": PACKET_GUIDANCE,
+        "steps": [
+            _step(_W, doc="parentage-petition"),
+            _step(_W, doc="parentage-acknowledgment"),
+            _step(_W, doc="confidential-information"),
+            _step(_W, doc="parenting-plan"),
+            _step(_W, doc="child-support-worksheet"),
+        ],
+    },
+}
+
+PACKETS_BY_SLUG = {p["slug"]: p for p in PACKET_DEFS.values()}
+
+
+def packet_def(slug):
+    return PACKETS_BY_SLUG.get(slug)
 
 
 def wizard_def(key):
@@ -1312,3 +2455,12 @@ def wizard_fields(wdef):
 for _entry in LIBRARY:
     if _entry["implemented"]:
         assert _entry["wizard"] in WIZARD_DEFS, _entry["slug"]
+
+# Packet steps must reference live material: a wizard step's doc is
+# an implemented catalog slug; upload/info steps are self-contained.
+for _packet in PACKET_DEFS.values():
+    for _step_def in _packet["steps"]:
+        if _step_def["type"] == "wizard":
+            _doc = LIBRARY_BY_SLUG.get(_step_def["doc"])
+            assert _doc and _doc["implemented"], (
+                _packet["slug"], _step_def["doc"])

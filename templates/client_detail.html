@@ -182,9 +182,44 @@
   </form>
   {% endif %}
 
-  {% if portal.uploads %}
-  <h3 style="margin-top:16px;">Recent portal uploads</h3>
+  <h3 style="margin-top:16px;">Guided checklists (packets)</h3>
+  {% if portal.packets %}
   <ul class="clean-list">
+    {% for pkt in portal.packets %}
+    <li>
+      <strong>{{ pkt.progress.pdef.title }}</strong>
+      <span class="badge {% if pkt.progress.complete %}badge-active{% else %}badge-pending{% endif %}">{{ pkt.progress.done }}/{{ pkt.progress.total }} steps{{ ' · complete' if pkt.progress.complete }}</span>
+      {% if pkt.assignment.case_number %}<span class="muted">case {{ pkt.assignment.case_number }}</span>{% endif %}
+      <span class="muted">· assigned {{ pkt.assignment.assigned_at[:10] }}</span>
+      {% if perms.get('manage_clients') %}
+      <form method="post" action="{{ url_for('portal_packet_unassign', client_id=client.id, assignment_id=pkt.assignment.id) }}" class="inline" onsubmit="return confirm('Remove this checklist from the client\'s portal? Document requests it created will be cancelled.');">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+        <button type="submit" class="btn btn-small">Unassign</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No checklists assigned. Assign one below and it appears at the top of the client's portal as a step-by-step guide for their situation.</p>
+  {% endif %}
+  {% if perms.get('manage_clients') %}
+  <form method="post" action="{{ url_for('portal_packet_assign', client_id=client.id) }}" class="portal-request-form">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <select name="packet_slug" required>
+      <option value="">Choose a checklist…</option>
+      {% for slug, pdef in portal.packet_defs.items() %}<option value="{{ slug }}">{{ pdef.title }}</option>{% endfor %}
+    </select>
+    <select name="case_id">
+      <option value="">Any case / client-level</option>
+      {% for c in cases %}<option value="{{ c.id }}">{{ c.case_number }} — {{ c.title or c.case_type }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-small btn-primary">Assign checklist</button>
+  </form>
+  {% endif %}
+
+  {% if portal.uploads %}
+  <h3 style="margin-top:16px;">Recent portal uploads</h3>  <ul class="clean-list">
     {% for u in portal.uploads %}
     <li>{{ u.original_name }} — <span class="badge {% if u.status == 'pending' %}badge-pending{% elif u.status == 'accepted' %}badge-active{% else %}badge-danger{% endif %}">{{ u.status }}</span> <span class="muted">{{ u.uploaded_at[:10] }}</span></li>
     {% endfor %}

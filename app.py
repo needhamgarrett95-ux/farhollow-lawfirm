@@ -630,6 +630,8 @@ CREATE TABLE IF NOT EXISTS portal_uploads (
 );
 -- A specific document the firm asked a client for ("your 2024 tax
 -- return"). Fulfilled when a linked upload is accepted by staff.
+-- packet_assignment_id/packet_step_index (v2.9.0) mark requests a
+-- scenario packet created, so packet progress can track them.
 CREATE TABLE IF NOT EXISTS portal_doc_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -640,7 +642,34 @@ CREATE TABLE IF NOT EXISTS portal_doc_requests (
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL,
     fulfilled_at TEXT,
-    fulfilled_upload_id INTEGER REFERENCES portal_uploads(id)
+    fulfilled_upload_id INTEGER REFERENCES portal_uploads(id),
+    packet_assignment_id INTEGER,
+    packet_step_index INTEGER
+);
+-- Scenario packet assignments (v2.9.0). Packet defs live in
+-- form_library.PACKET_DEFS; an assignment ties one packet to one
+-- client (optionally one case). unassigned_at set = history, not
+-- active. completed_at is stamped the first time every non-optional
+-- step is observed done.
+CREATE TABLE IF NOT EXISTS portal_packet_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    case_id INTEGER REFERENCES cases(id),
+    packet_slug TEXT NOT NULL,
+    assigned_by INTEGER REFERENCES users(id),
+    assigned_at TEXT NOT NULL,
+    unassigned_at TEXT,
+    unassigned_by INTEGER REFERENCES users(id),
+    completed_at TEXT
+);
+-- Read-and-acknowledge state for a packet's info steps.
+CREATE TABLE IF NOT EXISTS portal_packet_acks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    assignment_id INTEGER NOT NULL
+        REFERENCES portal_packet_assignments(id) ON DELETE CASCADE,
+    step_index INTEGER NOT NULL,
+    acknowledged_at TEXT NOT NULL,
+    UNIQUE (assignment_id, step_index)
 );
 -- Quick-fill form submissions. data_json is the working draft;
 -- snapshot_json is the immutable copy frozen at submit time. Staff
@@ -1195,6 +1224,42 @@ def init_db():
             ON portal_activity(seen_by_staff, created_at)""",
     ):
         db.execute(_ddl)
+    db.commit()
+
+    # Migration for v2.9: scenario packet tables + the packet link
+    # columns on portal_doc_requests (existing DBs predate them).
+    for _ddl in (
+        """CREATE TABLE IF NOT EXISTS portal_packet_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id)
+                ON DELETE CASCADE,
+            case_id INTEGER REFERENCES cases(id),
+            packet_slug TEXT NOT NULL,
+            assigned_by INTEGER REFERENCES users(id),
+            assigned_at TEXT NOT NULL,
+            unassigned_at TEXT,
+            unassigned_by INTEGER REFERENCES users(id),
+            completed_at TEXT)""",
+        """CREATE TABLE IF NOT EXISTS portal_packet_acks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assignment_id INTEGER NOT NULL
+                REFERENCES portal_packet_assignments(id)
+                ON DELETE CASCADE,
+            step_index INTEGER NOT NULL,
+            acknowledged_at TEXT NOT NULL,
+            UNIQUE (assignment_id, step_index))""",
+        """CREATE INDEX IF NOT EXISTS idx_packet_assign_client
+            ON portal_packet_assignments(client_id, unassigned_at)""",
+    ):
+        db.execute(_ddl)
+    _req_cols = [r["name"] for r in db.execute(
+        "PRAGMA table_info(portal_doc_requests)").fetchall()]
+    if "packet_assignment_id" not in _req_cols:
+        db.execute("ALTER TABLE portal_doc_requests"
+                   " ADD COLUMN packet_assignment_id INTEGER")
+    if "packet_step_index" not in _req_cols:
+        db.execute("ALTER TABLE portal_doc_requests"
+                   " ADD COLUMN packet_step_index INTEGER")
     db.commit()
 
     # Seed default admin on first run
@@ -4397,7 +4462,8 @@ from template_defs import get_template, template_list
 from template_pdf import build_template_pdf, calc_support
 from form_library import (
     LIBRARY, LIBRARY_BY_SLUG, TIERS, SCENARIOS, VAULT_FACTS,
-    WIZARD_DEFS, library_entry, implemented_entries, wizard_fields,
+    WIZARD_DEFS, PACKET_DEFS, library_entry, implemented_entries,
+    packet_def, wizard_fields,
 )
 
 
@@ -8440,10 +8506,32 @@ def library_view():
                 " GROUP BY form_key", wizard_keys).fetchall():
             submitted_counts[r["form_key"]] = r["c"]
     titles = {k: v["title"] for k, v in WIZARD_DEFS.items()}
+    # Scenario packets (v2.9.0): defs, live assignments with progress,
+    # and the pickers for the assign form.
+    packet_rows = []
+    for a in db.execute(
+            "SELECT pa.*, cl.first_name, cl.last_name"
+            " FROM portal_packet_assignments pa"
+            " JOIN clients cl ON cl.id = pa.client_id"
+            " WHERE pa.unassigned_at IS NULL"
+            " ORDER BY pa.assigned_at DESC").fetchall():
+        packet_rows.append({"assignment": a,
+                            "progress": _packet_progress(db, a)})
+    all_clients = db.execute(
+        "SELECT id, first_name, last_name FROM clients"
+        " ORDER BY last_name, first_name").fetchall()
+    all_cases = db.execute(
+        "SELECT cs.id, cs.case_number, cs.title, cs.client_id,"
+        " cl.first_name, cl.last_name FROM cases cs"
+        " JOIN clients cl ON cl.id = cs.client_id"
+        " WHERE cs.status = 'open'"
+        " ORDER BY cl.last_name, cs.case_number").fetchall()
     return render_template(
         "library.html", entries=entries, tiers=TIERS,
         scenarios=SCENARIOS, drafts=drafts,
-        submitted_counts=submitted_counts, wizard_titles=titles)
+        submitted_counts=submitted_counts, wizard_titles=titles,
+        packet_defs=PACKET_DEFS, packet_assignments=packet_rows,
+        all_clients=all_clients, all_cases=all_cases)
 
 
 @app.route("/library/<slug>/toggle", methods=["POST"])
@@ -8468,6 +8556,358 @@ def library_toggle(slug):
     flash(f"“{entry['title']}” is now {state} in the client portal.",
           "success")
     return redirect(url_for("library_view"))
+
+
+# ----------------------------------------------------------------------------
+# Scenario packets (v2.9.0)
+# ----------------------------------------------------------------------------
+# Packet defs live in form_library.PACKET_DEFS. Step state is DERIVED
+# from real records, never stored per step:
+#   wizard step -> latest portal_form_submissions row for that wizard
+#   upload step -> the portal_doc_requests row this assignment created
+#                  (fulfilled when staff accept the client's upload)
+#   info step   -> a portal_packet_acks row (read & acknowledged)
+# A step is locked when an EARLIER step is marked sequential and is
+# not done yet — the flag exists so a read-first step can gate a
+# packet (response deadlines, protection safety), and is used
+# sparingly. Packet state is always computed for ONE client from that
+# client's own rows; nothing here ever reads another client's data.
+
+
+def _packet_step_state(db, assignment, idx, sdef):
+    """Live state for one packet step of one assignment."""
+    cid = assignment["client_id"]
+    if sdef["type"] == "wizard":
+        entry = LIBRARY_BY_SLUG.get(sdef["doc"]) or {}
+        wdef = WIZARD_DEFS.get(entry.get("wizard") or "") or {}
+        sub = None
+        if wdef:
+            sub = db.execute(
+                "SELECT * FROM portal_form_submissions"
+                " WHERE client_id = ? AND form_key = ?"
+                " ORDER BY id DESC LIMIT 1",
+                (cid, wdef["key"]),
+            ).fetchone()
+        status = sub["status"] if sub else None
+        return {"kind": "wizard", "title": wdef.get("title", sdef["doc"]),
+                "form_number": entry.get("form_number", ""),
+                "slug": sdef["doc"], "sub_status": status,
+                "done": status in ("submitted", "imported"),
+                "state": status or "todo"}
+    if sdef["type"] == "upload":
+        req = db.execute(
+            "SELECT * FROM portal_doc_requests"
+            " WHERE packet_assignment_id = ? AND packet_step_index = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (assignment["id"], idx),
+        ).fetchone()
+        sent = bool(req) and db.execute(
+            "SELECT 1 FROM portal_uploads WHERE request_id = ?"
+            " AND status = 'pending'", (req["id"],),
+        ).fetchone() is not None
+        done = bool(req and req["status"] == "fulfilled")
+        state = ("done" if done else "sent" if sent
+                 else "open" if req and req["status"] == "open"
+                 else "todo")
+        return {"kind": "upload", "title": sdef["title"],
+                "note": sdef.get("note", ""),
+                "doc_type": sdef.get("doc_type", "other"),
+                "done": done, "state": state, "request": req}
+    ack = db.execute(
+        "SELECT id FROM portal_packet_acks"
+        " WHERE assignment_id = ? AND step_index = ?",
+        (assignment["id"], idx),
+    ).fetchone()
+    return {"kind": "info", "title": sdef["title"],
+            "body": sdef.get("body", ""),
+            "done": ack is not None,
+            "state": "done" if ack else "todo"}
+
+
+def _packet_progress(db, assignment):
+    """Steps + counts for one assignment. Optional steps render but
+    never count toward done/total or completion."""
+    pdef = packet_def(assignment["packet_slug"])
+    steps = []
+    blocked = False
+    done = 0
+    total = 0
+    current = None
+    for idx, sdef in enumerate(pdef["steps"]):
+        st = _packet_step_state(db, assignment, idx, sdef)
+        st["index"] = idx
+        st["def"] = sdef
+        st["locked"] = blocked
+        if not sdef.get("optional"):
+            total += 1
+            if st["done"]:
+                done += 1
+        if current is None and not st["done"] and not blocked:
+            current = idx
+        if sdef.get("sequential") and not st["done"]:
+            blocked = True
+        steps.append(st)
+    return {"pdef": pdef, "steps": steps, "done": done, "total": total,
+            "complete": total > 0 and done == total,
+            "current": current}
+
+
+def _packet_refresh_completion(db, assignment, pu=None):
+    """Stamp completed_at (once) when every counted step is done,
+    and leave the activity-feed entry the dashboard widget shows."""
+    prog = _packet_progress(db, assignment)
+    if prog["complete"] and not assignment["completed_at"]:
+        db.execute(
+            "UPDATE portal_packet_assignments SET completed_at = ?"
+            " WHERE id = ? AND completed_at IS NULL",
+            (datetime.now(timezone.utc).isoformat(), assignment["id"]),
+        )
+        _portal_activity(
+            db, assignment["client_id"], "packet",
+            f"Completed the '{prog['pdef']['title']}' checklist",
+            "portal_packet_assignments", assignment["id"])
+        db.commit()
+        if pu is not None:
+            _portal_audit(
+                "portal_packet_completed",
+                f"Client completed packet '{prog['pdef']['title']}'"
+                f" (assignment id={assignment['id']})", pu)
+    return prog
+
+
+def _client_packets(db, client_id, pu=None):
+    """Active packet assignments for a client, with live progress."""
+    out = []
+    rows = db.execute(
+        "SELECT pa.*, c.case_number FROM portal_packet_assignments pa"
+        " LEFT JOIN cases c ON c.id = pa.case_id"
+        " WHERE pa.client_id = ? AND pa.unassigned_at IS NULL"
+        " ORDER BY pa.assigned_at, pa.id",
+        (client_id,),
+    ).fetchall()
+    for a in rows:
+        out.append({"assignment": a,
+                    "progress": _packet_refresh_completion(db, a, pu)})
+    return out
+
+
+def _packet_assign(db, client_id, case_id, packet_slug, user_id):
+    """Assign a packet: create the assignment and, for each upload
+    step, the document request that tracks it. Returns
+    (assignment_id, error) — error 'already' when the client already
+    has this packet active."""
+    pdef = packet_def(packet_slug)
+    if not pdef:
+        return None, "unknown"
+    if case_id and not db.execute(
+            "SELECT id FROM cases WHERE id = ? AND client_id = ?",
+            (case_id, client_id)).fetchone():
+        case_id = None
+    if db.execute(
+            "SELECT id FROM portal_packet_assignments"
+            " WHERE client_id = ? AND packet_slug = ?"
+            " AND unassigned_at IS NULL",
+            (client_id, packet_slug)).fetchone():
+        return None, "already"
+    now = datetime.now(timezone.utc).isoformat()
+    cur = db.execute(
+        "INSERT INTO portal_packet_assignments (client_id, case_id,"
+        " packet_slug, assigned_by, assigned_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (client_id, case_id, packet_slug, user_id, now),
+    )
+    aid = cur.lastrowid
+    for idx, step in enumerate(pdef["steps"]):
+        if step["type"] == "upload":
+            db.execute(
+                "INSERT INTO portal_doc_requests (client_id, case_id,"
+                " title, note, status, created_by, created_at,"
+                " packet_assignment_id, packet_step_index)"
+                " VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?)",
+                (client_id, case_id, step["title"],
+                 step.get("note", ""), user_id, now, aid, idx),
+            )
+    db.commit()
+    _portal_activity(
+        db, client_id, "packet",
+        f"Office assigned the '{pdef['title']}' checklist",
+        "portal_packet_assignments", aid)
+    db.commit()
+    return aid, None
+
+
+def _packet_unassign(db, assignment, user_id):
+    """Retire an assignment; cancel its still-open document requests
+    so they don't linger on the client's home checklist."""
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "UPDATE portal_packet_assignments SET unassigned_at = ?,"
+        " unassigned_by = ? WHERE id = ? AND unassigned_at IS NULL",
+        (now, user_id, assignment["id"]),
+    )
+    db.execute(
+        "UPDATE portal_doc_requests SET status = 'cancelled'"
+        " WHERE packet_assignment_id = ? AND status = 'open'",
+        (assignment["id"],),
+    )
+    db.commit()
+    pdef = packet_def(assignment["packet_slug"]) or {}
+    _portal_activity(
+        db, assignment["client_id"], "packet",
+        f"Office removed the '{pdef.get('title', '')}' checklist",
+        "portal_packet_assignments", assignment["id"])
+    db.commit()
+
+
+@app.route("/clients/<int:client_id>/portal/packet", methods=["POST"])
+@permission_required("manage_clients")
+def portal_packet_assign(client_id):
+    check_csrf()
+    db = get_db()
+    if not db.execute("SELECT id FROM clients WHERE id = ?",
+                      (client_id,)).fetchone():
+        abort(404)
+    slug = request.form.get("packet_slug", "")
+    aid, err = _packet_assign(
+        db, client_id, request.form.get("case_id", type=int), slug,
+        session.get("user_id"))
+    pdef = packet_def(slug)
+    if err == "already":
+        flash(f"“{pdef['title']}” is already assigned to this client.",
+              "warning")
+    elif err or not pdef:
+        flash("Choose a checklist to assign.", "error")
+    else:
+        audit("portal_packet_assigned",
+              f"Assigned packet '{pdef['title']}' to client"
+              f" (id={client_id}, assignment id={aid})")
+        flash(f"Checklist assigned — “{pdef['title']}” now appears at "
+              "the top of the client's portal.", "success")
+    return redirect(url_for("client_detail", client_id=client_id))
+
+
+@app.route("/clients/<int:client_id>/portal/packet/<int:assignment_id>"
+           "/unassign", methods=["POST"])
+@permission_required("manage_clients")
+def portal_packet_unassign(client_id, assignment_id):
+    check_csrf()
+    db = get_db()
+    a = db.execute(
+        "SELECT * FROM portal_packet_assignments WHERE id = ?"
+        " AND client_id = ? AND unassigned_at IS NULL",
+        (assignment_id, client_id),
+    ).fetchone()
+    if not a:
+        abort(404)
+    pdef = packet_def(a["packet_slug"]) or {}
+    _packet_unassign(db, a, session.get("user_id"))
+    audit("portal_packet_unassigned",
+          f"Unassigned packet '{pdef.get('title', '')}' from client"
+          f" (id={client_id}, assignment id={assignment_id})")
+    flash("Checklist removed from the client's portal.", "success")
+    return redirect(url_for("client_detail", client_id=client_id))
+
+
+@app.route("/library/packets/assign", methods=["POST"])
+@permission_required("manage_clients")
+def library_packet_assign():
+    check_csrf()
+    db = get_db()
+    client_id = request.form.get("client_id", type=int)
+    slug = request.form.get("packet_slug", "")
+    if not client_id or not db.execute(
+            "SELECT id FROM clients WHERE id = ?", (client_id,)
+    ).fetchone():
+        flash("Choose a client for the checklist.", "error")
+        return redirect(url_for("library_view"))
+    aid, err = _packet_assign(
+        db, client_id, request.form.get("case_id", type=int), slug,
+        session.get("user_id"))
+    pdef = packet_def(slug)
+    if err == "already":
+        flash(f"“{pdef['title']}” is already assigned to that client.",
+              "warning")
+    elif err or not pdef:
+        flash("Choose a checklist to assign.", "error")
+    else:
+        audit("portal_packet_assigned",
+              f"Assigned packet '{pdef['title']}' to client"
+              f" (id={client_id}, assignment id={aid}) via the Library")
+        flash(f"Checklist “{pdef['title']}” assigned.", "success")
+    return redirect(url_for("library_view"))
+
+
+# ----------------------------------------------------------------------------
+# Portal: scenario packets (client side)
+# ----------------------------------------------------------------------------
+def _portal_packet_assignment(db, assignment_id, client_id):
+    """An ACTIVE assignment that belongs to this client, or None.
+    Every portal packet route resolves through here — the boundary
+    rule is the same as the rest of the portal (session client only)."""
+    return db.execute(
+        "SELECT * FROM portal_packet_assignments WHERE id = ?"
+        " AND client_id = ? AND unassigned_at IS NULL",
+        (assignment_id, client_id),
+    ).fetchone()
+
+
+@app.route("/portal/packets/<int:assignment_id>")
+@portal_login_required
+def portal_packet(assignment_id):
+    pu = g.portal_user
+    db = get_db()
+    a = _portal_packet_assignment(db, assignment_id, pu["client_id"])
+    if not a:
+        abort(404)
+    prog = _packet_refresh_completion(db, a, pu)
+    case = None
+    if a["case_id"]:
+        case = db.execute("SELECT * FROM cases WHERE id = ?",
+                          (a["case_id"],)).fetchone()
+    _portal_audit(
+        "portal_packet_view",
+        f"Client viewed packet '{prog['pdef']['title']}'"
+        f" (assignment id={assignment_id})", pu)
+    return render_template(
+        "portal_packet.html", pu=pu, assignment=a, pdef=prog["pdef"],
+        steps=prog["steps"], done=prog["done"], total=prog["total"],
+        complete=prog["complete"], current=prog["current"], case=case)
+
+
+@app.route("/portal/packets/<int:assignment_id>/ack", methods=["POST"])
+@portal_login_required
+def portal_packet_ack(assignment_id):
+    pu = g.portal_user
+    db = get_db()
+    check_csrf()
+    a = _portal_packet_assignment(db, assignment_id, pu["client_id"])
+    if not a:
+        abort(404)
+    pdef = packet_def(a["packet_slug"])
+    idx = request.form.get("step", type=int)
+    if (idx is None or idx < 0 or idx >= len(pdef["steps"])
+            or pdef["steps"][idx]["type"] != "info"):
+        abort(400)
+    prog = _packet_progress(db, a)
+    if prog["steps"][idx]["locked"]:
+        flash("Please complete the step above first.", "error")
+        return redirect(url_for("portal_packet",
+                                assignment_id=assignment_id))
+    db.execute(
+        "INSERT OR IGNORE INTO portal_packet_acks (assignment_id,"
+        " step_index, acknowledged_at) VALUES (?, ?, ?)",
+        (assignment_id, idx, datetime.now(timezone.utc).isoformat()),
+    )
+    db.commit()
+    _portal_audit(
+        "portal_packet_step_ack",
+        f"Client acknowledged info step {idx + 1} of packet"
+        f" '{pdef['title']}' (assignment id={assignment_id})", pu)
+    flash("Marked as read. Thank you.", "success")
+    a = _portal_packet_assignment(db, assignment_id, pu["client_id"])
+    _packet_refresh_completion(db, a, pu)
+    return redirect(url_for("portal_packet",
+                            assignment_id=assignment_id))
 
 
 # ----------------------------------------------------------------------------
@@ -8595,6 +9035,22 @@ def portal_form_generate_document(sub_id):
                 relief = (relief + "\n\n" if relief else "") + (
                     "Petitioner also requests restoration of their"
                     f" former name: {snap['name_change']}.")
+            # v2.9.0: one capture serves the whole Divorce series.
+            # A legal-separation or invalidity election rides the
+            # same petition layout; it is named up front in the
+            # relief text and on the data sheet so the attorney
+            # completes the right findings/order (FL Divorce
+            # 231/241 cover all three).
+            action_type = str(snap.get("action_type") or "")
+            variant = ""
+            if action_type and "Dissolution" not in action_type:
+                variant = ("Legal separation"
+                           if "separation" in action_type.lower()
+                           else "Invalidity (annulment)")
+                relief = (f"TYPE OF ACTION: {variant} (FL Divorce "
+                          "series — same petition form; findings and "
+                          "final order follow the " + variant.lower()
+                          + " track).\n\n" + relief).strip()
             save(gen["file_stem"], "petition_dissolution", {
                 "county": county, "case_number": case_number,
                 "petitioner": client_name, "respondent": spouse_name,
@@ -8612,7 +9068,9 @@ def portal_form_generate_document(sub_id):
                 "title": f"{wdef['title']} — Client Data",
                 "subtitle": f"Official form: {wdef['official']} —"
                             " client-supplied data for attorney"
-                            " completion",
+                            " completion"
+                            + (f" — TYPE OF ACTION: {variant}"
+                               if variant else ""),
                 "client_name": client_name, "case_number": case_number,
                 "submitted_on": submitted_on,
                 "sections": _wizard_data_sections(wdef, snap),
@@ -8671,6 +9129,14 @@ def portal_form_generate_document(sub_id):
                 "ai_disclosure": False,
             })
         else:  # data_sheet
+            sections = _wizard_data_sections(wdef, snap)
+            if gen.get("sheet_note"):
+                # A def can pin a plain-language note at the top of
+                # its data sheet (e.g. the fee waiver's "the court
+                # decides").
+                sections = [{"title": "IMPORTANT",
+                             "rows": [("Please note",
+                                       gen["sheet_note"])]}] + sections
             save(gen["file_stem"], "wizard_data_sheet", {
                 "title": f"{wdef['title']} — Client Data",
                 "subtitle": f"Official form: {wdef['official']} —"
@@ -8678,7 +9144,7 @@ def portal_form_generate_document(sub_id):
                             " official form",
                 "client_name": client_name, "case_number": case_number,
                 "submitted_on": submitted_on,
-                "sections": _wizard_data_sections(wdef, snap),
+                "sections": sections,
             })
         audit("portal_document_generated",
               f"Generated {', '.join(made)} for case (id={case_id})"
@@ -8936,6 +9402,7 @@ def portal_home():
         cases=cases, recent_uploads=recent_uploads, unread=unread,
         form_states=form_states, form_defs=PORTAL_FORM_DEFS,
         doc_types=PORTAL_DOC_TYPES,
+        packets=_client_packets(db, cid, pu),
     )
 
 
@@ -9338,6 +9805,8 @@ def _client_portal_context(db, client_id):
         "opp_warning": opp_warning,
         "has_email": bool(client_row and client_row["email"]),
         "doc_types": PORTAL_DOC_TYPES,
+        "packets": _client_packets(db, client_id),
+        "packet_defs": PACKET_DEFS,
     }
 
 

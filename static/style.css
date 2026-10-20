@@ -1905,3 +1905,12 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
   .p-review-row { grid-template-columns: minmax(0, 1fr); }
   .p-repeater-row { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ============================================================
+   Scenario packets (v2.9.0) — client checklist page + home cards
+   ============================================================ */
+.p-step-current { border-left: 4px solid var(--gold); padding-left: 10px; }
+.p-step-locked { opacity: .55; }
+.p-guidance { font-style: italic; }
+.p-info-body { display: block; overflow-wrap: anywhere; }
+.p-info-done summary { cursor: pointer; }

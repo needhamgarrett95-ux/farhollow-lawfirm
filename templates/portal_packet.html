@@ -1,0 +1,65 @@
+{% extends "portal_base.html" %}
+{% block title %}{{ pdef.title }} — Client Portal{% endblock %}
+{% block content %}
+<p class="p-muted"><a href="{{ url_for('portal_home') }}">← Your portal home</a></p>
+<h1 class="p-h1">{{ pdef.title }}</h1>
+<p class="p-muted">{{ pdef.description }}</p>
+{% if case %}<p class="p-muted p-small">For case {{ case.case_number }}{% if case.title %} — {{ case.title }}{% endif %}</p>{% endif %}
+<div class="p-card-head">
+  <span class="p-progress">{{ done }} of {{ total }} steps done</span>
+</div>
+<div class="p-progressbar"><span style="width: {{ (done * 100 // total) if total else 0 }}%"></span></div>
+<p class="p-muted p-small p-guidance">{{ pdef.guidance }}</p>
+
+{% if complete %}
+<div class="p-card">
+  <h2>All done — thank you!</h2>
+  <p class="p-muted">You've finished every step in this checklist. The office has what it needs; they'll be in touch about what happens next.</p>
+</div>
+{% endif %}
+
+<div class="p-card">
+  <ul class="p-checklist">
+    {% for st in steps %}
+    <li class="{% if current == st.index and not st.done %}p-step-current{% endif %}{% if st.locked %} p-step-locked{% endif %}">
+      <span class="p-check {% if st.done %}p-check-done{% else %}p-check-open{% endif %}"></span>
+      <span class="p-check-text">
+        <strong>Step {{ loop.index }}: {{ st.title }}</strong>
+        {% if st.def.get('optional') %} <span class="p-muted">(only if it applies to you)</span>{% endif %}
+        <br>
+        {% if st.kind == 'wizard' %}
+        <span class="p-muted">{{ st.form_number }}{% if st.state == 'draft' %} · draft saved — pick up where you left off{% elif st.state == 'submitted' %} · sent — the office is reviewing it{% elif st.state == 'imported' %} · added to your file{% endif %}</span>
+        {% elif st.kind == 'upload' %}
+        <span class="p-muted">{% if st.state == 'done' %}Received and filed by the office.{% elif st.state == 'sent' %}Sent — waiting for the office to review it.{% elif st.note %}{{ st.note }}{% endif %}</span>
+        {% elif st.kind == 'info' %}
+        <span class="p-muted">{% if st.done %}Read and marked.{% else %}Please read, then mark it read below.{% endif %}</span>
+        {% endif %}
+        {% if st.locked %}<br><span class="p-muted">Complete the step above first to unlock this one.</span>{% endif %}
+        {% if st.kind == 'info' and not st.done and not st.locked %}
+        <span class="p-info-body">{% for para in st.body.split('\n\n') %}<br><br>{{ para }}{% endfor %}</span>
+        {% elif st.kind == 'info' and st.done %}
+        <details class="p-info-done"><summary class="p-muted">Read again</summary><span class="p-info-body">{% for para in st.body.split('\n\n') %}<br><br>{{ para }}{% endfor %}</span></details>
+        {% endif %}
+      </span>
+      {% if not st.locked %}
+        {% if st.kind == 'wizard' %}
+          {% if not st.done %}<a class="btn btn-primary btn-small" href="{{ url_for('portal_wizard', slug=st.slug) }}">{{ 'Continue' if st.state == 'draft' else 'Start' }}</a>{% endif %}
+        {% elif st.kind == 'upload' %}
+          {% if st.state in ('open', 'todo') and st.request %}<a class="btn btn-primary btn-small" href="{{ url_for('portal_documents', request=st.request.id) }}">Upload</a>
+          {% elif st.state == 'todo' %}<a class="btn btn-primary btn-small" href="{{ url_for('portal_documents') }}">Upload</a>{% endif %}
+        {% elif st.kind == 'info' %}
+          {% if not st.done %}
+          <form method="post" action="{{ url_for('portal_packet_ack', assignment_id=assignment.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+            <input type="hidden" name="step" value="{{ st.index }}">
+            <button type="submit" class="btn btn-primary btn-small">I've read this</button>
+          </form>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+<p class="p-muted p-small">Questions about any step? <a href="{{ url_for('portal_messages') }}">Message the office</a> — that's always faster than guessing.</p>
+{% endblock %}
