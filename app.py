@@ -1691,13 +1691,27 @@ def _meta_set(key, value):
     db.commit()
 
 
+class ClallamParseError(ValueError):
+    """The calendar document downloaded fine but no judge assignments
+    could be read from it. That is NOT a schedule change — the watcher
+    must never alert on it (v2.11.0: the old code regexed the raw PDF
+    bytes, found nothing, and reported 'unknown' -> 'unknown' changes).
+    """
+
+
 def _fetch_clallam_schedule():
-    """Return (updated_str, content_hash) or raise."""
+    """Download the Clallam Friday judge calendar and parse it.
+
+    Returns {"updated", "signature", "text"} where signature hashes ONLY
+    the normalized judge-assignment lines (PDF re-saves / metadata churn
+    are not schedule changes). Raises ClallamParseError when the document
+    downloads but yields no assignments; network errors propagate.
+    """
     import hashlib
-    import re
     import urllib.request
 
-    from deadlines import CLALLAM_JUDGE_CALENDAR_URL
+    from deadlines import (CLALLAM_JUDGE_CALENDAR_URL,
+                           extract_pdf_text, parse_clallam_calendar_text)
 
     req = urllib.request.Request(
         CLALLAM_JUDGE_CALENDAR_URL,
@@ -1705,30 +1719,58 @@ def _fetch_clallam_schedule():
     )
     with urllib.request.urlopen(req, timeout=25) as resp:
         raw = resp.read()
-    content_hash = hashlib.sha256(raw).hexdigest()
-    # The document header shows "Updated MM/DD/YY". The file is an xlsx served
-    # through DocumentCenter; when it comes back as HTML the date is parseable.
-    # If it's binary, we fall back to hash-only comparison.
-    updated_str = ""
-    try:
+    if raw[:5] == b"%PDF-":
+        text = extract_pdf_text(raw)
+    else:
         text = raw.decode("utf-8", errors="ignore")
-        m = re.search(r"Updated\s+(\d{1,2}/\d{1,2}/\d{2,4})", text, re.IGNORECASE)
-        if m:
-            updated_str = m.group(1)
-    except Exception:
-        pass
-    return updated_str, content_hash
+    updated_str, lines = parse_clallam_calendar_text(text)
+    if not lines:
+        raise ClallamParseError(
+            "Downloaded the calendar document but could not read any "
+            "judge assignments from it.")
+    signature = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+    return {"updated": updated_str, "signature": signature,
+            "text": "\n".join(lines)}
+
+
+def _clallam_set_baseline(info, by_label):
+    _meta_set("clallam_cal_base_sig", info["signature"])
+    _meta_set("clallam_cal_base_text", info["text"])
+    _meta_set("clallam_cal_base_updated", info["updated"])
+    _meta_set("clallam_cal_base_at", datetime.now(timezone.utc).isoformat())
+    _meta_set("clallam_cal_base_by", by_label)
+
+
+def _clallam_clear_alert():
+    _meta_set("clallam_cal_alert", "")
+    _meta_set("clallam_cal_alert_msg", "")
+    _meta_set("clallam_cal_alert_kind", "")
 
 
 def clallam_schedule_check():
-    """One poll of the Clallam Friday judge calendar. Returns a status string."""
+    """One poll of the Clallam Friday judge calendar. Returns a status string.
+
+    Baseline model (v2.11.0): the watcher compares the LATEST parsed
+    assignments against the last CONFIRMED baseline. A change raises one
+    alert and leaves the baseline untouched until a staff member confirms
+    the new assignments on the review screen (or dismisses the alert, in
+    which case that exact change is muted but the baseline still stands,
+    so a further change re-alerts). A run that cannot parse the document
+    never raises a change alert and never moves the baseline.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
     try:
-        updated_str, content_hash = _fetch_clallam_schedule()
+        info = _fetch_clallam_schedule()
+    except ClallamParseError as e:
+        _meta_set("clallam_cal_last_check", now_iso)
+        _meta_set("clallam_cal_last_status", "parse-failed")
+        audit("clallam_schedule_parse_failed", str(e))
+        return "parse-failed"
     except Exception as e:  # noqa: BLE001 — network failure is expected sometimes
         fails = int(_meta_get("clallam_cal_failures", "0") or 0) + 1
         _meta_set("clallam_cal_failures", fails)
-        _meta_set("clallam_cal_last_check",
-                  datetime.now(timezone.utc).isoformat())
+        _meta_set("clallam_cal_last_check", now_iso)
+        _meta_set("clallam_cal_last_status", "fetch-failed")
         if fails >= CLALLAM_MAX_FETCH_FAILURES and not _meta_get("clallam_cal_alert"):
             msg = (
                 "Could not reach the Clallam County Friday judge calendar "
@@ -1737,35 +1779,60 @@ def clallam_schedule_check():
             )
             _meta_set("clallam_cal_alert", "1")
             _meta_set("clallam_cal_alert_msg", msg)
+            _meta_set("clallam_cal_alert_kind", "unreachable")
             audit("clallam_schedule_unreachable", msg)
             return "unreachable-alert"
         return f"fetch-failed ({e})"
     _meta_set("clallam_cal_failures", "0")
-    _meta_set("clallam_cal_last_check", datetime.now(timezone.utc).isoformat())
-    prev_hash = _meta_get("clallam_cal_hash")
-    prev_updated = _meta_get("clallam_cal_updated")
-    if not prev_hash:
-        # First successful check: establish the baseline, no alert.
-        _meta_set("clallam_cal_hash", content_hash)
-        _meta_set("clallam_cal_updated", updated_str)
+    _meta_set("clallam_cal_last_check", now_iso)
+    # Latest sighting (kept whether or not it matches the baseline, so
+    # the review screen can show exactly what the watcher saw).
+    _meta_set("clallam_cal_latest_sig", info["signature"])
+    _meta_set("clallam_cal_latest_text", info["text"])
+    _meta_set("clallam_cal_latest_updated", info["updated"])
+    _meta_set("clallam_cal_latest_at", now_iso)
+    # Legacy mirrors (pre-v2.11 keys): "last seen" values.
+    _meta_set("clallam_cal_hash", info["signature"])
+    _meta_set("clallam_cal_updated", info["updated"])
+
+    base_sig = _meta_get("clallam_cal_base_sig")
+    if not base_sig:
+        # First successful parse: establish the baseline, no alert.
+        _clallam_set_baseline(info, "automatic (first successful check)")
+        _meta_set("clallam_cal_last_status", "ok")
         return "baseline-established"
-    changed = (content_hash != prev_hash) or (
-        updated_str and prev_updated and updated_str != prev_updated
+    if info["signature"] == base_sig:
+        _meta_set("clallam_cal_last_status", "ok")
+        if _meta_get("clallam_cal_alert") == "1" and \
+                _meta_get("clallam_cal_alert_kind") == "change":
+            # The court reverted to the confirmed assignments.
+            _clallam_clear_alert()
+            audit("clallam_schedule_reverted",
+                  "The published judge assignments match the confirmed "
+                  "baseline again; the change alert cleared itself.")
+        return "no-change"
+    # Parsed assignments differ from the confirmed baseline.
+    _meta_set("clallam_cal_last_status", "changed")
+    if _meta_get("clallam_cal_dismissed_sig") == info["signature"]:
+        return "changed-dismissed"
+    if _meta_get("clallam_cal_alert") == "1" and \
+            _meta_get("clallam_cal_alert_kind") == "change":
+        return "changed-alert-active"
+    base_updated = _meta_get("clallam_cal_base_updated")
+    if base_updated and info["updated"]:
+        when = f"(was '{base_updated}', now '{info['updated']}')"
+    else:
+        when = "(the assignments no longer match the last confirmed version)"
+    msg = (
+        "The Clallam County Friday judge calendar has changed "
+        f"{when}. Review the judge assignments before your next Friday "
+        "hearing."
     )
-    if changed:
-        msg = (
-            "The Clallam County Friday judge calendar may have changed "
-            f"(was '{prev_updated or 'unknown'}', now '{updated_str or 'unknown'}'). "
-            f"Review judge assignments at {CLALLAM_CALENDARS_URL} before your "
-            "next Friday hearing."
-        )
-        _meta_set("clallam_cal_hash", content_hash)
-        _meta_set("clallam_cal_updated", updated_str)
-        _meta_set("clallam_cal_alert", "1")
-        _meta_set("clallam_cal_alert_msg", msg)
-        audit("clallam_schedule_change", msg)
-        return "changed-alert"
-    return "no-change"
+    _meta_set("clallam_cal_alert", "1")
+    _meta_set("clallam_cal_alert_msg", msg)
+    _meta_set("clallam_cal_alert_kind", "change")
+    audit("clallam_schedule_change", msg)
+    return "changed-alert"
 
 
 def clallam_schedule_monitor():
@@ -4035,13 +4102,121 @@ def deadline_push():
 @app.route("/clallam/schedule/dismiss", methods=["POST"])
 @permission_required("push_deadlines")
 def clallam_schedule_dismiss():
-    """Dismiss the Clallam schedule-change alert after reviewing."""
+    """Dismiss the Clallam schedule-change alert without confirming.
+
+    The baseline stays as-is; the currently-detected change is muted so
+    the watcher won't re-alert for the SAME assignments, but the next
+    genuine change alerts again.
+    """
     check_csrf()
-    _meta_set("clallam_cal_alert", "")
-    _meta_set("clallam_cal_alert_msg", "")
+    latest_sig = _meta_get("clallam_cal_latest_sig")
+    if latest_sig and _meta_get("clallam_cal_alert_kind") == "change":
+        _meta_set("clallam_cal_dismissed_sig", latest_sig)
+    _clallam_clear_alert()
     audit("clallam_schedule_acknowledged",
-          "Attorney reviewed and dismissed the court schedule change alert.")
-    flash("Schedule alert dismissed.", "success")
+          "Staff dismissed the court schedule change alert without "
+          "confirming the new assignments (baseline unchanged).")
+    flash("Schedule alert dismissed. The confirmed assignments stay in "
+          "place — you'll be alerted again if the calendar changes "
+          "further.", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/clallam/schedule/review")
+@permission_required("calculate_deadlines")
+def clallam_schedule_review():
+    """Review screen for the court-schedule watcher (v2.11.0).
+
+    Shows the last CONFIRMED assignments side by side with the latest
+    ones the watcher downloaded, with a line-by-line diff — the old
+    dashboard card's "Review" was a dead label with nowhere to go.
+    """
+    import difflib
+
+    base_text = _meta_get("clallam_cal_base_text")
+    latest_text = _meta_get("clallam_cal_latest_text")
+    base_lines = base_text.split("\n") if base_text else []
+    latest_lines = latest_text.split("\n") if latest_text else []
+    diff_rows = []
+    if base_lines and latest_lines:
+        for line in difflib.unified_diff(base_lines, latest_lines,
+                                         lineterm="", n=1):
+            if line.startswith("@@"):
+                diff_rows.append(("ctx", "⋯"))
+            elif line.startswith("+"):
+                diff_rows.append(("add", line[1:]))
+            elif line.startswith("-"):
+                diff_rows.append(("del", line[1:]))
+            elif line.startswith(" "):
+                diff_rows.append(("ctx", line[1:]))
+    state = {
+        "alert": _meta_get("clallam_cal_alert") == "1",
+        "alert_msg": _meta_get("clallam_cal_alert_msg"),
+        "alert_kind": _meta_get("clallam_cal_alert_kind"),
+        "status": _meta_get("clallam_cal_last_status"),
+        "last_check": _meta_get("clallam_cal_last_check"),
+        "failures": _meta_get("clallam_cal_failures", "0"),
+        "base_updated": _meta_get("clallam_cal_base_updated"),
+        "base_at": _meta_get("clallam_cal_base_at"),
+        "base_by": _meta_get("clallam_cal_base_by"),
+        "latest_updated": _meta_get("clallam_cal_latest_updated"),
+        "latest_at": _meta_get("clallam_cal_latest_at"),
+        "has_base": bool(base_text),
+        "has_latest": bool(latest_text),
+        "changed": bool(base_text and latest_text
+                        and _meta_get("clallam_cal_base_sig")
+                        != _meta_get("clallam_cal_latest_sig")),
+    }
+    return render_template(
+        "clallam_review.html", state=state, diff_rows=diff_rows,
+        base_lines=base_lines, latest_lines=latest_lines,
+        calendars_url=CLALLAM_CALENDARS_URL,
+        can_confirm=user_has_perm(session.get("permissions", {}),
+                                  "push_deadlines"))
+
+
+@app.route("/clallam/schedule/confirm", methods=["POST"])
+@permission_required("push_deadlines")
+def clallam_schedule_confirm():
+    """Confirm the latest assignments as the new baseline.
+
+    Uses the watcher's stored latest sighting; when there is none (e.g.
+    a stuck alert left over from before v2.11.0, which stored no text),
+    it fetches the calendar live right now so the alert can always be
+    cleared from this screen.
+    """
+    check_csrf()
+    latest_text = _meta_get("clallam_cal_latest_text")
+    if latest_text:
+        info = {"updated": _meta_get("clallam_cal_latest_updated"),
+                "signature": _meta_get("clallam_cal_latest_sig"),
+                "text": latest_text}
+    else:
+        try:
+            info = _fetch_clallam_schedule()
+        except Exception as e:  # noqa: BLE001 — show the failure, keep alert
+            flash("Couldn't download the calendar just now, so nothing "
+                  f"was confirmed. ({e})", "error")
+            return redirect(url_for("clallam_schedule_review"))
+        _meta_set("clallam_cal_latest_sig", info["signature"])
+        _meta_set("clallam_cal_latest_text", info["text"])
+        _meta_set("clallam_cal_latest_updated", info["updated"])
+        _meta_set("clallam_cal_latest_at",
+                  datetime.now(timezone.utc).isoformat())
+    username = (getattr(g, "user", None) or {}).get("username") \
+        or session.get("username") or "staff"
+    _clallam_set_baseline(info, username)
+    _meta_set("clallam_cal_dismissed_sig", "")
+    _meta_set("clallam_cal_last_status", "ok")
+    _clallam_clear_alert()
+    count = len([ln for ln in info["text"].split("\n") if ln.strip()])
+    audit("clallam_schedule_confirmed",
+          f"{username} confirmed the Clallam Friday judge assignments "
+          f"as the new baseline (calendar updated "
+          f"'{info['updated'] or 'unknown'}', {count} assignment "
+          "lines).")
+    flash("Assignments confirmed — that's the version the watcher will "
+          "compare against from now on.", "success")
     return redirect(url_for("dashboard"))
 
 

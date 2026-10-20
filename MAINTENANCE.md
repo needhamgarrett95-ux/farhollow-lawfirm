@@ -1900,3 +1900,76 @@ the visits/QDRO/de facto intakes? They only appear when their
 Library switch is on (Library page, staff side) — and like every
 wizard, nothing reaches a case file until staff review and import
 it from Portal Review.
+
+## 53. Full-system audit: the court-schedule alert and phone form widths (v2.11.0)
+
+v2.11.0 is a cleanup release. Every part of the system was exercised
+end to end on a test copy — all 25 portal wizards from client draft
+to a generated document in the case file, uploads and message
+attachments through review, trust money, invoices, payroll,
+invites, backups — and the two problems reported from a phone were
+found, fixed at the root, and covered by new tests
+(`tests/test_v211.py`, on top of the full older battery).
+
+**The "Needs Attention" court-schedule alert that wouldn't clear.**
+Two faults combined. First, the weekly watcher compared the county
+PDF's raw bytes and searched those bytes for the "Updated" date —
+but a PDF's text is compressed, so the date was never found and any
+re-saved PDF looked like a schedule change. That's why the alert
+said "(was 'unknown', now 'unknown')". Second, the card's "Review"
+label wasn't a link at all — the screen that could clear the alert
+didn't exist. Now:
+
+- The watcher actually reads the calendar: it extracts the PDF
+  text, finds the "Updated" date and the judge-assignment lines,
+  and compares only those lines against the last **confirmed**
+  assignments. A PDF re-save or a changed header no longer looks
+  like a schedule change.
+- If a download can't be read (no assignments found), that is
+  **not** treated as a change: no alert. The failure is written to
+  the audit log and shown on the review screen instead.
+- The dashboard card's **Review** is a real link. The review
+  screen shows the confirmed assignments next to the latest ones
+  the watcher found, with the changed lines marked. **Confirm
+  these assignments** makes the latest version the one the
+  watcher compares against and clears the alert (the audit log
+  records who confirmed and which calendar version). **Dismiss
+  alert only** clears the alert but keeps the old confirmed
+  version — you'll be alerted again only if the calendar changes
+  further. Confirming needs the "push deadlines" permission;
+  anyone with "use the deadline calculator" can open the review
+  screen and look.
+- An alert left over from before this update (which stored no
+  assignments to show) can still be cleared from the same screen:
+  Confirm downloads the calendar fresh and uses what it finds.
+- If the calendar ever returns to the confirmed assignments on
+  its own, the alert clears itself.
+
+**Date and time boxes running off the right edge of phone forms.**
+The phone stylesheet only capped those boxes' maximum width; iOS
+sizes them from their built-in controls, so they could push past
+the card. The shared stylesheet (one rule, every form) now gives
+the whole date/time family — date, time, datetime, month, week —
+the full card width with proper box sizing in the phone band, and
+a never-wider-than-the-card guard at every screen size. File
+inputs got the same guard, and the card grids' minimum column
+widths can no longer exceed a narrow screen. No per-form patches:
+if a future form uses a standard date or time box inside a card,
+it is covered automatically.
+
+**One more found by the audit.** An employee record whose pay rate
+had been stored as a plain number instead of encrypted text (only
+reachable by hand-editing the database) crashed the Employees and
+Payroll pages. The encryption helpers now accept those legacy
+values gracefully, as their design always promised.
+
+**Verified working, unchanged.** The portal-to-office pipeline
+(all 25 wizards, uploads of every type, document requests,
+message attachments, checklist packets advancing from real
+events), trust overdraft blocks and reversal rules, invoice
+payments linking to the operating ledger (including the 7-year
+retention rule and its admin override), payroll math (WA Paid
+Family & Medical Leave and WA Cares withholdings included),
+portal invite single-use and expiry, mid-session revocation for
+clients and staff, session timeout, and backup creation with an
+integrity check.

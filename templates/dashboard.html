@@ -51,7 +51,7 @@
       {% if schedule_alert %}
       <div class="mini"><div><div class="t">Court schedule changed</div>
         <div class="s">{{ schedule_alert }}</div></div>
-        <div class="r soon">Review</div></div>
+        {% if perms.get('calculate_deadlines') %}<a class="r soon" href="{{ url_for('clallam_schedule_review') }}">Review</a>{% else %}<div class="r soon">Review</div>{% endif %}</div>
       {% endif %}
     </div>
     {% endif %}

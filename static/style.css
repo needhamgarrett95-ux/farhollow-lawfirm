@@ -460,7 +460,7 @@ dd { margin: 0; }
 .report-links { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
 
 /* Document templates */
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 16px; margin-top: 16px; }
 .template-card h2 { margin-top: 0; font-size: 17px; }
 .template-card p { min-height: 60px; }
 .template-card .btn { margin-top: 8px; }
@@ -576,6 +576,16 @@ dd { margin: 0; }
 .mini .r.urgent { color: var(--error); }
 .mini .r.soon { color: var(--warning); }
 .mini .r.muted { color: var(--muted); }
+.mini a.r { text-decoration: none; }
+.mini a.r:hover { text-decoration: underline; }
+
+/* Court-schedule review screen (v2.11.0) */
+.cal-lines { font-size: .82rem; line-height: 1.5; overflow-wrap: anywhere; }
+.cal-lines > div { padding: 1px 0; border-bottom: 1px solid var(--border); }
+.cal-diff .diff-add { background: rgba(46, 125, 50, .10); font-weight: 600; }
+.cal-diff .diff-del { background: rgba(176, 0, 32, .08); text-decoration: line-through; }
+.cal-diff .diff-ctx { opacity: .75; }
+.action-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
 /* Customize panel */
 .customize-panel {
@@ -796,7 +806,7 @@ html[data-theme="dark"] .login-bg::after {
 /* ------------------------------------------------------------------ */
 /* Integrations (v2.2)                                                 */
 /* ------------------------------------------------------------------ */
-.integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 18px; }
+.integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 18px; margin-bottom: 18px; }
 .integration-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
 .integration-icon { width: 46px; height: 46px; border-radius: 12px; background: var(--navy); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 html[data-theme="dark"] .integration-icon { background: var(--gold); color: var(--navy-dark); }
@@ -839,6 +849,7 @@ html[data-theme="dark"] .email-body summary { color: var(--gold); }
 /* Compose */
 .compose-card { max-width: 720px; }
 .compose-row { display: grid; grid-template-columns: 90px 1fr; gap: 12px; align-items: start; margin-bottom: 12px; }
+.compose-row > * { min-width: 0; }
 .compose-row label { font-weight: 600; font-size: 13px; padding-top: 9px; }
 .compose-row input, .compose-row select, .compose-row textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--card); color: var(--text); font-family: inherit; }
 .compose-row textarea { resize: vertical; min-height: 220px; }
@@ -893,6 +904,16 @@ input[type=file] {
   width: 100%; cursor: pointer;
 }
 textarea { resize: vertical; min-height: 90px; }
+
+/* Intrinsically-sized controls (v2.11.0): date/time pickers and file
+   inputs size themselves from their native UI in several browsers and
+   can push past their card on narrow screens. They may never exceed
+   their container, at any viewport. Width itself is only forced in the
+   phone band below — desktop keeps the natural form layout. */
+input[type="date"], input[type="time"], input[type="datetime-local"],
+input[type="month"], input[type="week"], input[type="file"] {
+  min-width: 0; max-width: 100%;
+}
 
 /* Custom select chevron — theme-agnostic gray works on both palettes */
 select {
@@ -1026,7 +1047,7 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 .tc-hero .btn-xl { min-width: 240px; }
 
 /* Team member mini-cards */
-.tc-team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin-bottom: 8px; }
+.tc-team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 14px; margin-bottom: 8px; }
 .tc-member {
   background: var(--card); border: 1px solid var(--line); border-radius: 14px;
   padding: 18px; box-shadow: var(--shadow-card);
@@ -1760,7 +1781,14 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
   .detail-grid > * { min-width: 0; }
   form input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]),
   form select, form textarea { max-width: 100%; min-width: 0; }
-  input[type="date"], input[type="time"], input[type="file"] { max-width: 100%; min-width: 0; }
+  input[type="date"], input[type="time"], input[type="datetime-local"],
+  input[type="month"], input[type="week"] {
+    width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+    -webkit-appearance: none; appearance: none;
+  }
+  input[type="file"] { max-width: 100%; min-width: 0; box-sizing: border-box; }
+  .day-picker { flex-wrap: wrap; }
+  .day-picker input[type="date"] { width: 100%; }
   /* 16px inputs across the whole phone band (stops iOS focus zoom);
      same exclusions as the established v2.4 rule at <=700px. */
   input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=submit]):not([type=file]),

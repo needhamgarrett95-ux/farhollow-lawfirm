@@ -222,6 +222,156 @@ CLALLAM_JUDGE_CALENDAR_URL = (
 CLALLAM_CALENDARS_URL = "https://www.clallamcountywa.gov/1520/Calendars"
 
 
+# ----------------------------------------------------------------------------
+# Friday judge-calendar parsing (v2.11.0)
+#
+# The county serves the schedule as a PDF whose text streams are
+# FlateDecode-compressed, so the raw bytes are NOT searchable — the old
+# watcher regexed the raw download, never found the "Updated" date, and
+# compared raw bytes (any re-save of the PDF looked like a schedule
+# change). These helpers extract the text first, then pull out the two
+# things the watcher actually cares about: the "Updated MM/DD/YY" stamp
+# and the per-date judge assignment lines. Change detection hashes the
+# normalized assignment lines only, so PDF metadata churn, re-saves, and
+# header/footer edits never look like a schedule change.
+# ----------------------------------------------------------------------------
+
+import base64 as _base64
+import re as _re
+import zlib as _zlib
+
+
+def _inflate_stream(raw):
+    """Decode one PDF stream body: FlateDecode, or ASCII85+Flate
+    (ReportLab's default chain — its ASCII85 keeps the '~>' terminator
+    but drops the '<~' prefix, so strip/clean before decoding)."""
+    try:
+        return _zlib.decompress(raw)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        cleaned = _re.sub(rb"[^!-uz]", b"", raw.strip().rstrip(b"~>"))
+        pad = (5 - len(cleaned) % 5) % 5
+        return _zlib.decompress(_base64.a85decode(cleaned + b"u" * pad,
+                                                  adobe=False))
+    except Exception:  # noqa: BLE001
+        return raw
+
+
+def _pdf_unescape(s):
+    """Unescape a PDF literal string body (already decoded as latin-1)."""
+    out = []
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == "\\" and i + 1 < len(s):
+            n = s[i + 1]
+            if n in "nrtbf":
+                out.append({"n": "\n", "r": "\r", "t": "\t",
+                            "b": "\b", "f": "\f"}[n])
+                i += 2
+            elif n in "()\\":
+                out.append(n)
+                i += 2
+            elif n.isdigit():
+                j = i + 1
+                oct_digits = ""
+                while j < len(s) and len(oct_digits) < 3 and s[j].isdigit():
+                    oct_digits += s[j]
+                    j += 1
+                try:
+                    out.append(chr(int(oct_digits, 8)))
+                except ValueError:
+                    pass
+                i = j
+            else:
+                out.append(n)
+                i += 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+_PDF_TOKEN_RE = _re.compile(
+    r"\((?:\\.|[^\\()])*\)\s*(?:Tj|TJ|')|\[(?:\\.|[^\]\\])*\]\s*TJ"
+    r"|-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+(?:Td|TD)|T\*")
+
+
+def extract_pdf_text(data):
+    """Best-effort text extraction from a simple (non-encrypted) PDF.
+
+    Handles the common county/document-center layout: FlateDecode content
+    streams with Tj/TJ text-showing operators. Kerning adjustments in a
+    TJ array at or beyond -150 (thousandths of an em) are treated as word
+    spaces, and text-positioning moves with a vertical component start a
+    new line. Returns "" when nothing readable is found.
+    """
+    if not data or data[:5] != b"%PDF-":
+        return ""
+    chunks = []
+    for m in _re.finditer(rb"stream\r?\n(.*?)endstream", data, _re.S):
+        content = _inflate_stream(m.group(1))
+        text = content.decode("latin-1", errors="ignore")
+        if "Tj" not in text and "TJ" not in text:
+            continue
+        buf = []
+        for tok in _PDF_TOKEN_RE.finditer(text):
+            t = tok.group(0)
+            if t.startswith("("):  # literal string + Tj/TJ/'
+                buf.append(_pdf_unescape(t[1:t.rindex(")")]))
+            elif t.startswith("["):  # TJ array: strings + kerning numbers
+                arr = t[1:t.rindex("]")]
+                parts = []
+                for piece in _re.finditer(
+                        r"\((?:\\.|[^\\()])*\)|(-?\d+(?:\.\d+)?)", arr):
+                    if piece.group(1) is not None:
+                        try:
+                            if float(piece.group(1)) <= -150:
+                                parts.append(" ")
+                        except ValueError:
+                            pass
+                    else:
+                        lit = piece.group(0)
+                        parts.append(_pdf_unescape(lit[1:-1]))
+                buf.append("".join(parts))
+            elif t == "T*":
+                buf.append("\n")
+            else:  # "x y Td" / "x y TD"
+                nums = t.split()
+                try:
+                    if float(nums[1]) != 0:
+                        buf.append("\n")
+                except (IndexError, ValueError):
+                    pass
+        chunks.append("".join(buf))
+    return "\n".join(chunks)
+
+
+def parse_clallam_calendar_text(text):
+    """Pull (updated_str, judge_assignment_lines) out of calendar text.
+
+    Assignment lines are the dated rows naming the presiding judge
+    (e.g. "10/16/26 JUDGE ELIZABETH STANLEY 9:00 CRIMINAL [CT2] ...").
+    Lines are whitespace-normalized so the caller's signature is stable
+    across PDF re-saves. Returns ("", []) when nothing parses.
+    """
+    if not text:
+        return "", []
+    updated = ""
+    m = _re.search(r"Updated\s+(\d{1,2}/\d{1,2}/\d{2,4})", text, _re.IGNORECASE)
+    if m:
+        updated = m.group(1)
+    lines = []
+    for raw_line in text.splitlines():
+        line = " ".join(raw_line.split())
+        if not line:
+            continue
+        if _re.match(r"\d{1,2}/\d{1,2}/\d{2,4}\b", line) and "JUDGE" in line.upper():
+            lines.append(line)
+    return updated, lines
+
+
 def _nth_tuesday_of_month(d):
     """Return which Tuesday of the month `d` is (1-5), or 0 if not a Tuesday."""
     if d.weekday() != 1:  # Tuesday

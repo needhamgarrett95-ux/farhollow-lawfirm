@@ -48,6 +48,8 @@ def encrypt_value(plaintext):
     """Encrypt a string for storage. Empty/None stays empty."""
     if plaintext is None or plaintext == "":
         return ""
+    if not isinstance(plaintext, str):
+        plaintext = str(plaintext)
     return _get_fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
 
@@ -57,9 +59,16 @@ def decrypt_value(ciphertext):
     If the value is not valid ciphertext (e.g. legacy plaintext from before
     encryption was enabled), it is returned as-is so the migration step in
     app.init_db() can convert it. All current writes go through encrypt_value.
+
+    Non-string values are coerced first (v2.11.0): a column declared
+    INTEGER can hand back a raw int for legacy rows, and .encode() on it
+    crashed the accounting pages with AttributeError instead of falling
+    back to the plaintext path this function promises.
     """
     if ciphertext is None or ciphertext == "":
         return ""
+    if not isinstance(ciphertext, str):
+        ciphertext = str(ciphertext)
     try:
         return _get_fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except (InvalidToken, ValueError):
@@ -68,4 +77,4 @@ def decrypt_value(ciphertext):
 
 def looks_encrypted(value):
     """Heuristic: Fernet tokens are base64 starting with 'gAAAAA'."""
-    return bool(value) and value.startswith("gAAAAA")
+    return isinstance(value, str) and value.startswith("gAAAAA")

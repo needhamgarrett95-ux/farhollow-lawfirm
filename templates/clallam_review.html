@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Court schedule review — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Clallam County Friday judge calendar</h1>
+  <a class="btn btn-secondary" href="{{ calendars_url }}" target="_blank" rel="noopener">Open the county calendars page</a>
+</div>
+
+<p class="muted">The office software checks the county's Friday judge calendar once a week and
+compares what it finds against the last assignments a person here <strong>confirmed</strong>.
+Nothing here files or changes anything with the court — it just makes sure a swapped judge
+doesn't surprise you on a Friday morning.</p>
+
+{% if state.alert and state.alert_kind == 'change' %}
+<div class="flash flash-error">Court schedule changed — {{ state.alert_msg }}</div>
+{% elif state.alert and state.alert_kind == 'unreachable' %}
+<div class="flash flash-error">{{ state.alert_msg }}</div>
+{% elif state.status == 'parse-failed' %}
+<div class="flash flash-warning">The watcher downloaded the calendar at the last check but couldn't read the
+judge assignments from it, so it did <strong>not</strong> raise a change alert. Last check: {{ state.last_check[:19].replace('T', ' ') if state.last_check else 'never' }}.
+Verify Friday's judge on the county page above if you're heading to court.</div>
+{% elif state.has_base %}
+<div class="flash flash-success">The published assignments match the confirmed version. Last check: {{ state.last_check[:19].replace('T', ' ') if state.last_check else 'never' }}.</div>
+{% endif %}
+
+<div class="detail-grid">
+  <div class="detail-card">
+    <h2>Confirmed assignments</h2>
+    {% if state.has_base %}
+    <p class="small muted">Calendar marked “Updated {{ state.base_updated or 'unknown' }}” · confirmed
+      {{ state.base_at[:19].replace('T', ' ') if state.base_at }} by {{ state.base_by or 'staff' }} ·
+      {{ base_lines|length }} assignment lines.</p>
+    <div class="cal-lines">{% for ln in base_lines %}<div>{{ ln }}</div>{% endfor %}</div>
+    {% else %}
+    <p>No assignments have been confirmed yet. The first successful check becomes the
+    starting version automatically; after that, any change waits here for a person to confirm it.</p>
+    {% endif %}
+  </div>
+
+  <div class="detail-card">
+    <h2>Latest the watcher found</h2>
+    {% if state.has_latest %}
+    <p class="small muted">Calendar marked “Updated {{ state.latest_updated or 'unknown' }}” · downloaded
+      {{ state.latest_at[:19].replace('T', ' ') if state.latest_at }} ·
+      {{ latest_lines|length }} assignment lines.</p>
+    <div class="cal-lines">{% for ln in latest_lines %}<div>{{ ln }}</div>{% endfor %}</div>
+    {% else %}
+    <p>The watcher hasn't successfully downloaded the calendar yet.
+    {% if can_confirm %}Confirming below will download it right now and use what it finds as the confirmed version.{% endif %}</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if diff_rows %}
+<div class="detail-card">
+  <h2>What changed</h2>
+  <p class="small muted">Lines starting with − are in the confirmed version only; + lines are new in the latest download.</p>
+  <div class="cal-lines cal-diff">{% for kind, ln in diff_rows %}<div class="diff-{{ kind }}">{% if kind == 'add' %}+ {% elif kind == 'del' %}− {% endif %}{{ ln }}</div>{% endfor %}</div>
+</div>
+{% endif %}
+
+{% if can_confirm %}
+<div class="detail-card">
+  <h2>Decide</h2>
+  <div class="action-row">
+    <form method="post" action="{{ url_for('clallam_schedule_confirm') }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <button type="submit" class="btn btn-primary">Confirm these assignments</button>
+    </form>
+    {% if state.alert %}
+    <form method="post" action="{{ url_for('clallam_schedule_dismiss') }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <button type="submit" class="btn btn-secondary">Dismiss alert only</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="small muted"><strong>Confirm</strong> makes the latest assignments the version the watcher compares
+  against, and clears the alert. <strong>Dismiss</strong> clears the alert but keeps the old confirmed
+  version — you'll be alerted again if the calendar changes further.</p>
+</div>
+{% else %}
+<p class="muted">You can review the assignments here, but confirming or dismissing needs the
+“push deadlines” permission — ask the attorney or an admin to clear the alert once they've looked.</p>
+{% endif %}
+
+{% endblock %}
