@@ -156,7 +156,12 @@ h3 { font-size: 15px; margin: 16px 0 8px; }
 .table tbody tr { transition: background .12s ease; }
 .table tbody tr:hover { background: var(--surface-hover); }
 .table tr:last-child td { border-bottom: none; }
-.table a { color: var(--navy); }
+/* Plain links in tables take the navy link color — but never buttons.
+   .btn-primary declares color:#fff at (0,1,0); this rule at (0,1,1)
+   used to override it, rendering navy text on the navy button fill
+   (1.0:1 — the unreadable table "Review"/"Open" buttons, v2.12.1).
+   A component that fills its own background owns its label color. */
+.table a:not(.btn) { color: var(--navy); }
 
 /* Badges */
 .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
@@ -191,6 +196,12 @@ h3 { font-size: 15px; margin: 16px 0 8px; }
 html[data-theme="dark"] .btn-primary {
   background: linear-gradient(180deg, #3570ae, var(--brand));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+/* The shared hover's brightness(1.1) filter lifts the dark gradient's
+   light stop enough to drop white text to 4.39:1 (v2.12.1). Dark hover
+   gets its own pre-lifted gradient and no filter. */
+html[data-theme="dark"] .btn-primary:hover {
+  background: linear-gradient(180deg, #2f639f, #24507f); filter: none;
 }
 .btn-primary:hover { background: linear-gradient(180deg, #24507f, var(--brand)); filter: brightness(1.1); box-shadow: var(--shadow-lift); transform: translateY(-1px); }
 .btn-danger { background: var(--card); border-color: var(--error-border); color: var(--error); }
@@ -775,7 +786,7 @@ html[data-theme="dark"] .login-bg::after {
   display: inline-flex; align-items: center; justify-content: center;
   margin-bottom: 16px;
 }
-.modal-icon-info    { background: var(--info-bg);   color: var(--info); }
+.modal-icon-info    { background: var(--info-bg);   color: var(--info-text); }   /* --info itself is 4.44:1 on info-bg (v2.12.1) */
 .modal-icon-danger  { background: var(--error-bg);  color: var(--error); }
 .modal-icon-success { background: var(--success-bg); color: var(--success); }
 .modal-icon-warning { background: var(--warning-bg); color: var(--warning-text); }
@@ -827,7 +838,9 @@ html[data-theme="dark"] .integration-icon { background: var(--gold); color: var(
 .status-disconnected { background: var(--surface-soft); color: var(--muted); }
 .status-needs_reauth { background: #fef3e2; color: #8a5200; }
 html[data-theme="dark"] .status-connected { background: rgba(30,126,78,.25); color: #7ddba3; }
-html[data-theme="dark"] .status-disconnected { background: rgba(255,255,255,.08); color: var(--muted); }
+/* Was rgba(255,255,255,.08) over the card: the lightened fill dropped
+   --muted text to 4.47:1 (v2.12.1). Use the same token as light mode. */
+html[data-theme="dark"] .status-disconnected { background: var(--surface-soft); color: var(--muted); }
 html[data-theme="dark"] .status-needs_reauth { background: rgba(210,145,10,.22); color: #f0c96a; }
 .notice { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--navy); border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
 .notice-warning { border-left-color: var(--warning, #d4910a); }
@@ -1019,7 +1032,7 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 
 /* --- Sub tabs (accounting module) --- */
 .tabs a { border-radius: 8px 8px 0 0; transition: background .12s ease; }
-.tabs a:hover { background: var(--surface-hover); }
+.tabs a:hover { background: var(--surface-hover); color: var(--navy); }   /* hover strengthens text too (sibling idiom) — muted on the dark hover fill was 4.47:1 (v2.12.1) */
 
 /* --- Flash messages: softer --- */
 .flash { border-radius: 10px; box-shadow: var(--shadow-card); }
@@ -1612,7 +1625,7 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 .p-brand .firm-name small { display: block; color: var(--gold-light); font-weight: 600; letter-spacing: .04em; }
 .p-topnav { display: none; gap: 4px; margin-left: 12px; }
 .p-topnav a { color: #dbe4f0; text-decoration: none; padding: 7px 13px; border-radius: 999px; font-weight: 600; font-size: 14.5px; }
-.p-topnav a:hover { background: rgba(255,255,255,.12); }
+.p-topnav a:hover { background: rgba(255,255,255,.12); color: #fff; }   /* hover strengthens text too — #dbe4f0 on the dark hover fill was 4.08:1 (v2.12.1) */
 .p-topnav a.active { background: var(--gold); color: var(--navy-dark); }
 .p-user { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .p-username { font-weight: 600; font-size: 14.5px; }
@@ -1666,6 +1679,10 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 .p-bubble { max-width: 82%; background: var(--surface-soft); color: var(--text); border-radius: 16px; border-bottom-left-radius: 5px; padding: 9px 13px; margin: 3px 0; }
 .p-bubble-row.mine .p-bubble { background: var(--navy); color: #fff; border-radius: 16px; border-bottom-right-radius: 5px; }
 .p-bubble-row.mine .p-bubble .p-bubble-time { color: rgba(255,255,255,.65); }
+/* 65% white was tuned on the light navy; on the lighter dark --brand
+   bubble it drops to 3.94:1 (v2.12.1) — use the portal's solid
+   light-on-navy text color there instead. */
+html[data-theme="dark"] .p-bubble-row.mine .p-bubble .p-bubble-time { color: #dbe4f0; }
 html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand); }
 .p-bubble-name { font-size: 12px; font-weight: 700; opacity: .75; margin-bottom: 2px; }
 .p-bubble-body { white-space: pre-wrap; word-break: break-word; }
@@ -1759,6 +1776,9 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
     background: var(--brand); border-color: var(--brand); color: #fff; margin-bottom: 0;
   }
   .tabs a.active .tab-badge { background: rgba(255, 255, 255, .25); color: #fff; }
+  /* White on the 25%-white tint over the DARK brand bar is only
+     3.91:1 (v2.12.1) — match the standalone .tab-badge dark pairing. */
+  html[data-theme="dark"] .tabs a.active .tab-badge { background: var(--gold); color: var(--navy-dark); }
   /* Timeclock view switcher wraps the same way */
   .view-tabs { display: flex; flex-wrap: wrap; width: 100%; }
   .view-tab {

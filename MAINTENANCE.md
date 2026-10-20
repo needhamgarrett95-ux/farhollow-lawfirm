@@ -2082,3 +2082,67 @@ words, `--info-text` on `--info-bg`, and so on — the bright
 contrast checks in tests/test_v212.py re-measure the shipped
 colors on every run; a future color change that drops a pairing
 under the bar fails the build.
+
+## 57. The unreadable "Review" button — filled buttons own their label color (v2.12.1)
+
+Garrett's screenshot: after a client sent a form in, the **Review**
+button on the Portal Review queue was a solid navy pill with its
+word printed in navy — unreadable. The v2.12.0 readability pass
+(§56) had measured the theme *colors* against each other, but a
+button's colors come from two different *rules*, and one more rule
+got a vote:
+
+- The button rule says white text on the navy fill. Good: 8.3:1.
+- But the button is a link sitting in a table, and the table rule
+  ("links in tables are navy") outranks the button rule. Navy on
+  navy: **1.0:1** on the light theme, 2.4:1 on dark.
+
+The same trap was waiting on the **Open** button in the portal
+message inbox (same construction) — it would have been the next
+screenshot. Both are fixed by one change: the table rule now
+skips anything that is a button (`.table a:not(.btn)`). Plain
+table links are unchanged.
+
+Because Garrett said "some buttons" (plural), the whole program
+was then swept the way the button actually renders — every filled
+button, badge, pill, chip, banner, toast, and tab in both themes,
+including hover states. Seven more pairings were under the 4.5:1
+bar and are fixed:
+
+- **Primary button hover in dark mode (4.4:1):** the shared hover
+  brightens the fill with a filter, which lifts the dark fill too
+  far. Dark hover now has its own slightly-lifted fill (6.2:1).
+- **"Disconnected" status pill in dark mode (4.5:1, borderline):**
+  it used a one-off translucent white fill; now it uses the same
+  surface color as light mode (5.2:1).
+- **Count badge inside the active phone tab, dark mode (3.9:1):**
+  white on a pale tint. It now uses the same gold pairing as the
+  other tab badges (8.7:1).
+- **The blue "info" icon in pop-up dialogs (4.4:1):** it used the
+  accent blue as its color on the pale blue fill; it now uses the
+  darker text blue made for that fill (7.2:1).
+- **Desktop tab hover in dark mode (4.5:1, borderline):** hovering
+  lightened the fill but left the gray text. Hover now strengthens
+  the text too, like every sibling tab (5.3:1).
+- **Portal top-nav hover in dark mode (4.1:1):** same pattern —
+  hover now brightens the words to white as well (5.3:1).
+- **Timestamps inside a client's own dark-mode message bubbles
+  (3.9:1):** the 65%-white timestamp was tuned on the darker light
+  -theme bubble. Dark mode now uses a solid pale blue-gray (5.5:1).
+
+Everything else in the sweep — 70+ filled components × 2 themes —
+already passed, including some that looked suspicious: the phone
+tab bar's gold-tinted active pill (white text measures 9.6:1
+light / 7.9:1 dark over the navy capsule) and the sheet's gold
+role pill.
+
+**The rules going forward.** (1) A component that fills its own
+background owns its label color — every filled-button rule declares
+its `color` outright, never inherited. (2) Context rules (table
+links, banner links, card links) must never restyle a button; if a
+context needs different link colors, it excludes buttons by name,
+the way the updater banner already did. (3) The token checks in
+test_v212.py are necessary but not sufficient: tests/test_v2121.py
+now re-measures the *components as rendered* (fills, labels, hover
+states, both themes) on every run — a pairing that drops under
+4.5:1 fails the build.
