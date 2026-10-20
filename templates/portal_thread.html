@@ -27,7 +27,7 @@
           <a href="{{ url_for('portal_review') }}">review in the queue</a>
           {% elif m.att_status == 'accepted' %}
           <span class="badge">filed</span>
-          <a href="{{ url_for('portal_upload_download', upload_id=m.att_id) }}">download</a>
+          <a class="m-action" href="{{ url_for('portal_upload_download', upload_id=m.att_id) }}">Download</a>
           {% elif m.att_status == 'rejected' %}
           <span class="badge">rejected</span>
           {% endif %}

@@ -52,7 +52,7 @@
 {% if d.entries %}
   {% include "_timeclock_day_card.html" %}
 {% else %}
-<div class="empty-state">
+<div class="empty-state empty-stack">
   <div class="empty-icon">{{ icon('calendar', 28) }}</div>
   <h3>No punches on {{ day_date.strftime('%b %d, %Y') }}</h3>
   <p>{{ employee.full_name }} didn't clock in on this day.</p>

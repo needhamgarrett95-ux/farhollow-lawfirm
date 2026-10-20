@@ -8,12 +8,19 @@
   <h2>Send a document</h2>
   <form method="post" action="{{ url_for('portal_document_upload') }}" enctype="multipart/form-data" class="p-form">
     <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
-    <label for="doc_type">What kind of document is it?</label>
-    <select id="doc_type" name="doc_type">
+    <label>What kind of document is it?</label>
+    {# v2.7.0: big tappable radio cards instead of a cramped select —
+       one-handed friendly at phone width. Posts doc_type exactly like
+       the old <select> did. #}
+    <div class="p-type-grid" role="radiogroup" aria-label="Document type">
       {% for key, dt in doc_types.items() %}
-      <option value="{{ key }}" {% if preselect_type == key %}selected{% endif %}>{{ dt.label }}</option>
+      <label class="p-type-card">
+        <input type="radio" name="doc_type" value="{{ key }}"
+               {% if preselect_type == key or (not preselect_type and loop.first) %}checked{% endif %}>
+        <span class="p-type-label">{{ dt.label }}</span>
+      </label>
       {% endfor %}
-    </select>
+    </div>
     <p class="p-muted p-small" id="docTypeHint"></p>
     {% if open_requests %}
     <label for="request_id">Is this for something the office asked for?</label>
@@ -72,7 +79,7 @@
     {% endfor %}
   </ul>
   {% else %}
-  <p class="p-muted">Nothing yet. When you send a document, it will show up here.</p>
+  <p class="p-muted p-empty">Nothing yet. When you send a document, it will show up here.</p>
   {% endif %}
 </div>
 
@@ -80,10 +87,13 @@
   var hints = {};
   {% for k, dt in doc_types.items() %}hints[{{ k | tojson }}] = {{ dt.hint | tojson }};
   {% endfor %}
-  var sel = document.getElementById('doc_type');
+  var radios = document.querySelectorAll('input[name="doc_type"]');
   var hint = document.getElementById('docTypeHint');
-  function showHint() { hint.textContent = hints[sel.value] || ''; }
-  sel.addEventListener('change', showHint);
+  function showHint() {
+    var checked = document.querySelector('input[name="doc_type"]:checked');
+    hint.textContent = (checked && hints[checked.value]) || '';
+  }
+  radios.forEach(function (r) { r.addEventListener('change', showHint); });
   showHint();
 </script>
 {% endblock %}

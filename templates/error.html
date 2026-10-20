@@ -2,7 +2,7 @@
 {% from "_icons.html" import icon %}
 {% block title %}Error {{ code }} — Case Management{% endblock %}
 {% block content %}
-<div class="empty-state">
+<div class="empty-state empty-stack">
   <div class="empty-icon">{{ icon('alert', 30) }}</div>
   <h2>{{ code }}</h2>
   <p>{{ message }}</p>

@@ -4,7 +4,7 @@
 {% set _rc = none %}
 {% if account is defined and account and account.id is defined %}{% set _rc = account.id %}
 {% elif unreconciled is defined and unreconciled %}{% set _rc = unreconciled[0].id %}{% endif %}
-<div class="tabs">
+<div class="tabs pill-tabs">
   <a href="{{ url_for('accounting_overview') }}" class="{% if active_tab == 'overview' %}active{% endif %}">Overview</a>
   <a href="{{ url_for('op_txn_list') }}" class="{% if active_tab == 'transactions' %}active{% endif %}">Transactions</a>
   <a href="{{ url_for('coa_list') }}" class="{% if active_tab == 'coa' %}active{% endif %}">Chart of Accounts</a>

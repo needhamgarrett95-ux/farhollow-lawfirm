@@ -29,13 +29,13 @@
       <td>{{ c.last_name }}, {{ c.first_name }}</td>
       <td>{{ c.phone or '—' }}</td>
       <td>{{ c.email or '—' }}</td>
-      <td><a href="{{ url_for('client_detail', client_id=c.id) }}">Open</a></td>
+      <td><a class="row-action" href="{{ url_for('client_detail', client_id=c.id) }}">Open</a></td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}
-<div class="empty-state">
+<div class="empty-state empty-stack">
   <div class="empty-icon">{{ icon('clients', 28) }}</div>
   <h2>No clients yet</h2>
   <p class="muted">Add your first client to get started. You only need a name — the rest can come later.</p>

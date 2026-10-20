@@ -23,7 +23,7 @@
       <td>{{ a.bank_name or '—' }}</td>
       <td>{{ a.client_count }}</td>
       <td><strong>${{ a.balance_cents|cents }}</strong></td>
-      <td class="nowrap"><a href="{{ url_for('trust_account_detail', account_id=a.id) }}">Open</a></td>
+      <td class="nowrap"><a class="row-action" href="{{ url_for('trust_account_detail', account_id=a.id) }}">Open</a></td>
     </tr>
   {% endfor %}
   </tbody>
@@ -34,7 +34,7 @@
   <a href="{{ url_for('trust_three_way') }}" class="btn">Three-way reconciliation report</a>
 </div>
 {% else %}
-<div class="empty-state mini">
+<div class="empty-state empty-stack mini">
   <div class="empty-icon">{{ icon('trust', 22) }}</div>
   <h3>No trust accounts yet</h3>
   <p>Create one to start tracking client funds.</p>

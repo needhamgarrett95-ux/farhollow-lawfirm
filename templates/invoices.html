@@ -19,13 +19,13 @@
       <td class="nowrap">{{ i.due_date or '—' }}</td>
       <td>${{ '%.2f'|format(i.total) }}</td>
       <td><span class="badge badge-{{ 'active' if i.status == 'paid' else 'pending' if i.status in ('sent','overdue') else 'closed' }}">{{ i.status }}</span></td>
-      <td><a href="{{ url_for('invoice_detail', invoice_id=i.id) }}">Open</a></td>
+      <td><a class="row-action" href="{{ url_for('invoice_detail', invoice_id=i.id) }}">Open</a></td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}
-<div class="empty-state">
+<div class="empty-state empty-stack">
   <div class="empty-icon">{{ icon('billing', 28) }}</div>
   <h2>No invoices yet</h2>
   <p class="muted">Create your first invoice from a client's unbilled time.</p>

@@ -64,10 +64,10 @@
   </div>
 </div>
 
-<div class="detail-card">
-  <h2>Notes</h2>
-  <p class="pre">{{ client.notes or '—' }}</p>
-</div>
+{# Notes — ONE system (v2.7.0): the quick-notes timeline, with the old
+   static notes field pinned at the top as the Original intake note. #}
+{% from "_notes.html" import notes_section %}
+{{ notes_section(notes, 'client', client.id, legacy_note=client.notes) }}
 
 <h2>Cases</h2>
 <div class="page-head" style="margin-bottom: 8px;">
@@ -84,13 +84,13 @@
       <td>{{ c.title }}</td>
       <td>{{ c.case_type|capitalize }}</td>
       <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
-      <td>{% if perms.get('view_cases') %}<a href="{{ url_for('case_detail', case_id=c.id) }}">Open</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{% if perms.get('view_cases') %}<a class="row-action" href="{{ url_for('case_detail', case_id=c.id) }}">Open</a>{% else %}<span class="muted">—</span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}
-<div class="empty-state mini">
+<div class="empty-state empty-stack mini">
   <div class="empty-icon">{{ icon('cases', 22) }}</div>
   <h3>No cases yet</h3>
   <p>Cases opened for this client will appear here.</p>
@@ -199,8 +199,4 @@
   </ul>
   {% endif %}
 </div>
-
-{# Quick notes (v2.4.1) #}
-{% from "_notes.html" import notes_section %}
-{{ notes_section(notes, 'client', client.id) }}
 {% endblock %}

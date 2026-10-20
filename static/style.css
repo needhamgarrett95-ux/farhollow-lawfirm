@@ -1658,3 +1658,196 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
   .p-grid .p-card { margin: 0; }
   .p-bubble { max-width: 65%; }
 }
+
+/* ============================================================
+   v2.7.0 — MOBILE PAGE REDESIGN + NOTES UNIFICATION
+   Garrett's phone-testing verdict on v2.5.2: the nav chrome was
+   redesigned but the PAGES were still desktop pages squeezed into
+   a phone — side-scrolling sub-nav strips, underlined text posing
+   as buttons, form fields escaping the right edge, squished empty
+   states, and TWO notes systems on the client page.
+   Everything below is either (a) new markup hooks, or (b) inside
+   the <=768px query. Desktop rendering above this line is
+   untouched.
+   ============================================================ */
+
+/* --- Notes unification (all viewports — structural change):
+   the record's original static notes field now renders as a pinned
+   entry at the top of the one quick-notes timeline. --- */
+.note-legacy {
+  background: var(--surface-soft); border-radius: 10px;
+  padding: 10px 12px 12px; margin-bottom: 14px;
+}
+.note-legacy .note-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* --- Portal upload type picker: big tappable radio cards
+   (new component in v2.7.0; replaces the cramped <select>). --- */
+.p-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 2px; }
+.p-type-grid .p-type-card {
+  display: flex; align-items: center; gap: 9px; margin: 0;
+  border: 1.5px solid var(--input-border); border-radius: 12px;
+  padding: 12px; background: var(--input-bg); cursor: pointer;
+  font-weight: 600; font-size: 14.5px; line-height: 1.3; min-height: 52px;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.p-type-card input[type="radio"] { width: 20px; height: 20px; accent-color: var(--navy); flex: none; margin: 0; }
+.p-type-card:has(input:checked) {
+  border-color: var(--brand); background: var(--surface-soft);
+  box-shadow: 0 0 0 1px var(--brand);
+}
+.p-type-grid .p-type-card:last-child:nth-child(odd) { grid-column: span 2; }
+
+@media (max-width: 768px) {
+  /* -- 0. Gutters + no-wide-page backstop (real fixes below;
+        this only catches stragglers) -- */
+  main.container { padding-left: 16px; padding-right: 16px; overflow-x: clip; }
+  .dash-main { overflow-x: clip; }
+  .p-main { overflow-x: clip; }
+
+  /* -- 1. Sub-navigation: a WRAPPING GRID of pill buttons.
+        Every item visible, nothing scrolls sideways, ever.
+        Kills the old .tabs { overflow-x: auto } strips. -- */
+  .tabs {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    overflow: visible; border-bottom: none; margin-bottom: 16px;
+  }
+  .tabs a {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    flex: 1 1 auto; min-height: 44px; padding: 10px 14px; margin-bottom: 0;
+    background: var(--card); border: 1.5px solid var(--border); border-radius: 999px;
+    color: var(--text); font-weight: 600; white-space: normal; text-align: center;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  }
+  .tabs a.active {
+    background: var(--brand); border-color: var(--brand); color: #fff; margin-bottom: 0;
+  }
+  .tabs a.active .tab-badge { background: rgba(255, 255, 255, .25); color: #fff; }
+  /* Timeclock view switcher wraps the same way */
+  .view-tabs { display: flex; flex-wrap: wrap; width: 100%; }
+  .view-tab {
+    flex: 1 1 auto; justify-content: center; min-height: 44px;
+    white-space: normal; text-align: center;
+  }
+  /* Segmented selectors stretch full-width, segments share the row */
+  .seg { display: flex; width: 100%; }
+  .seg-btn { flex: 1 1 auto; min-height: 44px; white-space: normal; }
+
+  /* -- 2. Actions are buttons, not underlined text -- */
+  .m-action, .row-action {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 40px; padding: 8px 16px; margin: 2px 0;
+    background: var(--surface-soft); border: 1.5px solid var(--border);
+    border-radius: 999px; color: var(--navy);
+    font-weight: 600; font-size: 14px; text-decoration: none;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  }
+  .m-action:active, .row-action:active { background: var(--surface-hover); }
+  .alert .m-action { margin: 6px 0 2px; }
+  /* .btn-link (a real <button> styled as a bare link) becomes a pill */
+  .btn-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1.5px solid var(--border); background: var(--card); color: var(--navy);
+    border-radius: 999px; padding: 8px 14px; min-height: 40px;
+    text-decoration: none; box-shadow: none;
+  }
+  .btn-link:hover { text-decoration: none; background: var(--surface-hover); transform: none; }
+
+  /* -- 3. Forms stay on the screen -- */
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .form-grid .span2 { grid-column: span 1; }
+  .form-grid > *, .upload-row > *, .compose-row > *, .search-row > *,
+  .portal-review-form > *, .portal-request-form > *, .child-form > *,
+  .detail-grid > * { min-width: 0; }
+  form input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="submit"]),
+  form select, form textarea { max-width: 100%; min-width: 0; }
+  input[type="date"], input[type="time"], input[type="file"] { max-width: 100%; min-width: 0; }
+  /* 16px inputs across the whole phone band (stops iOS focus zoom);
+     same exclusions as the established v2.4 rule at <=700px. */
+  input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=submit]):not([type=file]),
+  select, textarea { font-size: 16px; }
+  .upload-row { flex-direction: column; align-items: stretch; }
+  .upload-row label { width: 100%; }
+  .search-row { flex-direction: column; align-items: stretch; }
+  .form-actions { flex-direction: column; align-items: stretch; }
+  .form-actions .btn { justify-content: center; text-align: center; min-height: 48px; }
+  /* Long forms: the action bar sticks just above the capsule nav
+     while scrolling, and settles at the end of the form. */
+  .form-card .form-actions {
+    position: sticky; bottom: calc(100px + env(safe-area-inset-bottom, 0px));
+    background: var(--card); border-top: 1px solid var(--line);
+    padding: 12px 0 8px; margin-top: 20px; z-index: 5;
+  }
+
+  /* -- 4. Tables become stacked cards across the full phone band
+        (extends the <=700px card layout to 768px; replaces the
+        701–768px side-scrolling table rule). Labels come from the
+        base.html JS that stamps data-label from <th> text. -- */
+  .table thead { display: none; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table { background: none; box-shadow: none; border: none; border-radius: 0; overflow: visible; }
+  .table tr {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; margin-bottom: 12px; padding: 6px 0;
+    box-shadow: var(--shadow-card);
+  }
+  .table tbody tr:hover { background: var(--card); }
+  .table td {
+    border: none; border-bottom: 1px solid var(--line);
+    padding: 10px 14px; min-height: 0;
+  }
+  .table td:last-child { border-bottom: none; }
+  .table td::before {
+    content: attr(data-label);
+    display: block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    color: var(--muted); margin-bottom: 2px;
+  }
+  .table td:not([data-label])::before,
+  .table td[data-label=""]::before,
+  .table td.no-label::before { display: none; }
+  .table tr.row-urgent { background: var(--error-bg); border-color: var(--error-border); }
+  /* Row actions sit as a button row at the foot of the card */
+  .table td .row-action { margin: 2px 6px 2px 0; }
+
+  /* -- 5. Empty states: one vertical centered stack -- */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 34px 20px;
+  }
+  .empty-state .empty-icon { flex: none; margin: 0 0 14px; }
+  .empty-state h2, .empty-state h3 { margin: 0 0 8px; }
+  .empty-state p { margin: 0 auto 18px; max-width: 36ch; }
+  .empty-state .btn { align-self: center; margin-top: 0; }
+
+  /* -- 6. Page chrome: heads stack, actions go full-width -- */
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-head > div { display: flex; flex-wrap: wrap; gap: 8px; }
+  .page-head > div .btn, .page-head > .btn {
+    flex: 1 1 auto; justify-content: center; min-height: 44px;
+  }
+  .detail-card { padding: 16px; }
+  /* Stat rows: two-up grid; an odd last stat spans the row */
+  .stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat-row .stat:last-child:nth-child(odd) { grid-column: span 2; }
+
+  /* -- 7. Portal pages: the same rules through the client door -- */
+  .p-form input, .p-form select, .p-form textarea,
+  .p-composer textarea, .p-composer input[type="file"] {
+    font-size: 16px; max-width: 100%; min-width: 0;
+  }
+  .p-form-actions { flex-direction: column; align-items: stretch; }
+  .p-form-actions .btn { width: 100%; justify-content: center; min-height: 48px; }
+  /* Document/request lists stack instead of squeezing */
+  .p-upload-list li { flex-wrap: wrap; gap: 6px 10px; }
+  .p-upload-main { flex: 1 1 100%; min-width: 0; }
+  .p-case-list li { flex-wrap: wrap; gap: 2px 12px; }
+  .p-case-next { text-align: left; }
+  .p-checklist li { gap: 10px; }
+  .p-checklist li .btn { flex: none; }
+  /* Portal empty states stack like the staff ones */
+  .p-empty, .p-chat-empty { text-align: center; padding: 16px 6px; }
+  /* Staff-side portal review forms go full-width single column */
+  .portal-review-form { flex-direction: column; align-items: stretch; }
+  .portal-review-form select, .portal-review-form input[type="text"] { width: 100%; }
+  .portal-review-form .btn { justify-content: center; min-height: 44px; }
+}

@@ -25,7 +25,6 @@
       <dt>Status</dt><dd><span class="badge badge-{{ 'active' if invoice.status == 'paid' else 'pending' if invoice.status in ('sent','overdue') else 'closed' }}">{{ invoice.status }}</span></dd>
       <dt>Total</dt><dd><strong>${{ '%.2f'|format(total) }}</strong></dd>
     </dl>
-    {% if invoice.notes %}<p class="muted small">{{ invoice.notes }}</p>{% endif %}
   </div>
 </div>
 
@@ -86,7 +85,8 @@
 {% endif %}
 {% endif %}
 
-{# Quick notes (v2.4.1) #}
+{# Notes — ONE system (v2.7.0): the quick-notes timeline, with the
+   invoice's original notes field pinned as the Original intake note. #}
 {% from "_notes.html" import notes_section %}
-{{ notes_section(notes, 'invoice', invoice.id) }}
+{{ notes_section(notes, 'invoice', invoice.id, legacy_note=invoice.notes) }}
 {% endblock %}

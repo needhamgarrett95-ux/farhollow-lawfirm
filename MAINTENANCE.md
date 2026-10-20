@@ -1531,3 +1531,73 @@ know both doors are open before you invite the second side.
 - The portal must only ever be reachable through the firm's private
   network or its secure remote-access setup — never publish the
   server's port directly on the open internet.
+
+## 49. Phone pages redesigned + one notes system (v2.7.0)
+
+The phone view (§47) gave the app a phone-shaped frame; this update
+redesigns the **pages inside it**, after real phone testing found
+desktop habits still showing through. Everything here is
+presentation — no buttons moved house, nothing works differently.
+Desktop screens are unchanged.
+
+**Sub-navigation never scrolls sideways.** The tab strips (Accounting's
+Overview / Transactions / Chart of Accounts / Reports / Reconcile /
+Employees / Payroll / Tax Settings, the case page tabs, the Cases
+Active/Pending/Closed filter, the Timeclock Week/Day switch) used to
+be a one-line strip you dragged sideways — and it could shift up and
+down while you dragged. On a phone they are now a **grid of pill
+buttons** that wraps onto as many rows as it needs: every choice is
+visible at once, the one you're on is filled in navy, and each pill is
+a full finger tall. If you ever see a page you have to scroll
+sideways on a phone, that's a bug — tell whoever maintains this.
+
+**Buttons look like buttons.** Standalone actions that used to be
+plain underlined text (the **Reconcile now** links in the yellow
+"accounts not yet reconciled" box are the photographed example, plus
+the **Open** / **Ledger** / **Reverse** links at the end of table
+rows, and the dashboard's Review / Inbox shortcuts) are now proper
+pill buttons on phones. Names inside a sentence that simply take you
+somewhere (a client name, a case number) are still ordinary links —
+only things that *do* something became buttons.
+
+**Forms stay on the screen.** Form fields used to be able to escape
+the right edge of the phone (the invoice date fields were caught
+doing it). Now: forms are one column on phones, every field is held
+inside the screen, text in fields is sized so the iPhone doesn't
+zoom in when you tap, and on long forms (invoice, client, case,
+employee) the save buttons **stick just above the bottom bar** while
+you scroll, so they're always in reach, then settle at the bottom
+of the form when you arrive.
+
+**Lists are cards on phones.** Every list — clients, cases, invoices,
+transactions, trust ledgers, employees, users, documents, the audit
+log — renders as stacked cards instead of a squeezed table: each
+field shows with its label, and the row's actions sit at the foot of
+the card as buttons. Nothing needs sideways scrolling. (Between
+701–768px wide the old side-scrolling table is gone too — cards all
+the way.) Empty pages ("No transactions yet" and friends) now stack
+their icon, words, and button in one neat centered column instead of
+squeezing side by side.
+
+**One notes system (this one is on every screen, not just phones).**
+Client, case, and invoice pages used to have **two** notes areas: a
+"Notes" box near the top that showed the note typed when the record
+was first created — often just a dash — and couldn't be added to, and
+the real notes timeline further down. They are now **one** section:
+the timeline, with its **Add note** button. The old original note
+hasn't gone anywhere: if the record had one, it sits pinned at the
+top of the timeline labeled **Original intake note**, word for word
+as it was written. To change that original note, edit it in the
+record's Edit form as before — it stays pinned in the timeline.
+
+**The client portal follows the same rules.** Portal pages were
+checked against every rule above: no sideways scrolling anywhere, no
+scrolling tab strips (its capsule bar already complied), form fields
+held on-screen at 16px with full-width buttons, document and case
+lists stack instead of squeezing, and empty states stack like the
+staff side. One visible improvement: the **"What kind of document
+is it?"** picker on the client's Documents page is no longer a
+dropdown — it's a grid of **big tappable cards** (Photo ID, Pay
+stubs, Tax return, and so on), each with its own radio circle, made
+to be hit one-handed on a phone. It files the document exactly the
+same way the dropdown did.

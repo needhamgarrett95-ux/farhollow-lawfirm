@@ -30,7 +30,7 @@
     {% else %}
     <p class="muted">Never reconciled. <strong>Reconcile monthly — this is not optional (RPC 1.15A).</strong></p>
     {% endif %}
-    {% if perms.get('manage_trust') %}<p><a href="{{ url_for('trust_reconcile', account_id=account.id) }}">Reconcile this account {{ icon("chevron-right", 16) }}</a></p>{% endif %}
+    {% if perms.get('manage_trust') %}<p><a class="m-action" href="{{ url_for('trust_reconcile', account_id=account.id) }}">Reconcile this account {{ icon("chevron-right", 16) }}</a></p>{% endif %}
   </div>
 </div>
 
@@ -44,15 +44,15 @@
       <td>{{ c.first_name }} {{ c.last_name }}</td>
       <td><strong>${{ c.bal|cents }}</strong></td>
       <td class="nowrap">
-        <a href="{{ url_for('trust_client_ledger', client_id=c.client_id) }}">Ledger</a> ·
-        {% if perms.get('manage_trust') %}<a href="{{ url_for('trust_transaction_new', account_id=account.id, client_id=c.client_id) }}">New transaction</a>{% endif %}
+        <a class="row-action" href="{{ url_for('trust_client_ledger', client_id=c.client_id) }}">Ledger</a> ·
+        {% if perms.get('manage_trust') %}<a class="row-action" href="{{ url_for('trust_transaction_new', account_id=account.id, client_id=c.client_id) }}">New transaction</a>{% endif %}
       </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}
-<div class="empty-state mini">
+<div class="empty-state empty-stack mini">
   <div class="empty-icon">{{ icon('billing', 22) }}</div>
   <h3>No client funds yet</h3>
   <p>Record a deposit and client funds will show up here.</p>
@@ -72,13 +72,13 @@
       <td>{{ t.description }}{% if t.reference %}<br><span class="muted small">Ref: {{ t.reference }}</span>{% endif %}</td>
       <td class="nowrap">${{ t.amount_cents|cents }}</td>
       <td class="muted small">{{ t.created_by_name or '—' }}</td>
-      <td class="nowrap">{% if perms.get('manage_trust') %}<a href="{{ url_for('trust_transaction_new', account_id=account.id, client_id=t.client_id, reverse_id=t.id) }}">Reverse</a>{% endif %}</td>
+      <td class="nowrap">{% if perms.get('manage_trust') %}<a class="row-action" href="{{ url_for('trust_transaction_new', account_id=account.id, client_id=t.client_id, reverse_id=t.id) }}">Reverse</a>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}
-<div class="empty-state mini">
+<div class="empty-state empty-stack mini">
   <div class="empty-icon">{{ icon('billing', 22) }}</div>
   <h3>No transactions yet</h3>
   <p>Deposits and disbursements for this account will appear here.</p>

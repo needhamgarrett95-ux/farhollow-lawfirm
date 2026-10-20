@@ -1,9 +1,12 @@
 {# Quick notes section (v2.4.1) — reusable on client / case / invoice pages.
    Usage: {% from "_notes.html" import notes_section %}
           {{ notes_section(notes, 'client', client.id) }}
-   Notes are append-only; admins (is_admin) get a delete button. #}
+   Notes are append-only; admins (is_admin) get a delete button.
+   v2.7.0: pass legacy_note=<record's old static notes field> and it is
+   pinned at the top of the timeline as the "Original intake note" — the
+   ONE notes system on the page; the old static Notes card is gone. #}
 {% from "_icons.html" import icon %}
-{% macro notes_section(notes, entity_type, entity_id, compact=false) %}
+{% macro notes_section(notes, entity_type, entity_id, compact=false, legacy_note='') %}
 <div class="notes-block {{ 'notes-compact' if compact }}" data-notes-block>
   <div class="notes-head">
     {{ icon('note', 17) }}
@@ -23,8 +26,20 @@
       <button type="submit" class="btn btn-small btn-primary">{{ icon('checkmark', 14) }} Save note</button>
     </div>
   </form>
-  {% if notes %}
+  {% if notes or legacy_note %}
   <div class="notes-timeline">
+    {% if legacy_note %}
+    <div class="note-item note-legacy">
+      <div class="note-dot"></div>
+      <div class="note-body">
+        <div class="note-text">{{ legacy_note }}</div>
+        <div class="note-meta">
+          <span class="badge badge-closed">Original intake note</span>
+          From the original record, kept exactly as written.
+        </div>
+      </div>
+    </div>
+    {% endif %}
     {% for n in notes %}
     <div class="note-item">
       <div class="note-dot"></div>
@@ -44,7 +59,7 @@
     </div>
     {% endfor %}
   </div>
-  {% else %}
+  {% elif not legacy_note %}
   <p class="muted small" style="margin:6px 0 2px">No notes yet — add the first one above.</p>
   {% endif %}
 </div>

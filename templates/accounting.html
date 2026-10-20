@@ -37,7 +37,7 @@
   <ul>
   {% for a in unreconciled %}
     <li>{{ a.name }} — book balance ${{ a.book_cents|cents }}
-      {% if perms.get('manage_accounting') %}— <a href="{{ url_for('op_reconcile', account_id=a.id) }}">Reconcile now</a>{% endif %}</li>
+      {% if perms.get('manage_accounting') %}<a class="m-action" href="{{ url_for('op_reconcile', account_id=a.id) }}">Reconcile now</a>{% endif %}</li>
   {% endfor %}
   </ul>
 </div>
@@ -59,7 +59,7 @@
   </tbody>
 </table>
 {% else %}
-{% if perms.get('manage_accounting') %}<div class="empty-state mini">
+{% if perms.get('manage_accounting') %}<div class="empty-state empty-stack mini">
   <div class="empty-icon">{{ icon('billing', 22) }}</div>
   <h3>No transactions yet</h3>
   <p>Income and expenses you record will show up here.</p>

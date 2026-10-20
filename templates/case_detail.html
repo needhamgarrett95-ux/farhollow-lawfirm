@@ -13,7 +13,7 @@
   </div>
 </div>
 
-<div class="tabs">
+<div class="tabs pill-tabs">
   <a href="{{ url_for('case_detail', case_id=case.id) }}" class="tab {% if active_tab == 'overview' %}active{% endif %}">Overview</a>
   <a href="{{ url_for('case_detail', case_id=case.id, tab='emails') }}" class="tab {% if active_tab == 'emails' %}active{% endif %}">
     {{ icon('mail', 15) }} Emails
@@ -64,7 +64,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="empty-state mini">
+  <div class="empty-state empty-stack mini">
   <div class="empty-icon">{{ icon('mail', 22) }}</div>
   <h3>No emails linked yet</h3>
   <p>New messages matching the client's address or this case number will appear here automatically.</p>
@@ -170,14 +170,10 @@
     <button type="submit" class="btn btn-small btn-primary">Add party</button>
   </form>{% endif %}
 </div>
-
-<div class="detail-card">
-  <h2>Notes</h2>
-  <p class="pre">{{ case.notes or '—' }}</p>
-</div>
 {% endif %}
 
-{# Quick notes timeline (v2.4.1) — append-only #}
+{# Notes — ONE system (v2.7.0): the quick-notes timeline, with the old
+   static notes field pinned at the top as the Original intake note. #}
 {% from "_notes.html" import notes_section %}
-{{ notes_section(notes, 'case', case.id) }}
+{{ notes_section(notes, 'case', case.id, legacy_note=case.notes) }}
 {% endblock %}
