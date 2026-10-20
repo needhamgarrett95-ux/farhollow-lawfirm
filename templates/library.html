@@ -5,7 +5,7 @@
 <div class="page-head">
   <h1>{{ icon('documents', 22) }} Document Library</h1>
 </div>
-<p class="muted">The verified Washington family-law catalog this firm works from. <strong>Common and Uncommon</strong> documents are live in the client portal as guided wizards (clients confirm facts from their profile vault instead of retyping them). Rare entries are catalog-only in this release and are <strong>not</strong> client-facing. Catalog verified October 2026 against the Washington Courts forms list; see <code>docs/FORM_CATALOG.md</code>. Nothing a client completes files itself — every wizard output is a staff-reviewed draft.</p>
+<p class="muted">The verified Washington family-law catalog this firm works from. <strong>Common, Uncommon, and (since v2.10.0) most Rare</strong> documents are live in the client portal as guided wizards (clients confirm facts from their profile vault instead of retyping them). The few entries still marked <strong>catalog only</strong> say why, right in their row — a court order the client never completes, a form number still unverified, or a case type with no state form where the office drafts from an intake sheet instead. Usage figures under each live document are counted from real portal submissions (drafts &ldquo;stall&rdquo; at the step a draft was last left on). Catalog verified October 2026 against the Washington Courts forms list; see <code>docs/FORM_CATALOG.md</code>. Nothing a client completes files itself — every wizard output is a staff-reviewed draft.</p>
 
 <div class="detail-card">
   <h2>Guided checklists (scenario packets)</h2>
@@ -92,8 +92,12 @@
           {% if e.implemented %}
             {% if e.enabled %}<span class="lib-on">Available</span>{% if submitted_counts.get(e.wizard) %} · <a href="{{ url_for('portal_review') }}">{{ submitted_counts[e.wizard] }} awaiting review</a>{% endif %}
             {% else %}<span class="muted">Switched off</span>{% endif %}
+            {% set st = wizard_stats.get(e.wizard) %}
+            <br><span class="lib-stats">{% if st and st.started %}Started {{ st.started }} · sent to office {{ st.submitted }} · added to file {{ st.imported }}{% if st.stall_label %} · drafts stall at &ldquo;{{ st.stall_label }}&rdquo; ({{ st.stall_count }} draft{{ 's' if st.stall_count != 1 }}){% endif %}{% if st.avg_sections_pct is not none %} · clients fill ~{{ st.avg_sections_pct }}% of sections{% endif %}{% else %}No portal data yet{% endif %}</span>
+          {% elif e.catalog_only_reason %}
+            <span class="muted">Catalog only — {{ e.catalog_only_reason }}</span>
           {% else %}
-            <span class="muted">In a later release</span>
+            <span class="muted">Catalog only</span>
           {% endif %}
         </td>
         <td>

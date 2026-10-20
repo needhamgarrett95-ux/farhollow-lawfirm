@@ -6,8 +6,8 @@ Tests for v2.9.0 — Scenario Packets + Uncommon Tier.
     references live material (wizard step -> implemented catalog
     entry with a wizard def; upload step -> a real portal doc type;
     info step -> real guidance text); every packet carries the exact
-    COMPLIANCE guidance line; 17 implemented entries (9 common +
-    8 uncommon); the Modify numbers are right (501 = support,
+    COMPLIANCE guidance line; 25 implemented entries (11 common +
+    9 uncommon + 5 rare, v2.10.0); the Modify numbers are right (501 = support,
     601 = parenting plan) and the Acknowledgment of Parentage is
     DOH 422-159 (303 is the Residential Schedule).
   * Assignment flow: staff assign from the client record AND from
@@ -206,10 +206,14 @@ for p in fl.PACKET_DEFS.values():
             bad.append((p["slug"], st["type"]))
 check("every packet step references live material", not bad, str(bad))
 impl = [e for e in fl.LIBRARY if e["implemented"]]
-check("17 entries implemented (9 common + 8 uncommon)",
-      len(impl) == 17
-      and sum(1 for e in impl if e["tier"] == "common") == 9
-      and sum(1 for e in impl if e["tier"] == "uncommon") == 8)
+# v2.10.0 expectation update: 25 implemented after the library
+# completed (11 common + 9 uncommon + 5 rare).
+check("25 entries implemented (11 common + 9 uncommon + 5 rare, "
+      "v2.10.0)",
+      len(impl) == 25
+      and sum(1 for e in impl if e["tier"] == "common") == 11
+      and sum(1 for e in impl if e["tier"] == "uncommon") == 9
+      and sum(1 for e in impl if e["tier"] == "rare") == 5)
 NEW_KEYS = {"response_marriage", "relocation_notice",
             "relocation_objection", "modify_parenting",
             "modify_support", "parentage_petition",

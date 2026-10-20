@@ -174,13 +174,17 @@ def vault_fact(key):
 # ----------------------------------------------------------------------------
 def _e(slug, number, title, tier, scenarios, completable, vault=(),
        source_url=FORMS_INDEX_URL, verified=True, implemented=False,
-       wizard=None, note=""):
+       wizard=None, note="", catalog_only_reason=""):
     return {
         "slug": slug, "form_number": number, "title": title,
         "tier": tier, "scenarios": list(scenarios),
         "completable": completable, "vault_fields": list(vault),
         "source_url": source_url, "verified": verified,
         "implemented": implemented, "wizard": wizard, "note": note,
+        # v2.10.0: why an entry has no portal wizard, in plain terms
+        # for the staff library view. Every catalog-only entry should
+        # carry one — "no wizard yet" is a decision, not an omission.
+        "catalog_only_reason": catalog_only_reason,
     }
 
 
@@ -278,17 +282,27 @@ LIBRARY = [
        "Temporary Parenting Plan", "common", ["temporary_orders"],
        "none"),
     _e("residential-time-summary", "FL Divorce 243", "Residential Time "
-       "Summary Report", "common", ["starting_divorce"], "none"),
+       "Summary Report", "common", ["starting_divorce"], "partial",
+       implemented=True, wizard="residential_time_summary",
+       note="v2.10.0: the wizard confirms the children and the "
+            "overnight counts from the parenting plan; the office "
+            "prepares the summary report from those figures."),
     _e("findings-marriage", "FL Divorce 231", "Findings and Conclusions "
-       "About a Marriage", "common", ["finalizing"], "none",
-       note="Attorney/court document — cataloged so staff see the full "
-            "packet."),
+       "About a Marriage", "common", ["finalizing"], "partial",
+       implemented=True, wizard="final_review",
+       note="Attorney document — v2.10.0: the Final Review wizard "
+            "has the client confirm the facts the findings (and the "
+            "Final Divorce Order, FL Divorce 241) are built from."),
     _e("final-divorce-order", "FL Divorce 241", "Final Divorce Order "
        "(Dissolution Decree) / Legal Separation Order / Invalid "
-       "Marriage Order", "common", ["finalizing"], "none",
+       "Marriage Order", "common", ["finalizing"], "partial",
        note="Legal separation and invalidity ride this same divorce "
             "series (petition, summons, response, findings) — there is "
-            "no separate legal-separation packet."),
+            "no separate legal-separation packet.",
+       catalog_only_reason="No separate wizard: the facts behind this "
+            "order are confirmed in the Final Review wizard (see "
+            "Findings and Conclusions, FL Divorce 231). The attorney "
+            "prepares the order itself for the court's signature."),
     _e("proof-personal-service", "FL All Family 101", "Proof of Personal "
        "Service", "common", ["starting_divorce"], "none"),
     _e("service-accepted", "FL All Family 117", "Service Accepted",
@@ -465,8 +479,13 @@ LIBRARY = [
        "partial"),
     _e("contempt-motion", "FL All Family 165", "Motion for Contempt "
        "Hearing", "uncommon", ["changing_order"], "partial",
+       implemented=True, wizard="contempt",
        note="Number verified as cited in superior-court local rules "
-            "(e.g. Clark County LCR 4.1) for the contempt motion form."),
+            "(e.g. Clark County LCR 4.1) for the contempt motion form. "
+            "v2.10.0: the wizard captures which order was violated, "
+            "how, and when; the attorney prepares the motion — "
+            "contempt has strict proof requirements, so nothing "
+            "here files itself."),
     _e("sealed-health-cover", "FL All Family 012", "Sealed Personal "
        "Health Care Records (Cover Sheet)", "uncommon",
        ["temporary_orders"], "none"),
@@ -488,68 +507,248 @@ LIBRARY = [
        note="Protection orders use the PO series, not 'FL Protect'. "
             "Safety note: a client who needs this needs it NOW — staff "
             "handle protection filings directly and urgently; a "
-            "self-serve wizard is deliberately not the front door."),
+            "self-serve wizard is deliberately not the front door.",
+       catalog_only_reason="Deliberately no self-serve wizard: a "
+            "client who needs a protection order needs staff help "
+            "immediately, not homework. The Protection checklist "
+            "routes them to call the office instead."),
     _e("parentage-immediate-restraining", "FL Parentage 321", "Motion "
        "for Immediate Restraining Order (Ex Parte) (Parentage)", "rare",
-       ["parentage", "protection"], "none"),
+       ["parentage", "protection"], "none",
+       catalog_only_reason="An ex parte motion the attorney files "
+            "(often the same day). There is no client-completed "
+            "portion; the facts come from the client's declaration "
+            "and messages to the office."),
     _e("parentage-temporary-motion", "FL Parentage 323", "Motion for "
        "Temporary Family Law Order and Restraining Order (Parentage)",
-       "rare", ["parentage", "temporary_orders"], "partial"),
+       "rare", ["parentage", "temporary_orders"], "partial",
+       implemented=True, wizard="parentage_temporary",
+       note="v2.10.0: the wizard captures what the client needs "
+            "ordered now in a parentage case; the attorney drafts "
+            "the motion."),
     _e("parentage-temporary-order", "FL Parentage 324", "Temporary "
        "Family Law Order (Parentage)", "rare",
-       ["parentage", "temporary_orders"], "partial"),
+       ["parentage", "temporary_orders"], "partial",
+       catalog_only_reason="This is the order the court signs — no "
+            "client wizard. The facts behind it are captured in the "
+            "FL Parentage 323 wizard and the Parenting Plan wizard; "
+            "the attorney prepares the proposed order."),
     _e("parentage-sexual-assault-allegation", "FL Parentage 365",
        "Sexual Assault Allegation", "rare", ["parentage"], "none",
        note="Filed and served together with FL Parentage 301 when "
             "alleged; handle with the attorney, never as a casual "
-            "portal task."),
+            "portal task.",
+       catalog_only_reason="Handled with the attorney alongside the "
+            "FL Parentage 301 petition, given its sensitivity — "
+            "deliberately not a standalone portal task."),
     _e("relocate-final-ex-parte-motion", "FL Relocate 706", "Ex Parte "
        "Motion for Final Order Changing Parenting Plan — No Objection "
        "to Moving with Children (Relocation)", "rare", ["relocation"],
        "none", verified=False,
        note="Number seen in secondary form catalogs; not yet confirmed "
-            "against the official list."),
+            "against the official list.",
+       catalog_only_reason="An attorney-filed ex parte motion used "
+            "only when a relocation drew no objection — and its form "
+            "number is still unverified. Staff complete it from the "
+            "case file."),
     _e("relocate-final-ex-parte-order", "FL Relocate 707", "Ex Parte "
        "Order on Motion for Final Order Changing Parenting Plan — "
        "Moving with Children (Relocation)", "rare", ["relocation"],
        "none", verified=False,
        note="Number seen in secondary form catalogs; not yet confirmed "
-            "against the official list."),
+            "against the official list.",
+       catalog_only_reason="The court's order on the FL Relocate 706 "
+            "motion — signed by the court, not completed by the "
+            "client. Its number is also still unverified."),
     _e("gal-order", "FL All Family 146", "Order Appointing Guardian Ad "
-       "Litem for Child", "rare", ["starting_divorce"], "none"),
+       "Litem for Child", "rare", ["starting_divorce"], "none",
+       catalog_only_reason="A court-issued appointment order. The "
+            "attorney prepares the motion and proposed order; the "
+            "client has no portion to complete."),
     _e("parenting-evaluator-order", "FL All Family 148", "Order "
        "Appointing Parenting Evaluator/Investigator", "rare",
-       ["starting_divorce"], "none"),
-    _e("visits-petition", "FL Visits 476", "Petition for Visits "
+       ["starting_divorce"], "none",
+       catalog_only_reason="A court-issued appointment order, like "
+            "the Guardian ad Litem order (FL All Family 146) — "
+            "attorney-prepared, nothing for the client to complete."),
+    _e("visits-petition", "—", "Petition for Visits "
        "(Nonparent / Grandparent Visitation, RCW 26.11)", "rare",
        ["parentage"], "partial", verified=False,
-       note="The Visits series exists (post-2021 Chapter 26.11 RCW), "
-            "but this exact number was found only in secondary form "
-            "catalogs — verify against the official list before "
-            "relying on it."),
+       implemented=True, wizard="visits_petition",
+       note="The Visits series exists (post-2021 Chapter 26.11 RCW). "
+            "Secondary form catalogs list a 'FL Visits 476', but that "
+            "number is NOT confirmed against the official list, so "
+            "the registry shows '—' and the office confirms the "
+            "current form before filing. v2.10.0: the wizard is an "
+            "information intake for the attorney's petition — it "
+            "does not present itself as the court form."),
     _e("de-facto-parentage", "—", "De Facto Parentage (RCW 26.26A.440)",
        "rare", ["parentage"], "partial", verified=False,
+       implemented=True, wizard="de_facto_parentage",
        note="No dedicated mandatory state form number verified. "
             "De facto parentage is pleaded through the parentage "
             "series (see FL Parentage 301) — confirm the current "
-            "procedure with the official forms list before use."),
+            "procedure with the official forms list before use. "
+            "v2.10.0: the wizard is an attorney-drafting intake "
+            "sheet and says so, in the portal and on its output."),
     _e("committed-intimate-relationship", "—", "Committed Intimate "
        "Relationship (formerly 'meretricious relationship') — "
        "Complaint/Petition", "rare", ["starting_divorce"], "partial",
        verified=False,
+       implemented=True, wizard="cir_intake",
        note="No mandatory Washington state form verified; these cases "
             "proceed by locally drafted pleading. Cataloged so the "
-            "library shows the gap honestly."),
+            "library shows the gap honestly. v2.10.0: the wizard is "
+            "an attorney-drafting intake sheet and says so, in the "
+            "portal and on its output."),
     _e("qdro-data", "—", "Qualified Domestic Relations Order (QDRO) — "
        "Retirement Division Data Sheet", "rare", ["finalizing"],
        "partial", verified=False,
+       implemented=True, wizard="qdro_intake",
        note="QDROs are drafted per the retirement plan's own "
             "requirements — there is no Washington state QDRO form. "
             "The firm collects the plan data and drafts (or refers) "
-            "the order."),
+            "the order. v2.10.0: the wizard is that data collection "
+            "and says plainly it is not a court form."),
 ]
 
 LIBRARY_BY_SLUG = {e["slug"]: e for e in LIBRARY}
+
+# v2.10.0: NO entry is silently wizard-less. Every entry without a
+# portal wizard carries a plain-language, staff-facing reason (the
+# staff Library view shows it in the Portal column). The rare tier's
+# reasons are written on the entries themselves, where they need
+# fuller context (deliberate safety calls, unverified numbers, court
+# appointment orders). The classes below repeat across the common
+# and uncommon tiers: court-signed orders, service proofs, summonses,
+# and cover sheets are completed by the office — never the client.
+_CATALOG_ONLY_REASONS = {
+    "summons-marriage":
+        "Issued with the filing packet — the office prepares the "
+        "summons from the petition; there is nothing for the client "
+        "to fill in.",
+    "joinder":
+        "A short agreement the respondent signs when they agree "
+        "with the petition as filed — the office prepares it for "
+        "signature; no client data to gather.",
+    "child-support-order":
+        "Court order: the attorney prepares it for the judge's "
+        "signature from the worksheet figures; clients never "
+        "complete the order itself.",
+    "sealed-financial-cover":
+        "Cover sheet the office attaches when filing financial "
+        "source documents — assembled from the case file at filing "
+        "time.",
+    "temp-parenting-info":
+        "Information sheet the office completes from the parenting "
+        "plan already on file when temporary orders are sought.",
+    "proof-personal-service":
+        "Completed and signed by the process server after service "
+        "— the facts are the server's, not the client's.",
+    "service-accepted":
+        "Signed by the person accepting service (or their attorney) "
+        "at the moment of service — handled at the office, not as "
+        "homework.",
+    "proof-mailing":
+        "Completed by whoever mailed or hand-delivered the "
+        "documents (usually the office) at the time it happens.",
+    "notice-of-hearing":
+        "The office notes hearings from the court's calendar and "
+        "files this notice — the dates are the court's, not the "
+        "client's to supply.",
+    "case-cover-sheet":
+        "Clerk's cover sheet the office completes from the case "
+        "file with every new filing.",
+    "response-domestic-partnership":
+        "Registered domestic partnership cases are uncommon for "
+        "this office, and the response is drafted by the attorney "
+        "with the client; the Response wizard covers marriages.",
+    "temporary-order-divorce":
+        "The proposed order itself: the attorney prepares it for "
+        "the judge from the facts the client gives in the Temporary "
+        "Orders wizard.",
+    "immediate-restraining-order":
+        "Emergency ex parte motion — prepared by the attorney with "
+        "the client in person, the same day; never a self-serve "
+        "wizard.",
+    "restraining-order":
+        "Court order signed by the judge; the attorney prepares "
+        "the proposed order from the motion papers.",
+    "fee-waiver-motion":
+        "The attorney files this motion; the client's own "
+        "statement is captured by the Fee Waiver wizard (GR 34).",
+    "fee-waiver-order":
+        "Court order: the judge grants or denies the waiver — the "
+        "office prepares the proposed order for signature.",
+    "public-assistance-declaration":
+        "Short declaration the office completes with the client "
+        "from benefit records when support is calculated.",
+    "notice-address-change":
+        "One-fact form: the office files it from the address the "
+        "client gives us — the client just needs to tell the "
+        "office they moved.",
+    "motion-default":
+        "Attorney motion filed when the other side has not "
+        "responded in time — nothing for the client to complete.",
+    "order-default":
+        "Court order on the default motion; the attorney prepares "
+        "it for the judge's signature.",
+    "military-dependent-notice":
+        "Notice the office completes from the service facts "
+        "already in the case file.",
+    "supervised-visitation-ack":
+        "Signed by the visitation supervisor who accepts the "
+        "supervision terms — not a client document.",
+    "modify-parenting-summons":
+        "Issued with the modification filing packet — the office "
+        "prepares it from the petition; nothing for the client to "
+        "fill in.",
+    "modify-adequate-cause-motion":
+        "Attorney motion: adequate cause is argued from the facts "
+        "in the Modify a Parenting Plan wizard, but the motion "
+        "itself is the attorney's.",
+    "modify-adequate-cause-order":
+        "Court order on adequate cause; the attorney prepares it "
+        "for the judge's signature.",
+    "modify-parenting-final-order":
+        "Final court order and findings — the attorney prepares it "
+        "for the judge from the decided terms.",
+    "modify-temporary-motion":
+        "Attorney motion for temporary relief during a "
+        "modification; the facts ride in with the Modify wizards.",
+    "relocate-objection-summons":
+        "Issued with the objection filing packet — the office "
+        "prepares it from the objection; nothing for the client to "
+        "fill in.",
+    "relocate-prevent-move-motion":
+        "Urgent attorney motion to stop a move before the hearing "
+        "— prepared by the attorney, not as client homework.",
+    "parentage-residential-schedule":
+        "The schedule issues with the court's parentage orders; "
+        "the schedule facts are captured in the Parentage Petition "
+        "wizard.",
+    "parentage-plan-petition":
+        "When a plan is needed after parentage is set, the office "
+        "drafts this petition with the client from the parentage "
+        "file.",
+    "parentage-plan-response":
+        "The response is drafted by the attorney with the client "
+        "from the parentage file.",
+    "sealed-health-cover":
+        "Cover sheet the office attaches when filing health "
+        "records under seal — assembled at filing time.",
+    "sealed-reports-cover":
+        "Cover sheet the office attaches when filing confidential "
+        "reports under seal — assembled at filing time.",
+    "email-service-agreement":
+        "A short consent the parties sign to accept service by "
+        "email — the office prepares it for signature; no data to "
+        "gather.",
+}
+for _entry in LIBRARY:
+    if not _entry["implemented"] and not _entry["catalog_only_reason"]:
+        _entry["catalog_only_reason"] = _CATALOG_ONLY_REASONS[
+            _entry["slug"]]
 
 TIERS = ("common", "uncommon", "rare")
 
@@ -749,7 +948,7 @@ WIZARD_DEFS = {
         "slug": "financial-declaration",
         "title": "Financial Declaration",
         "official": "FL All Family 131",
-        "minutes": 15,
+        "minutes": 13,
         "description": "Your income, expenses, assets, and debts — "
                        "the financial picture the court works from. "
                        "Most of this confirms what you've already told "
@@ -877,7 +1076,7 @@ WIZARD_DEFS = {
         "slug": "confidential-information",
         "title": "Confidential Information Form",
         "official": "FL All Family 001",
-        "minutes": 10,
+        "minutes": 12,
         "description": "The private details the court needs but "
                        "keeps sealed — Social Security numbers, ID "
                        "numbers, account information. Almost all of "
@@ -968,7 +1167,7 @@ WIZARD_DEFS = {
         "slug": "certificate-dissolution",
         "title": "Certificate of Dissolution (Vital Statistics)",
         "official": "DOH 422-027",
-        "minutes": 8,
+        "minutes": 9,
         "description": "The state health department's record of the "
                        "marriage and its end — birth names, birth "
                        "places, and the marriage facts, exactly as "
@@ -1136,7 +1335,7 @@ WIZARD_DEFS = {
         "slug": "parenting-plan",
         "title": "Parenting Plan — Your Proposal",
         "official": "FL All Family 140",
-        "minutes": 20,
+        "minutes": 18,
         "description": "Your proposed plan for the children: where "
                        "they'll live and when, how holidays split, "
                        "who decides what, and how exchanges work. "
@@ -1235,7 +1434,7 @@ WIZARD_DEFS = {
         "slug": "child-support-worksheet",
         "title": "Child Support Worksheet — Your Figures",
         "official": "WSCSS — Worksheets",
-        "minutes": 8,
+        "minutes": 9,
         "description": "Confirm the incomes and children's costs "
                        "the support worksheet runs on. The office "
                        "generates the worksheet from these figures.",
@@ -1298,7 +1497,7 @@ WIZARD_DEFS = {
         "slug": "temporary-orders",
         "title": "Temporary Orders — What You Need Now",
         "official": "FL Divorce 223 / 224",
-        "minutes": 12,
+        "minutes": 13,
         "description": "Temporary orders cover the time between "
                        "now and the final decree: where everyone "
                        "lives, support, time with the children, and "
@@ -1389,7 +1588,7 @@ WIZARD_DEFS = {
         "slug": "response-marriage",
         "title": "Response to the Petition — Your Answers",
         "official": "FL Divorce 211",
-        "minutes": 15,
+        "minutes": 18,
         "description": "You were served with a petition. This walks "
                        "through it topic by topic — what you agree "
                        "with, what you don't, and what you're asking "
@@ -1516,7 +1715,7 @@ WIZARD_DEFS = {
         "slug": "relocate-notice",
         "title": "Notice of Intent to Move — Your Information",
         "official": "FL Relocate 701",
-        "minutes": 12,
+        "minutes": 15,
         "description": "You're planning to move with the children. "
                        "Washington law requires formal written "
                        "notice (FL Relocate 701) — usually at least "
@@ -1598,7 +1797,7 @@ WIZARD_DEFS = {
         "slug": "relocate-objection",
         "title": "Objection to a Move — Your Information",
         "official": "FL Relocate 721",
-        "minutes": 12,
+        "minutes": 14,
         "description": "You received notice that the other parent "
                        "plans to move with the children, and you "
                        "object. Objections have a short statutory "
@@ -1679,7 +1878,7 @@ WIZARD_DEFS = {
         "slug": "modify-parenting-petition",
         "title": "Changing a Parenting Plan — Your Information",
         "official": "FL Modify 601",
-        "minutes": 15,
+        "minutes": 12,
         "description": "You have a parenting plan (or custody "
                        "order) and something substantial has changed. "
                        "This captures what changed and what you're "
@@ -1830,7 +2029,7 @@ WIZARD_DEFS = {
         "slug": "parentage-petition",
         "title": "Petition to Decide Parentage — Your Information",
         "official": "FL Parentage 301",
-        "minutes": 15,
+        "minutes": 14,
         "description": "For parents who weren't married when a "
                        "child was born and don't have a signed "
                        "acknowledgment — a court case (FL Parentage "
@@ -1926,7 +2125,7 @@ WIZARD_DEFS = {
         "slug": "parentage-acknowledgment",
         "title": "Acknowledgment of Parentage — Your Details",
         "official": "DOH 422-159",
-        "minutes": 8,
+        "minutes": 11,
         "description": "The Acknowledgment of Parentage is the "
                        "voluntary form both parents sign so a "
                        "parent is added to the birth certificate — "
@@ -2084,7 +2283,7 @@ WIZARD_DEFS = {
         "slug": "fee-waiver-statement",
         "title": "Fee Waiver — Financial Statement",
         "official": "GR 34.0300",
-        "minutes": 10,
+        "minutes": 11,
         "description": "Court filing fees can be waived for "
                        "people who can't afford them. This is the "
                        "financial statement (GR 34.0300) behind the "
@@ -2166,6 +2365,695 @@ WIZARD_DEFS = {
                   "prompt": "Recent job loss, medical bills, "
                             "caring for a family member — whatever "
                             "explains why the fee is a hardship."},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 18. Contempt — client data capture (FL All Family 165) [v2.10.0]
+    # ------------------------------------------------------------------
+    "contempt": {
+        "key": "contempt",
+        "slug": "contempt-motion",
+        "title": "Contempt — An Order Wasn't Followed",
+        "official": "FL All Family 165",
+        "minutes": 13,
+        "description": "When the other party isn't following a "
+                       "court order — missed support, refused "
+                       "parenting time, property not handed over — "
+                       "contempt is how the court is asked to make "
+                       "them comply. This collects exactly what "
+                       "happened; your attorney prepares the motion "
+                       "(FL All Family 165).",
+        "explainer": "Contempt has strict requirements: the court "
+                     "must find the person knew about the order, "
+                     "could have complied, and didn't. That is why "
+                     "dates and specifics matter so much here — "
+                     "'three times in March' beats 'all the time'. "
+                     "Your attorney reviews everything before "
+                     "anything is filed.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Contempt_Client_Data",
+                     "sheet_note": "Contempt (FL All Family 165) "
+                                   "requires proof the other party "
+                                   "knew the order, was able to "
+                                   "comply, and did not. Review the "
+                                   "client's specifics against the "
+                                   "order before filing."},
+        "steps": [
+            {"title": "The order that wasn't followed",
+             "fields": [
+                 {"name": "order_title", "label": "Name of the "
+                  "order (from the top of its first page)",
+                  "type": "text", "required": True,
+                  "help": "For example: 'Temporary Family Law "
+                          "Order' or 'Order of Child Support'."},
+                 {"name": "order_date", "label": "Date the order "
+                  "was signed", "type": "date", "required": True},
+                 {"name": "order_requires", "label": "What exactly "
+                  "did the order require the other party to do?",
+                  "type": "textarea", "rows": 5, "required": True,
+                  "prompt": "Quote or closely paraphrase the part "
+                            "that was violated — amounts, dates, "
+                            "schedules, deadlines.",
+                  "guidance": "One requirement per paragraph is "
+                              "clearest."},
+             ]},
+            {"title": "What happened",
+             "explainer": "Be specific. The court can only act on "
+                          "violations it can pin to dates and facts.",
+             "fields": [
+                 {"name": "violations", "label": "Each time the "
+                  "order was not followed — what happened, and when",
+                  "type": "textarea", "rows": 7, "required": True,
+                  "prompt": "For example: 'March 3 — support "
+                            "payment of $450 not paid.' 'March 15 — "
+                            "children not returned until 10 p.m. "
+                            "instead of 6 p.m.'",
+                  "guidance": "Missed payments: give the amount due "
+                              "and the amount actually paid, if any."},
+                 {"name": "evidence_notes", "label": "Anything "
+                  "that shows what happened (messages, receipts, "
+                  "witnesses)", "type": "textarea", "rows": 4,
+                  "prompt": "You can upload documents to the office "
+                            "from the Documents area after you send "
+                            "this — note here what you have."},
+                 {"name": "still_ongoing", "label": "Is it still "
+                  "happening?", "type": "radio_cards",
+                  "options": ["Yes — still happening",
+                              "No — it stopped",
+                              "Partly"]},
+             ]},
+            {"title": "What you want the court to do",
+             "fields": [
+                 {"name": "relief", "label": "I'm asking the "
+                  "court to…", "type": "checkboxes",
+                  "options": [
+                      "Order the other party to comply with the "
+                      "order",
+                      "Order make-up parenting time",
+                      "Order payment of what is owed",
+                      "Order the other party to pay my attorney "
+                      "fees for this",
+                      "Something else (explained below)"]},
+                 {"name": "relief_details", "label": "Anything "
+                  "else the office should know", "type": "textarea",
+                  "rows": 4},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 19. Residential Time Summary — confirm flow (FL Divorce 243)
+    # ------------------------------------------------------------------
+    "residential_time_summary": {
+        "key": "residential_time_summary",
+        "slug": "residential-time-summary",
+        "title": "Residential Time Summary — Where the Children Sleep",
+        "official": "FL Divorce 243",
+        "minutes": 12,
+        "description": "The Residential Time Summary (FL Divorce "
+                       "243) turns the parenting plan into overnight "
+                       "counts the court uses — including for child "
+                       "support. Confirm the children and count a "
+                       "typical two weeks; the office prepares the "
+                       "report and the yearly percentages from your "
+                       "numbers.",
+        "explainer": "Count actual overnights in a NORMAL two-week "
+                     "stretch — not holidays or vacations (those go "
+                     "in the last section). If the children's nights "
+                     "are split differently from each other, explain "
+                     "in the notes rather than averaging.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Residential_Time_Summary_Data"},
+        "steps": [
+            {"title": "Your children",
+             "explainer": "Confirm the children covered by the "
+                          "parenting plan.",
+             "fields": [dict(CHILDREN_REPEATER)]},
+            {"title": "A typical two weeks",
+             "explainer": "Out of every 14 nights, where do the "
+                          "children sleep? The two numbers should "
+                          "usually add up to 14.",
+             "fields": [
+                 {"name": "overnights_you", "label": "Nights at "
+                  "YOUR home (out of 14)", "type": "select",
+                  "required": True,
+                  "options": [str(i) for i in range(15)]},
+                 {"name": "overnights_other", "label": "Nights at "
+                  "the OTHER parent's home (out of 14)",
+                  "type": "select", "required": True,
+                  "options": [str(i) for i in range(15)]},
+                 {"name": "overnights_notes", "label": "Anything "
+                  "that doesn't fit the two numbers (split "
+                  "siblings, a third home, rotating schedules)",
+                  "type": "textarea", "rows": 4},
+             ]},
+            {"title": "Holidays, breaks, and coming changes",
+             "fields": [
+                 {"name": "holiday_split", "label": "How are "
+                  "holidays and school breaks usually split?",
+                  "type": "textarea", "rows": 4,
+                  "prompt": "For example: 'We alternate Thanksgiving "
+                            "and spring break; Christmas is split "
+                            "in half each year.'"},
+                 {"name": "changes_expected", "label": "Anything "
+                  "scheduled to change (a move, a new school, a new "
+                  "work schedule)?", "type": "textarea", "rows": 3},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 20. Final Review — facts behind the Findings & Final Order
+    #     (FL Divorce 231 / 241) [v2.10.0]
+    # ------------------------------------------------------------------
+    "final_review": {
+        "key": "final_review",
+        "slug": "findings-marriage",
+        "title": "Final Review — Confirm Your Case Facts",
+        "official": "FL Divorce 231 / 241",
+        "minutes": 15,
+        "description": "Before your case can finish, your attorney "
+                       "prepares the Findings (FL Divorce 231) and "
+                       "the Final Divorce Order (FL Divorce 241) "
+                       "from the facts on your file. This is your "
+                       "chance to confirm every one of those facts — "
+                       "and to flag anything that's changed — before "
+                       "the final documents are drafted.",
+        "explainer": "Final orders are hard to change once signed, "
+                     "so read like a proofreader: names spelled "
+                     "right, dates right, the property and support "
+                     "figures the ones you agreed to. Anything marked "
+                     "'changed' is reviewed by the office with you — "
+                     "nothing is overwritten automatically.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Final_Review_Client_Data",
+                     "sheet_note": "Attorney documents: the Findings "
+                                   "(FL Divorce 231) and Final "
+                                   "Divorce Order (FL Divorce 241) "
+                                   "are prepared from these client-"
+                                   "confirmed facts. This sheet is "
+                                   "the confirmation record, not a "
+                                   "court document."},
+        "steps": [
+            {"title": "Names and the marriage",
+             "explainer": "Exactly as they should appear in the "
+                          "final order.",
+             "fields": [
+                 {"name": "spouse_name", "label": "The other "
+                  "party's full legal name", "type": "text",
+                  "vault": "spouse.name",
+                  "target": ("client", "spouse_name")},
+                 {"name": "marriage_date", "label": "Date of "
+                  "marriage", "type": "date", "vault": "marriage.date",
+                  "target": ("vault", "marriage.date")},
+                 {"name": "marriage_place", "label": "Place of "
+                  "marriage (city, state)", "type": "text",
+                  "vault": "marriage.place",
+                  "target": ("vault", "marriage.place")},
+                 {"name": "separation_date", "label": "Date of "
+                  "separation", "type": "date",
+                  "vault": "separation.date",
+                  "target": ("vault", "separation.date")},
+             ]},
+            {"title": "Your children",
+             "fields": [dict(CHILDREN_REPEATER)]},
+            {"title": "Property, debts, and support figures",
+             "explainer": "These are the figures the final order "
+                          "will use. If the two of you reached an "
+                          "agreement, this is where you confirm it "
+                          "matches.",
+             "fields": [
+                 {"name": "assets_notes", "label": "Assets — what "
+                  "there is and who keeps what", "type": "textarea",
+                  "rows": 4, "vault": "notes.assets",
+                  "target": ("financial", "assets_notes")},
+                 {"name": "debts_notes", "label": "Debts — what is "
+                  "owed and who pays it", "type": "textarea",
+                  "rows": 4, "vault": "notes.debts",
+                  "target": ("financial", "debts_notes")},
+                 {"name": "client_gross_income", "label": "Your "
+                  "monthly GROSS income ($)", "type": "money",
+                  "vault": "income.client_gross",
+                  "target": ("financial", "client_gross_income")},
+                 {"name": "client_net_income", "label": "Your "
+                  "monthly NET (take-home) income ($)",
+                  "type": "money", "vault": "income.client_net",
+                  "target": ("financial", "client_net_income")},
+                 {"name": "other_parent_net_income", "label": "The "
+                  "other parent's monthly NET income ($)",
+                  "type": "money", "vault": "income.other_parent_net",
+                  "target": ("financial", "other_parent_net_income")},
+                 {"name": "division_ok", "label": "Do the property, "
+                  "debt, and support figures above match what was "
+                  "agreed or ordered?", "type": "radio_cards",
+                  "required": True,
+                  "options": [
+                      "Yes — this matches",
+                      "Mostly — I noted a change below",
+                      "No — this needs discussion before anything "
+                      "is finalized"]},
+                 {"name": "division_changes", "label": "Anything "
+                  "that changed, or that doesn't match",
+                  "type": "textarea", "rows": 4},
+             ]},
+            {"title": "Final details",
+             "fields": [
+                 {"name": "name_change_final", "label": "If you are "
+                  "restoring a former name in the final order, type "
+                  "it EXACTLY as it should appear", "type": "text",
+                  "help": "Leave blank if you're keeping your "
+                          "current name."},
+                 {"name": "anything_else", "label": "Anything the "
+                  "office must fix or check before your case is "
+                  "finalized?", "type": "textarea", "rows": 4},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 21. Temporary orders in a parentage case (FL Parentage 323)
+    # ------------------------------------------------------------------
+    "parentage_temporary": {
+        "key": "parentage_temporary",
+        "slug": "parentage-temporary-motion",
+        "title": "Temporary Orders in a Parentage Case",
+        "official": "FL Parentage 323",
+        "minutes": 11,
+        "description": "While a parentage case is pending, the "
+                       "court can make temporary orders — parenting "
+                       "time, child support, and restraints. Tell "
+                       "us what you need now; the office prepares "
+                       "the motion (FL Parentage 323).",
+        "explainer": "Temporary orders keep life stable while the "
+                     "case runs. If you need help immediately for "
+                     "safety, call the office rather than waiting "
+                     "on this form.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Parentage_Temporary_Client_Data"},
+        "steps": [
+            {"title": "Your children",
+             "fields": [dict(CHILDREN_REPEATER)]},
+            {"title": "What do you need the court to order now?",
+             "fields": [
+                 {"name": "needs", "label": "I need the court to…",
+                  "type": "checkboxes",
+                  "options": [
+                      "Set a temporary parenting-time schedule",
+                      "Order temporary child support",
+                      "Decide who the children live with for now",
+                      "Restrain the other parent from contacting "
+                      "or coming near me or the children",
+                      "Order genetic testing be completed",
+                      "Something else (explained below)"]},
+                 {"name": "schedule_now", "label": "What is the "
+                  "children's schedule like right now, and what "
+                  "schedule are you asking for?", "type": "textarea",
+                  "rows": 5, "required": True},
+                 {"name": "support_now", "label": "Anything about "
+                  "support the court should know (income, who "
+                  "pays for what now)", "type": "textarea",
+                  "rows": 4},
+             ]},
+            {"title": "Safety and anything urgent",
+             "fields": [
+                 {"name": "safety", "label": "Any safety concerns "
+                  "or urgent matters?", "type": "textarea",
+                  "rows": 5,
+                  "guidance": "Leave blank if none. If anyone is "
+                              "in danger now, call 911 or the "
+                              "office — don't wait on this form."},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 22. Nonparent / grandparent visits intake (RCW 26.11) [v2.10.0]
+    #     Information intake for an attorney-drafted petition. The
+    #     registry carries the unverified 'FL Visits 476' lead in the
+    #     entry note only — this wizard never presents a form number
+    #     as settled.
+    # ------------------------------------------------------------------
+    "visits_petition": {
+        "key": "visits_petition",
+        "slug": "visits-petition",
+        "title": "Visits with a Child — Information for the Office",
+        "official": "RCW 26.11",
+        "minutes": 15,
+        "description": "Washington law (RCW 26.11) lets a "
+                       "grandparent or another adult with a real "
+                       "parent-like relationship ask the court for "
+                       "visits with a child. These cases are fact-"
+                       "heavy and the office prepares the petition "
+                       "for you — this collects the information the "
+                       "attorney needs to start.",
+        "explainer": "The court looks for a genuine, long-standing "
+                     "relationship with the child and whether visits "
+                     "are in the child's best interest — and it gives "
+                     "a parent's decision special weight. Be "
+                     "complete and factual; the office will be "
+                     "honest with you about how the law applies to "
+                     "your situation.",
+        "case_required": False,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "Visits_Intake_Client_Data",
+                     "sheet_note": "Nonparent visitation proceeds "
+                                   "under RCW 26.11. Secondary "
+                                   "catalogs list a state form "
+                                   "number ('FL Visits 476') that is "
+                                   "NOT verified against the "
+                                   "official list — confirm the "
+                                   "current form before filing. This "
+                                   "sheet is the client's intake "
+                                   "information, not a court form."},
+        "steps": [
+            {"title": "You and the child",
+             "fields": [
+                 {"name": "relationship", "label": "Your "
+                  "relationship to the child", "type": "radio_cards",
+                  "required": True,
+                  "options": ["Grandparent", "Step-parent",
+                              "Other family member",
+                              "Another adult who has helped raise "
+                              "the child"]},
+                 {"name": "child_name", "label": "The child's full "
+                  "name", "type": "text", "required": True,
+                  "help": "If this is about more than one child, "
+                          "list the others in the last section."},
+                 {"name": "child_dob", "label": "The child's date "
+                  "of birth", "type": "date"},
+                 {"name": "child_lives_with", "label": "Who does "
+                  "the child live with now?", "type": "text"},
+             ]},
+            {"title": "Your relationship with the child",
+             "explainer": "This is the heart of these cases — take "
+                          "your time.",
+             "fields": [
+                 {"name": "bond_history", "label": "Describe your "
+                  "relationship with the child — how long, how "
+                  "close, what you've done together and for them",
+                  "type": "textarea", "rows": 6, "required": True,
+                  "prompt": "Times you cared for them, lived with "
+                            "them, took them to school or doctors, "
+                            "holidays and routines — specifics "
+                            "help."},
+                 {"name": "time_recent", "label": "When did you "
+                  "last spend time with the child, and how has "
+                  "contact changed?", "type": "textarea",
+                  "rows": 4},
+             ]},
+            {"title": "What you're asking for",
+             "fields": [
+                 {"name": "requested_visits", "label": "What "
+                  "visits are you asking the court for?",
+                  "type": "textarea", "rows": 4, "required": True,
+                  "prompt": "For example: 'Two Saturdays a month, "
+                            "10 to 4, plus a weekly video call.'"},
+                 {"name": "parents_position", "label": "What have "
+                  "the child's parent(s) said about visits?",
+                  "type": "textarea", "rows": 4},
+                 {"name": "more_children", "label": "Other "
+                  "children this is about, and anything else the "
+                  "office should know", "type": "textarea",
+                  "rows": 4},
+             ]},
+        ],
+    },
+
+    # ------------------------------------------------------------------
+    # 23-25. Attorney-drafting intake sheets — NO standard state form
+    # exists for any of these, and the defs say so in the portal
+    # copy, the explainer, AND the generated sheet note. Never dress
+    # them up as court forms. [v2.10.0]
+    # ------------------------------------------------------------------
+    "de_facto_parentage": {
+        "key": "de_facto_parentage",
+        "slug": "de-facto-parentage",
+        "title": "De Facto Parentage — Information for the Office",
+        "official": "—",
+        "minutes": 16,
+        "description": "A de facto parent is someone who has lived "
+                       "with a child and parented them in every way, "
+                       "without being a legal parent. Washington law "
+                       "(RCW 26.26A.440) lets the court recognize "
+                       "that relationship. There is NO standard state "
+                       "form for this — the office prepares the court "
+                       "papers from your answers here.",
+        "explainer": "There is NO standard state form for this kind "
+                     "of case — the office prepares the court papers "
+                     "from your answers here. The court asks detailed "
+                     "questions: that you "
+                     "lived with the child, parented them fully and "
+                     "permanently, without pay, and formed a bonded, "
+                     "parent-child relationship. Your answers below "
+                     "map to those questions — be specific, with "
+                     "dates and examples.",
+        "case_required": False,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "De_Facto_Parentage_Intake",
+                     "sheet_note": "NO STANDARD FORM: Washington has "
+                                   "no standard state form for de "
+                                   "facto parentage (RCW 26.26A.440). "
+                                   "The office prepares the court "
+                                   "papers from this intake sheet. "
+                                   "Nothing here is a court form."},
+        "steps": [
+            {"title": "The child",
+             "fields": [
+                 {"name": "child_name", "label": "The child's full "
+                  "name", "type": "text", "required": True,
+                  "help": "If this is about more than one child, "
+                          "add the others in the last step."},
+                 {"name": "child_dob", "label": "The child's date "
+                  "of birth", "type": "date"},
+                 {"name": "child_home", "label": "Where does the "
+                  "child live now, and with whom?", "type": "text"},
+             ]},
+            {"title": "How you have parented",
+             "explainer": "The court's questions, in plain words.",
+             "fields": [
+                 {"name": "lived_together", "label": "When did "
+                  "the child live with you, and for how long?",
+                  "type": "textarea", "rows": 4, "required": True,
+                  "prompt": "Dates or best estimates, and whose "
+                            "home it was."},
+                 {"name": "daily_care", "label": "Describe the "
+                  "daily parenting you did — meals, school, "
+                  "doctors, discipline, money", "type": "textarea",
+                  "rows": 6, "required": True},
+                 {"name": "bond", "label": "Describe your "
+                  "relationship with the child", "type": "textarea",
+                  "rows": 5,
+                  "prompt": "What they call you, your routines, "
+                            "how they rely on you — the human "
+                            "picture."},
+             ]},
+            {"title": "The legal parents, and why now",
+             "fields": [
+                 {"name": "legal_parents", "label": "Who are the "
+                  "child's legal parents, and what is your "
+                  "relationship with them?", "type": "textarea",
+                  "rows": 4},
+                 {"name": "parents_agree", "label": "Do the legal "
+                  "parent(s) agree with you being recognized?",
+                  "type": "radio_cards",
+                  "options": ["Yes", "No", "Partly / it depends",
+                              "I don't know"]},
+                 {"name": "why_now", "label": "Why is recognition "
+                  "needed — school, medical decisions, benefits, "
+                  "stability?", "type": "textarea", "rows": 4,
+                  "required": True},
+                 {"name": "more_children", "label": "Other "
+                  "children this is about, and anything else",
+                  "type": "textarea", "rows": 3},
+             ]},
+        ],
+    },
+    "cir_intake": {
+        "key": "cir_intake",
+        "slug": "committed-intimate-relationship",
+        "title": "Committed Intimate Relationship — Information "
+               "for the Office",
+        "official": "—",
+        "minutes": 15,
+        "description": "You and your partner lived as a committed "
+                       "couple without marrying. When such a "
+                       "relationship ends, a Washington court can "
+                       "divide the property you acquired together "
+                       "much as in a divorce. There is NO standard "
+                       "state form for this kind of case — the "
+                       "office prepares the court papers (a drafted "
+                       "complaint) from your answers here.",
+        "explainer": "There is NO standard state form for this kind "
+                     "of case — the office prepares the court papers "
+                     "from your answers here. The court looks at "
+                     "whether the relationship "
+                     "was stable and marriage-like: living together "
+                     "continuously, for how long, pooling resources, "
+                     "and your intent. Property acquired during the "
+                     "relationship is what gets divided — be "
+                     "complete about what there is.",
+        "case_required": False,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "CIR_Intake_Client_Data",
+                     "sheet_note": "NO STANDARD FORM: Washington has "
+                                   "no standard state form for a "
+                                   "committed intimate relationship "
+                                   "case. The office drafts the "
+                                   "complaint from this intake "
+                                   "sheet. Nothing here is a court "
+                                   "form."},
+        "steps": [
+            {"title": "You and your partner",
+             "fields": [
+                 {"name": "partner_name", "label": "Your partner's "
+                  "(or former partner's) full legal name",
+                  "type": "text", "vault": "spouse.name",
+                  "target": ("client", "spouse_name")},
+                 {"name": "relationship_start", "label": "When "
+                  "did the relationship begin?", "type": "date"},
+                 {"name": "lived_together", "label": "When did "
+                  "you live together, and where?", "type": "textarea",
+                  "rows": 3, "required": True,
+                  "prompt": "From when to when, and the town(s) — "
+                            "the court looks for continuous "
+                            "cohabitation."},
+                 {"name": "separation_date", "label": "Date you "
+                  "separated (if you have)", "type": "date",
+                  "vault": "separation.date",
+                  "target": ("vault", "separation.date")},
+             ]},
+            {"title": "What you built together",
+             "explainer": "Property acquired DURING the "
+                          "relationship is what the court divides.",
+             "fields": [
+                 {"name": "shared_property", "label": "Property "
+                  "acquired while you were together — home, "
+                  "vehicles, accounts, valuables", "type": "textarea",
+                  "rows": 5, "required": True,
+                  "prompt": "One per line helps: what it is, when "
+                            "you got it, roughly what it's worth, "
+                            "whose name is on it."},
+                 {"name": "joint_finances", "label": "Joint "
+                  "accounts, shared debts, and how you handled "
+                  "money", "type": "textarea", "rows": 4},
+                 {"name": "contributions", "label": "Each "
+                  "partner's contributions — work, income, "
+                  "homemaking, raising children", "type": "textarea",
+                  "rows": 4},
+             ]},
+            {"title": "What you're asking for",
+             "fields": [
+                 {"name": "division_ask", "label": "How are you "
+                  "asking for the property and debts to be "
+                  "divided?", "type": "textarea", "rows": 5,
+                  "required": True},
+                 {"name": "children_together", "label": "Do you "
+                  "have children together? Anything about them "
+                  "the office should know (a separate parentage "
+                  "case may be needed)", "type": "textarea",
+                  "rows": 3},
+             ]},
+        ],
+    },
+    "qdro_intake": {
+        "key": "qdro_intake",
+        "slug": "qdro-data",
+        "title": "Retirement Division (QDRO) — Plan Information",
+        "official": "—",
+        "minutes": 13,
+        "description": "When a divorce divides a retirement "
+                       "account, the plan usually needs a special "
+                       "court order called a QDRO. There is NO "
+                       "Washington state QDRO form — each order is "
+                       "drafted to the retirement plan's own rules. "
+                       "This collects the plan information the "
+                       "office needs to draft (or refer) yours.",
+        "explainer": "There is NO Washington state QDRO form — "
+                     "the office drafts each order to the plan's "
+                     "own rules from your answers here. Accuracy "
+                     "about the PLAN is what matters: the exact plan "
+                     "name and type decide how the order must be "
+                     "written. Your most recent statement has most "
+                     "of it — you can upload it from the Documents "
+                     "area.",
+        "case_required": True,
+        "generate": {"kind": "data_sheet", "category": "pleadings",
+                     "file_stem": "QDRO_Plan_Data",
+                     "sheet_note": "NO STATE FORM: there is no "
+                                   "Washington state QDRO form. Each "
+                                   "order is drafted to the "
+                                   "retirement plan's own "
+                                   "requirements from the data on "
+                                   "this sheet."},
+        "steps": [
+            {"title": "Whose plan, and which plan",
+             "fields": [
+                 {"name": "plan_holder", "label": "Whose "
+                  "retirement plan is being divided?",
+                  "type": "radio_cards", "required": True,
+                  "options": ["Mine", "My spouse's / former "
+                              "spouse's", "Both — we each have a "
+                              "plan"]},
+                 {"name": "plan_names", "label": "Plan name(s) "
+                  "and the employer they come through",
+                  "type": "textarea", "rows": 4, "required": True,
+                  "prompt": "Exactly as the statement shows, for "
+                            "example: 'Boeing 401(k) — The Boeing "
+                            "Company' or 'WA DRS PERS 2 pension'."},
+                 {"name": "plan_types", "label": "What kind of "
+                  "plan(s)?", "type": "checkboxes",
+                  "options": [
+                      "401(k) / 403(b) (account balance)",
+                      "Pension (monthly benefit)",
+                      "IRA",
+                      "State retirement (PERS / TRS / LEOFF)",
+                      "Military retirement",
+                      "Not sure"]},
+             ]},
+            {"title": "The marriage dates and the division",
+             "explainer": "Retirement division usually covers the "
+                          "part earned between the marriage and "
+                          "the separation — confirm the dates.",
+             "fields": [
+                 {"name": "marriage_date", "label": "Date of "
+                  "marriage", "type": "date", "vault": "marriage.date",
+                  "target": ("vault", "marriage.date")},
+                 {"name": "separation_date", "label": "Date of "
+                  "separation", "type": "date",
+                  "vault": "separation.date",
+                  "target": ("vault", "separation.date")},
+                 {"name": "decree_status", "label": "Has the "
+                  "court already ordered how the retirement is "
+                  "divided?", "type": "radio_cards",
+                  "options": [
+                      "Yes — the final order says how",
+                      "Not yet — it's still being decided",
+                      "Not sure"]},
+                 {"name": "decree_terms", "label": "If yes — what "
+                  "does the order say about the retirement?",
+                  "type": "textarea", "rows": 4,
+                  "prompt": "For example: 'Wife receives 50% of "
+                            "the marital portion of Husband's "
+                            "401(k).'"},
+             ]},
+            {"title": "Plan details you have",
+             "fields": [
+                 {"name": "approx_balances", "label": "Approximate "
+                  "balance(s) and the statement date(s)",
+                  "type": "textarea", "rows": 3},
+                 {"name": "admin_contact", "label": "Anything "
+                  "from the plan: administrator name, address, or "
+                  "a sample QDRO the plan provided",
+                  "type": "textarea", "rows": 3,
+                  "help": "You can upload a plan statement from "
+                          "the Documents area — it speeds up the "
+                          "drafting a lot."},
              ]},
         ],
     },
@@ -2464,3 +3352,58 @@ for _packet in PACKET_DEFS.values():
             _doc = LIBRARY_BY_SLUG.get(_step_def["doc"])
             assert _doc and _doc["implemented"], (
                 _packet["slug"], _step_def["doc"])
+
+
+# ----------------------------------------------------------------------------
+# Time estimates (v2.10.0) — the model behind every wizard's "minutes"
+# ----------------------------------------------------------------------------
+# The "minutes" literal on each wizard def is DATA, calibrated with
+# this model (tests/test_v210.py asserts the literals match it):
+#
+#   2.0 minutes base — opening the document, reading the explainer,
+#       and the final review-and-send step
+# + 0.75 per section (reading the section's guidance)
+# + per field, by type:
+#       narrative textarea .... 1.6  (the client has to compose prose)
+#       children repeater ..... 1.5
+#       any other field ....... 0.6  (short answer or one choice)
+#   vault-bound fields cost 60% of their type cost — most render as
+#   one-tap confirm cards of a fact the office already has.
+# Rounded to the nearest minute, floored at 5. Narrative-heavy
+# documents (the Declaration) land high on purpose: honesty about
+# the effort is part of the low-stress design.
+def estimate_wizard_minutes(wdef):
+    total = 2.0 + 0.75 * len(wdef["steps"])
+    for f in wizard_fields(wdef):
+        if f["type"] == "repeater":
+            cost = 1.5
+        elif f["type"] == "textarea":
+            cost = 1.6
+        else:
+            cost = 0.6
+        if f.get("vault") and f["vault"] != "children":
+            cost *= 0.6
+        total += cost
+    return max(5, int(round(total)))
+
+
+# Packet totals (portal checklist header): a wizard step costs its
+# def's minutes; an upload step is finding + photographing/scanning
+# a document (~5); an info step is a careful read (~2).
+PACKET_UPLOAD_MINUTES = 5
+PACKET_INFO_MINUTES = 2
+
+
+def packet_est_minutes(pdef):
+    """Estimated total minutes for a scenario packet's steps."""
+    total = 0
+    for s in pdef["steps"]:
+        if s["type"] == "wizard":
+            entry = LIBRARY_BY_SLUG.get(s["doc"]) or {}
+            wdef = WIZARD_DEFS.get(entry.get("wizard") or "") or {}
+            total += wdef.get("minutes", 10)
+        elif s["type"] == "upload":
+            total += PACKET_UPLOAD_MINUTES
+        elif s["type"] == "info":
+            total += PACKET_INFO_MINUTES
+    return total

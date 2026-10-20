@@ -671,6 +671,17 @@ CREATE TABLE IF NOT EXISTS portal_packet_acks (
     acknowledged_at TEXT NOT NULL,
     UNIQUE (assignment_id, step_index)
 );
+-- "Pick up where you left off" cards (v2.10.0): a client may dismiss
+-- the stale-draft nudge for one of their drafts without touching the
+-- draft itself.
+CREATE TABLE IF NOT EXISTS portal_draft_dismissals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    submission_id INTEGER NOT NULL
+        REFERENCES portal_form_submissions(id) ON DELETE CASCADE,
+    dismissed_at TEXT NOT NULL,
+    UNIQUE (client_id, submission_id)
+);
 -- Quick-fill form submissions. data_json is the working draft;
 -- snapshot_json is the immutable copy frozen at submit time. Staff
 -- import applies the snapshot, never the draft.
@@ -4463,7 +4474,7 @@ from template_pdf import build_template_pdf, calc_support
 from form_library import (
     LIBRARY, LIBRARY_BY_SLUG, TIERS, SCENARIOS, VAULT_FACTS,
     WIZARD_DEFS, PACKET_DEFS, library_entry, implemented_entries,
-    packet_def, wizard_fields,
+    packet_def, wizard_fields, packet_est_minutes,
 )
 
 
@@ -8322,6 +8333,130 @@ def _wizard_value_display(f, value):
     return str(value or "")
 
 
+def _wizard_sections_completed(wdef, data):
+    """How many of a wizard's sections hold at least one answer."""
+    done = 0
+    for step in wdef["steps"]:
+        if any(str(_wizard_value_display(f, data.get(f["name"]))).strip()
+               for f in step["fields"]):
+            done += 1
+    return done
+
+
+def _wizard_draft_position(wdef, data):
+    """The step index a draft rests at (0..len(steps); len means the
+    review step). Saved on every wizard post since v2.10.0 as
+    data['_step']; older drafts fall back to the last section that
+    holds an answer."""
+    saved = data.get("_step")
+    if isinstance(saved, int):
+        return max(0, min(saved, len(wdef["steps"])))
+    pos = 0
+    for i, step in enumerate(wdef["steps"]):
+        if any(str(_wizard_value_display(f, data.get(f["name"]))).strip()
+               for f in step["fields"]):
+            pos = i
+    return pos
+
+
+def _wizard_step_label(wdef, pos):
+    if pos >= len(wdef["steps"]):
+        return "Review & send"
+    return wdef["steps"][pos]["title"]
+
+
+def _library_wizard_stats(db):
+    """Per-wizard usage stats for the staff Library view (v2.10.0):
+    how many clients started / sent / got filed, the step drafts
+    most often stall on, and the average share of sections clients
+    complete. Everything is counted from portal_form_submissions —
+    nothing is estimated. A document with no submissions reports
+    started=0 and the view shows 'no data yet'."""
+    by_key = {}
+    for r in db.execute(
+            "SELECT form_key, status, data_json"
+            " FROM portal_form_submissions").fetchall():
+        if r["form_key"] in WIZARD_DEFS:
+            by_key.setdefault(r["form_key"], []).append(r)
+    stats = {}
+    for key, wdef in WIZARD_DEFS.items():
+        subs = by_key.get(key, [])
+        st = {"started": len(subs),
+              "submitted": sum(1 for s in subs
+                               if s["status"] in ("submitted",
+                                                  "imported")),
+              "imported": sum(1 for s in subs
+                              if s["status"] == "imported"),
+              "stall_label": None, "stall_count": 0,
+              "avg_sections_pct": None}
+        positions = []
+        shares = []
+        for s in subs:
+            try:
+                data = json.loads(s["data_json"] or "{}")
+            except (ValueError, TypeError):
+                data = {}
+            if s["status"] == "draft":
+                positions.append(_wizard_draft_position(wdef, data))
+            if s["status"] != "dismissed":
+                shares.append(_wizard_sections_completed(wdef, data)
+                              / max(1, len(wdef["steps"])))
+        if positions:
+            counts = {}
+            for p in positions:
+                counts[p] = counts.get(p, 0) + 1
+            # Most common resting step; ties go to the earliest step
+            # (where help unblocks the most people).
+            best = min(counts, key=lambda p: (-counts[p], p))
+            st["stall_label"] = _wizard_step_label(wdef, best)
+            st["stall_count"] = counts[best]
+        if shares:
+            st["avg_sections_pct"] = round(
+                100 * sum(shares) / len(shares))
+        stats[key] = st
+    return stats
+
+
+# Drafts untouched this long earn the gentle "pick up where you left
+# off" card on the client's portal home (v2.10.0). In-portal only —
+# there is no email plumbing, and a nudge that follows a client home
+# would be nagging, not kindness.
+STALE_DRAFT_DAYS = 14
+
+
+def _stale_library_drafts(db, client_id):
+    """This client's library-wizard drafts untouched for
+    STALE_DRAFT_DAYS+ days, minus the ones whose card the client
+    dismissed."""
+    keys = list(WIZARD_DEFS)
+    if not keys:
+        return []
+    marks = ",".join("?" for _ in keys)
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(days=STALE_DRAFT_DAYS))
+    out = []
+    for r in db.execute(
+            "SELECT s.* FROM portal_form_submissions s"
+            " LEFT JOIN portal_draft_dismissals d"
+            " ON d.submission_id = s.id AND d.client_id = s.client_id"
+            " WHERE s.client_id = ? AND s.status = 'draft'"
+            f" AND s.form_key IN ({marks}) AND d.id IS NULL"
+            " ORDER BY s.updated_at", [client_id] + keys).fetchall():
+        try:
+            updated = datetime.fromisoformat(r["updated_at"])
+        except (TypeError, ValueError):
+            continue
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        if updated <= cutoff:
+            wdef = WIZARD_DEFS[r["form_key"]]
+            out.append({"sub": r, "wdef": wdef,
+                        "entry": LIBRARY_BY_SLUG.get(wdef["slug"]) or {},
+                        "days": (datetime.now(timezone.utc)
+                                 - updated).days})
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Portal: the Document Library
 # ----------------------------------------------------------------------------
@@ -8331,7 +8466,19 @@ def portal_library():
     pu = g.portal_user
     db = get_db()
     docs = _library_docs_for_client(db, pu["client_id"])
-    return render_template("portal_library.html", pu=pu, docs=docs)
+    # v2.10.0: group by tier under plain-language headings.
+    headings = {"common": "The usual documents",
+                "uncommon": "Less common",
+                "rare": "Rare — your attorney will guide you"}
+    doc_groups = []
+    for tier in TIERS:
+        tier_docs = [d for d in docs if d["entry"]["tier"] == tier]
+        if tier_docs:
+            doc_groups.append({"tier": tier,
+                               "heading": headings[tier],
+                               "docs": tier_docs})
+    return render_template("portal_library.html", pu=pu, docs=docs,
+                           doc_groups=doc_groups)
 
 
 @app.route("/portal/library/<slug>", methods=["GET", "POST"])
@@ -8390,6 +8537,19 @@ def portal_wizard(slug):
             data["attest_name"] = request.form.get("attest_name", "")
             data["attest_agree"] = ("yes" if request.form.get(
                 "attest_agree") else "")
+        # v2.10.0: remember where the draft comes to rest, so the
+        # staff library can report where drafts stall. Mirrors the
+        # redirect targets computed below (save_exit rests here;
+        # back/next land on the adjacent step; a submit attempt rests
+        # on the review step). Internal key — never a form field.
+        if action == "back":
+            data["_step"] = max(0, step_idx - 1)
+        elif action == "save_exit":
+            data["_step"] = step_idx
+        elif action == "submit" and step_idx == total:
+            data["_step"] = total
+        else:
+            data["_step"] = min(total, step_idx + 1)
         now = datetime.now(timezone.utc).isoformat()
         if draft:
             db.execute(
@@ -8530,6 +8690,7 @@ def library_view():
         "library.html", entries=entries, tiers=TIERS,
         scenarios=SCENARIOS, drafts=drafts,
         submitted_counts=submitted_counts, wizard_titles=titles,
+        wizard_stats=_library_wizard_stats(db),
         packet_defs=PACKET_DEFS, packet_assignments=packet_rows,
         all_clients=all_clients, all_cases=all_cases)
 
@@ -8649,7 +8810,8 @@ def _packet_progress(db, assignment):
         steps.append(st)
     return {"pdef": pdef, "steps": steps, "done": done, "total": total,
             "complete": total > 0 and done == total,
-            "current": current}
+            "current": current,
+            "est_minutes": packet_est_minutes(pdef)}
 
 
 def _packet_refresh_completion(db, assignment, pu=None):
@@ -8871,7 +9033,8 @@ def portal_packet(assignment_id):
     return render_template(
         "portal_packet.html", pu=pu, assignment=a, pdef=prog["pdef"],
         steps=prog["steps"], done=prog["done"], total=prog["total"],
-        complete=prog["complete"], current=prog["current"], case=case)
+        complete=prog["complete"], current=prog["current"], case=case,
+        est_minutes=prog["est_minutes"])
 
 
 @app.route("/portal/packets/<int:assignment_id>/ack", methods=["POST"])
@@ -9137,11 +9300,25 @@ def portal_form_generate_document(sub_id):
                 sections = [{"title": "IMPORTANT",
                              "rows": [("Please note",
                                        gen["sheet_note"])]}] + sections
+            # v2.10.0 honesty pass: documents with no standard state
+            # form (registry number "—") must not be subtitled as if
+            # figures transfer onto an official form — there isn't
+            # one. The attorney prepares the document from this data.
+            entry = library_entry(wdef["slug"]) or {}
+            no_form = entry.get("form_number") == "—"
+            if no_form:
+                sheet_subtitle = (
+                    "Client-supplied data for attorney preparation"
+                    " — no standard Washington form exists for this"
+                    " document")
+            else:
+                sheet_subtitle = (
+                    f"Official form: {wdef['official']} —"
+                    " transfer verified figures to the"
+                    " official form")
             save(gen["file_stem"], "wizard_data_sheet", {
                 "title": f"{wdef['title']} — Client Data",
-                "subtitle": f"Official form: {wdef['official']} —"
-                            " transfer verified figures to the"
-                            " official form",
+                "subtitle": sheet_subtitle, "no_form": no_form,
                 "client_name": client_name, "case_number": case_number,
                 "submitted_on": submitted_on,
                 "sections": sections,
@@ -9402,8 +9579,36 @@ def portal_home():
         cases=cases, recent_uploads=recent_uploads, unread=unread,
         form_states=form_states, form_defs=PORTAL_FORM_DEFS,
         doc_types=PORTAL_DOC_TYPES,
+        stale_drafts=_stale_library_drafts(db, cid),
         packets=_client_packets(db, cid, pu),
     )
+
+
+@app.route("/portal/drafts/<int:sub_id>/dismiss", methods=["POST"])
+@portal_login_required
+def portal_draft_dismiss(sub_id):
+    """Dismiss the 'pick up where you left off' card for one of the
+    client's OWN library drafts (v2.10.0). The draft itself is
+    untouched — only the nudge goes away. Another client's draft id
+    is a 404, like everywhere else in the portal."""
+    check_csrf()
+    pu = g.portal_user
+    db = get_db()
+    sub = db.execute(
+        "SELECT id FROM portal_form_submissions WHERE id = ?"
+        " AND client_id = ? AND status = 'draft'",
+        (sub_id, pu["client_id"]),
+    ).fetchone()
+    if not sub:
+        abort(404)
+    db.execute(
+        "INSERT OR IGNORE INTO portal_draft_dismissals (client_id,"
+        " submission_id, dismissed_at) VALUES (?, ?, ?)",
+        (pu["client_id"], sub_id,
+         datetime.now(timezone.utc).isoformat()),
+    )
+    db.commit()
+    return redirect(url_for("portal_home"))
 
 
 @app.route("/portal/documents")
@@ -10421,10 +10626,17 @@ def portal_form_generate_support(sub_id):
             "daycare": _money("daycare"),
             "health_insurance": _money("health_insurance"),
             "notes": "Generated from the client's portal Financial "
-                     "Worksheet.",
+                     f"Worksheet (submission id={sub_id}). DRAFT — "
+                     "verify against the official RCW 26.19 schedule "
+                     "before filing.",
         }
         data = dict(values)
         data["ai_disclosure"] = False
+        # v2.10.0 DRAFT-wording audit: this legacy path used to omit
+        # draft=True, so its worksheet carried NO draft banner while
+        # the wizard path to the same layout did. Canonical banner
+        # everywhere now (template_pdf.DRAFT_BANNER_TEXT).
+        data["draft"] = True
         data["children"] = [
             {"name": c.get("name", ""),
              "date_of_birth": c.get("date_of_birth", "")}
@@ -10437,7 +10649,8 @@ def portal_form_generate_support(sub_id):
             sub["case_id"], f"{tmpl['file_stem']}.pdf", pdf_bytes,
             tmpl["doc_category"],
             "Generated from portal Financial Worksheet"
-            f" (submission id={sub_id})")
+            f" (submission id={sub_id}) — DRAFT, attorney review"
+            " required")
         audit("portal_support_generated",
               f"Generated Child Support Worksheet v{version} for case"
               f" (id={sub['case_id']}) from portal submission {sub_id}")

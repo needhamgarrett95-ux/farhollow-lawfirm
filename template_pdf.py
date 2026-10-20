@@ -624,10 +624,21 @@ def build_wizard_data_sheet(data, logo_path=None):
         ]))
         story.append(t)
     story.append(Spacer(1, 14))
-    story.append(Paragraph(
-        "Prepared from information the client provided through the "
-        "client portal. Attorney review required — transfer verified "
-        "figures to the official form before filing.", s["warn"]))
+    if data.get("no_form"):
+        # v2.10.0: documents with NO standard state form must not
+        # close by pointing at "the official form" — there isn't
+        # one. The attorney prepares the filing from this data.
+        story.append(Paragraph(
+            "Prepared from information the client provided through "
+            "the client portal. Attorney review required — there is "
+            "no official form for this document; the attorney "
+            "prepares the filing from this data.", s["warn"]))
+    else:
+        story.append(Paragraph(
+            "Prepared from information the client provided through "
+            "the client portal. Attorney review required — transfer "
+            "verified figures to the official form before filing.",
+            s["warn"]))
     doc.build(story)
     return buf.getvalue()
 

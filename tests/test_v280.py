@@ -176,12 +176,15 @@ check("catalog has 50+ entries", len(fl.LIBRARY) >= 50,
 tiers = {e["tier"] for e in fl.LIBRARY}
 check("all three tiers present", tiers == {"common", "uncommon", "rare"})
 impl = [e for e in fl.LIBRARY if e["implemented"]]
-check("8 common wizards + sealed attachment (v2.9.0: +8 uncommon "
-      "= 17 live)",
-      len(impl) == 17
-      and sum(1 for e in impl if e["tier"] == "common") == 9
-      and sum(1 for e in impl if e["tier"] == "uncommon") == 8
-      and all(e["tier"] in ("common", "uncommon") for e in impl))
+# v2.10.0 expectation update: the library is complete — 25 live
+# entries (11 common + 9 uncommon + 5 rare), so the old "no rare
+# implemented" clause is gone by design.
+check("25 entries implemented (11 common + 9 uncommon + 5 rare, "
+      "v2.10.0)",
+      len(impl) == 25
+      and sum(1 for e in impl if e["tier"] == "common") == 11
+      and sum(1 for e in impl if e["tier"] == "uncommon") == 9
+      and sum(1 for e in impl if e["tier"] == "rare") == 5)
 check("every implemented entry has a wizard def",
       all(e["wizard"] in fl.WIZARD_DEFS for e in impl))
 check("wizard def keys and entry wizards line up",
@@ -248,9 +251,11 @@ r = A.get("/portal/library")
 check("A's library lists the implemented common tier",
       b"Declaration" in r.data and b"FL All Family 135" in r.data
       and b"Parenting Plan" in r.data and b"DOH 422-027" in r.data)
-check("A's library shows uncommon live but NO rare/unverified "
-      "entries (v2.9.0)",
-      b"FL Divorce 211" in r.data and b"PO 001" not in r.data
+check("A's library shows uncommon + implemented rare live, but "
+      "never wizard-less or unverified entries (v2.10.0)",
+      b"FL Divorce 211" in r.data and b"QDRO" in r.data
+      and b"Rare \xe2\x80\x94 your attorney will guide you" in r.data
+      and b"PO 001" not in r.data
       and b"FL Relocate 706" not in r.data)
 r = A.get("/portal/documents")
 check("Documents area shows 'Forms to complete'",
@@ -666,8 +671,12 @@ check("staff library shows the full catalog with tiers",
       b"Common tier" in r.data and b"Uncommon tier" in r.data
       and b"Rare tier" in r.data and b"FL Divorce 201" in r.data
       and b"DOH 422-027" in r.data)
-check("staff library flags unverified numbers + later releases",
-      b"number unverified" in r.data and b"In a later release" in r.data)
+# v2.10.0 expectation update: nothing is "in a later release" any
+# more — non-live entries are labeled "Catalog only" WITH a reason.
+check("staff library flags unverified numbers + catalog-only "
+      "reasons (v2.10.0)",
+      b"number unverified" in r.data and b"Catalog only" in r.data
+      and b"In a later release" not in r.data)
 check("staff library shows B's draft in progress",
       b"Drafts in progress" in r.data and b"Bob" in r.data
       and b"Certificate of Dissolution" in r.data)

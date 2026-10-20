@@ -319,3 +319,42 @@ worksheets, and temporary orders). Points for counsel's review:
   flags surface to staff in Portal Review. The wizard instructs
   clients not to re-type full account numbers (institutions and
   last-four only), consistent with §5.
+
+## 7. Addendum (v2.10.0) — the completed library: rare tier
+
+- **The library is complete across all three tiers.** 25 documents
+  are live client wizards; everything else in the catalog is
+  catalog-only with a recorded reason (court-signed orders, service
+  proofs, summonses and cover sheets the office assembles, emergency
+  ex parte papers, and the protection-order petition). The
+  protection-order petition (PO 001, RCW 7.105) stays deliberately
+  wizard-less: the portal's Protection checklist routes a client in
+  danger to contact the office immediately rather than complete
+  paperwork.
+- **Everything a client produces is a draft.** All generated output
+  carries the same banner — "DRAFT — NOT FOR FILING — ATTORNEY
+  REVIEW REQUIRED" — and nothing generated from a wizard is filed
+  without attorney review and the staff import step in Portal
+  Review. The Final Review wizard (FL Divorce 231) is a client
+  *confirmation* of facts for attorney-prepared final documents; it
+  is a record of that confirmation, not a court document, and its
+  output says so.
+- **No-form items are labeled as such, in both directions.** Three
+  case types have no standard Washington form (de facto parentage,
+  committed intimate relationship, QDRO/retirement division). Their
+  wizards are attorney-drafting intakes: the portal copy states
+  plainly that no standard form exists and the office prepares the
+  documents, and the generated intake sheets repeat the statement
+  ("NO STATE FORM" / "NO STANDARD FORM") and omit any reference to
+  transferring figures onto an official form. One further number
+  remains **unverified**: secondary catalogs list a "FL Visits 476"
+  for the RCW 26.11 visits petition; the registry shows "—" and
+  flags the number as unconfirmed, and the office confirms the
+  current form before filing.
+- **Usage statistics are counts, not tracking.** The staff
+  Library's per-document figures (started / sent / filed, stall
+  step, sections completed) are aggregated from the firm's own
+  submission records for workflow purposes; no new client data is
+  collected for them, and no client sees another's figures. The
+  14-day stale-draft card is shown only inside the client's own
+  portal, is dismissible, and never deletes the underlying draft.

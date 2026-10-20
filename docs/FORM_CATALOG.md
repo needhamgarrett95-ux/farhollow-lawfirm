@@ -46,9 +46,9 @@ DOH 422-027** — a vital-statistics form, not an FL form at all.
 | FL All Family 130 | Child Support Order | No (attorney/court) |
 | FL All Family 011 | Sealed Financial Source Documents (Cover Sheet) | No (catalog) |
 | FL All Family 139 | Information for Temporary Parenting Plan | No (catalog) |
-| FL Divorce 243 | Residential Time Summary Report | No (catalog) |
-| FL Divorce 231 | Findings and Conclusions About a Marriage | No (catalog) |
-| FL Divorce 241 | Final Divorce Order (also Legal Separation / Invalid Marriage orders) | No (catalog) |
+| FL Divorce 243 | Residential Time Summary Report | **Confirm wizard** (v2.10.0) — overnights tally + holiday split from the parenting-plan answers |
+| FL Divorce 231 | Findings and Conclusions About a Marriage | **Confirm wizard** (v2.10.0) — the Final Review: client confirms the vault + case facts; the attorney drafts the Findings |
+| FL Divorce 241 | Final Divorce Order (also Legal Separation / Invalid Marriage orders) | No (catalog) — its facts are confirmed in the FL Divorce 231 Final Review; the attorney prepares the order itself |
 | FL All Family 101 | Proof of Personal Service | No (catalog) |
 | FL All Family 117 | Service Accepted | No (catalog) |
 | FL All Family 112 | Proof of Mailing or Hand Delivery | No (catalog) |
@@ -119,28 +119,64 @@ Residential Schedule "FL Parentage 304"; the current official PDF is
 
 **Contempt:** FL All Family 165 (Motion for Contempt Hearing) —
 verified as cited in superior-court local rules (e.g., Clark County
-LCR 4.1(d)).
+LCR 4.1(d)). **Implemented in v2.10.0** as a client data capture
+(which order, what it required, what happened, what the court
+should do) generating a DRAFT data sheet.
 
-## Rare tier — catalog only; several entries deliberately unverified
+## Rare tier — implemented in v2.10.0 where a client can honestly help; the rest catalog-only, with reasons
+
+**Implemented in v2.10.0** (client capture or intake; DRAFT data
+sheets like every other wizard):
+
+- **FL Parentage 323 — Motion for Temporary Family Law Order
+  (Parentage).** Client capture: the temporary decisions needed,
+  the schedule in place now, safety facts.
+- **Petition for Visits (RCW 26.11)** — nonparent/grandparent
+  visitation intake. The office prepares the petition from the
+  client's answers. The registry shows the form number as **"—"
+  (unconfirmed)**: secondary catalogs list "FL Visits 476," but
+  that number is **NOT confirmed** against the official list and
+  is carried only as an unverified lead in the registry note (see
+  below).
+- **De facto parentage (RCW 26.26A.440)** — attorney-drafting
+  intake. No standard state form exists; the portal and the
+  generated intake sheet both say so plainly.
+- **Committed intimate relationship** — attorney-drafting intake.
+  No Washington state form exists; labeled as such in the portal
+  and on the output.
+- **QDRO / retirement division** — attorney-drafting intake. No
+  Washington state QDRO form exists; each order is drafted to the
+  plan's own requirements. Portal and output say so plainly.
+
+**Still catalog-only — deliberately, each with its reason recorded
+in the registry (the staff Library view shows the reason):**
 
 - **PO 001 — Petition for Protection Order (RCW 7.105).** Protection
   orders are the **PO series**, not "FL Protect." Number and title
-  verified on the official PDF (rev. 01/2024). The registry deliberately
-  gives this no self-serve wizard: a client who needs protection needs
-  staff, urgently.
-- FL Parentage 321 / 323 / 324 (parentage restraining + temporary
-  orders), FL Parentage 365 (Sexual Assault Allegation).
-- FL All Family 146 (Guardian Ad Litem order), FL All Family 148
-  (Parenting Evaluator order).
+  verified on the official PDF (rev. 01/2024). No wizard on
+  purpose: a person in danger needs staff help immediately, not
+  homework. The Protection checklist routes the client to call the
+  office instead.
+- FL Parentage 321 (immediate restraining order — emergency ex
+  parte attorney motion), FL Parentage 324 (the temporary ORDER —
+  court-signed; its facts are captured in the 323 wizard),
+  FL Parentage 365 (Sexual Assault Allegation — attorney completes
+  it with the client alongside the 301 petition).
+- FL All Family 146 (Guardian Ad Litem order) and FL All Family
+  148 (Parenting Evaluator order) — court appointment orders; the
+  judge issues them and the attorney handles the nomination.
 
 **Marked UNVERIFIED in the registry (shown with a warning in the staff
 library view — do not rely on these numbers until checked against the
 official list):**
 
-- FL Relocate 706 / 707 (ex parte final-order pair) — secondary form
-  catalogs only.
+- FL Relocate 706 / 707 (ex parte final-order pair) — secondary
+  form catalogs only; also attorney ex parte documents, so they
+  stay catalog-only even once verified.
 - FL Visits 476, Petition for Visits (RCW 26.11) — the Visits series
   exists, but this exact number came from secondary catalogs only.
+  The v2.10.0 visits intake is live; the number itself remains an
+  unverified lead, shown as "—" in the registry.
 - De facto parentage (RCW 26.26A.440) — no dedicated mandatory state
   form number verified; pleaded through the parentage series.
 - Committed intimate relationship — no mandatory Washington state form
@@ -172,10 +208,21 @@ v1.9.0) — the library reconciles rather than duplicates them:
   engine, staff library with per-document portal switches.
   Uncommon/Rare are catalog-only (staff-visible, labeled "in a
   later release," never client-facing).
-- **v2.9.0 (this release):** scenario packets (8 guided checklists —
+- **v2.9.0:** scenario packets (8 guided checklists —
   starting a divorce, responding to service, uncontested, temporary
   orders, changing an order, relocation, protection, parentage)
   with staff assignment from the client record or the Library, plus
   the Uncommon tier wizards listed above and the FL All Family 002
   sealed-attachment wizard. Rare stays catalog-only.
-- **v2.10.0 (planned):** Rare tier + polish.
+- **v2.10.0 (this release) — the library is complete.** Rare tier:
+  FL Parentage 323 capture, the RCW 26.11 visits intake, and the
+  three no-state-form attorney-drafting intakes (de facto
+  parentage, committed intimate relationship, QDRO). Common tier
+  finished: FL Divorce 243 and the FL Divorce 231 Final Review
+  (241 rides it as a pointer). Contempt (FL All Family 165)
+  implemented. What remains catalog-only is catalog-only on
+  purpose — court-signed orders, service proofs, summonses, cover
+  sheets, emergency ex parte documents, and the protection-order
+  petition — and every such entry states its reason in the
+  registry and in the staff Library view. 25 of the catalog's
+  documents are live portal wizards across all three tiers.

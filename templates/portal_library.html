@@ -4,7 +4,9 @@
 <h1 class="p-h1">Document library</h1>
 <p class="p-muted">Court documents you can complete right here, at your own pace. Anything we've already saved about you is filled in for you to confirm — you should rarely have to type the same fact twice. Everything you send is a draft the office reviews with you before it's used.</p>
 
-{% for doc in docs %}
+{% for group in doc_groups %}
+<h2 class="p-tier-heading">{{ group.heading }}</h2>
+{% for doc in group.docs %}
 <div class="p-card">
   <div class="p-card-head">
     <h2>{{ doc.wdef.title }}</h2>
@@ -21,6 +23,7 @@
   <a class="btn btn-primary" href="{{ url_for('portal_wizard', slug=doc.entry.slug) }}">Start</a>
   {% endif %}
 </div>
+{% endfor %}
 {% endfor %}
 {% if not docs %}
 <div class="p-card"><p class="p-muted p-empty">No documents are open right now. The office will let you know when there's something here for you.</p></div>

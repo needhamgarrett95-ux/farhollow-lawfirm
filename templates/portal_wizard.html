@@ -140,10 +140,10 @@
     {% else %}
     {# ---- Review step: friendly summary + attestation + submit ---- #}
     <h2>Review your answers</h2>
-    <p class="p-muted">Check everything below. Use Back to fix anything — nothing goes to the office until you press the send button.</p>
+    <p class="p-muted">Check everything below — each section has an <strong>Edit</strong> link that takes you straight back to it. Nothing goes to the office until you press the send button.</p>
     {% for s in wdef.steps %}
     <div class="p-review-section">
-      <h3>{{ s.title }}</h3>
+      <h3>{{ s.title }} <a class="p-review-edit" href="{{ url_for('portal_wizard', slug=entry.slug, step=loop.index0) }}">Edit this section</a></h3>
       {% for f in s.fields %}
       {% set v = display(f, data.get(f.name)) %}
       <div class="p-review-row">

@@ -1806,3 +1806,97 @@ kept; look at the assignment's dates on the Library page. A client
 can't find their checklist? It only exists while assigned — check
 the client's record; if someone unassigned it, the activity feed
 says so.
+
+## 52. The Rare documents, library statistics, and finishing touches (v2.10.0)
+
+v2.10.0 completes the Document Library: all three tiers (Common,
+Uncommon, Rare) are now as implemented as they honestly can be —
+**25 documents are live portal wizards**. `docs/FORM_CATALOG.md`
+has the per-form detail; this section is about running it.
+
+**The Rare documents.** Five went live:
+
+- **Temporary orders in a parentage case (FL Parentage 323)** — the
+  client lists the temporary decisions they need, the schedule in
+  place now, and any safety facts.
+- **Visits (RCW 26.11)** — a grandparent or other nonparent asks
+  the office to prepare a visits petition from their answers. The
+  registry shows this form's number as **"—"**: a number seen in
+  secondary catalogs ("FL Visits 476") could not be confirmed
+  against the official list, so the registry refuses to print it
+  as settled. **Confirm the current form with the official list
+  before filing anything from this intake.**
+- **De facto parentage, committed intimate relationship, and
+  retirement division (QDRO)** — these have **no standard
+  Washington form at all**. Their wizards are *intake sheets*: the
+  client answers questions, and the office drafts the court papers
+  from the answers. The portal says this in plain words before the
+  client starts, and the generated sheet says it again ("NO STATE
+  FORM"), so the output can never be mistaken for a court form.
+
+Two Common documents also finished: the **Residential Time Summary
+(FL Divorce 243)** — a short confirm-flow tallying overnights from
+the parenting-plan answers — and the **Final Review (FL Divorce
+231)**: before final papers are prepared, the client confirms the
+facts the final documents rest on (spouse, marriage, children,
+incomes, and "does the division match what you agreed?"). The
+**Final Divorce Order (241)** has no wizard of its own — its facts
+are exactly what the Final Review confirms, and the attorney
+prepares the order. **Contempt (FL All Family 165)** went live too:
+the client records which order, what it required, and what
+happened; the sheet reminds everyone that contempt must be proved
+with clear, convincing evidence.
+
+**What "catalog only" means now.** A handful of entries will never
+have wizards, and each one says why, right in its Library row:
+court-signed orders (the judge signs; the attorney prepares them),
+service proofs (the process server's facts), summonses and cover
+sheets (the office assembles them at filing), emergency ex parte
+papers (attorney, same day, in person), and — deliberately — the
+**protection-order petition (PO 001)**: a person in danger needs
+staff help immediately, not homework. The Protection checklist
+routes those clients to call the office. If a client asks why a
+document isn't in their portal, the reason in the staff Library is
+the answer to give them.
+
+**Reading the Library statistics.** Under each live document, the
+staff Library now shows real counts from portal use: how many
+clients **started**, how many **sent** the form to the office, how
+many made it **into the file**, where drafts most often **stall**
+(the section a draft was last left on), and the average share of
+sections clients fill in. A document nobody has opened yet says
+"No portal data yet" — that's information, not an error. Use the
+stall figure when a client is stuck: if drafts pile up at one
+section, that's the section to walk them through on the phone.
+
+**Time estimates.** The "about N minutes" on each document and the
+total on each checklist come from one simple model (in
+`form_library.py`, next to the wizard definitions): a base for
+opening and reviewing, time per section, and per question —
+writing answers cost more than tapping choices, and questions the
+client only has to *confirm* from their saved facts cost less.
+They're honest planning numbers, not promises.
+
+**"Pick up where you left off."** If a client leaves a draft
+untouched for **14 days**, their portal home shows a gentle card
+naming the document and offering to continue. They can dismiss it
+("Don't remind me") — the draft itself is never deleted or changed
+by dismissing, and no email is sent (there is no email plumbing,
+by design). If a client mentions an old draft they can't find,
+it's still in their Document Library with a **draft saved** label.
+
+**Draft wording, one last sweep.** Every document the portal
+generates carries the same banner: **DRAFT — NOT FOR FILING —
+ATTORNEY REVIEW REQUIRED**. v2.10.0 found and fixed the last two
+places that drifted: the older Financial Worksheet path to the
+support worksheet now marks its output DRAFT like the wizard path
+does, and the closing line of every client data sheet no longer
+tells staff to transfer figures "to the official form" on the
+documents that have no official form.
+
+**Troubleshooting.** A rare-tier intake generated a sheet that says
+"no standard form" — that's correct, not a bug. A client can't see
+the visits/QDRO/de facto intakes? They only appear when their
+Library switch is on (Library page, staff side) — and like every
+wizard, nothing reaches a case file until staff review and import
+it from Portal Review.

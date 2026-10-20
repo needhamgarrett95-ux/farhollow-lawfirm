@@ -1901,6 +1901,13 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
 .p-attest-check input { width: 22px; height: 22px; flex: 0 0 auto; }
 .lib-on { color: var(--success); font-weight: 600; }
 .lib-warn { color: var(--error); font-weight: 600; font-size: 0.85rem; }
+/* v2.10.0: library tier headings (portal), review Edit jumps, staff stats */
+.p-tier-heading { margin: 22px 0 4px; font-size: 1.05rem; }
+.p-review-edit {
+  font-size: 0.8rem; font-weight: 600; margin-left: 10px;
+  white-space: nowrap;
+}
+.lib-stats { color: var(--muted); font-size: 0.82rem; }
 @media (max-width: 768px) {
   .p-review-row { grid-template-columns: minmax(0, 1fr); }
   .p-repeater-row { grid-template-columns: minmax(0, 1fr); }

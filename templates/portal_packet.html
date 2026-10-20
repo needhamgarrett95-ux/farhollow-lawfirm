@@ -9,6 +9,7 @@
   <span class="p-progress">{{ done }} of {{ total }} steps done</span>
 </div>
 <div class="p-progressbar"><span style="width: {{ (done * 100 // total) if total else 0 }}%"></span></div>
+<p class="p-muted p-small">About {{ est_minutes }} minutes in total — most people spread it over a few sittings.</p>
 <p class="p-muted p-small p-guidance">{{ pdef.guidance }}</p>
 
 {% if complete %}

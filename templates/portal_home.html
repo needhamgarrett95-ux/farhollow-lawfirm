@@ -27,6 +27,20 @@
 </div>
 {% endif %}
 
+{% for sd in stale_drafts %}
+<div class="p-card">
+  <div class="p-card-head">
+    <h2>Pick up where you left off</h2>
+  </div>
+  <p class="p-muted">You started <strong>{{ sd.wdef.title }}</strong> {{ sd.days }} days ago and it's saved right where you stopped. No rush — finish it whenever you're ready.</p>
+  <a class="btn btn-primary" href="{{ url_for('portal_wizard', slug=sd.entry.slug) }}">Continue {{ sd.wdef.title }}</a>
+  <form method="post" action="{{ url_for('portal_draft_dismiss', sub_id=sd.sub.id) }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <button type="submit" class="btn">Don't remind me</button>
+  </form>
+</div>
+{% endfor %}
+
 {% for pkt in packets %}
 <div class="p-card">
   <div class="p-card-head">
@@ -35,6 +49,7 @@
   </div>
   <div class="p-progressbar"><span style="width: {{ (pkt.progress.done * 100 // pkt.progress.total) if pkt.progress.total else 0 }}%"></span></div>
   <p class="p-muted">{{ pkt.progress.pdef.description }}</p>
+  <p class="p-muted p-small">About {{ pkt.progress.est_minutes }} minutes in total, at your own pace.</p>
   {% if pkt.progress.complete %}
   <p class="p-muted"><strong>All done — thank you!</strong> The office has everything in this checklist.</p>
   {% elif pkt.progress.current is not none %}
