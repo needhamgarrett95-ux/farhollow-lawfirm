@@ -1401,3 +1401,16 @@ desktop menu — change permissions in one place and both menus follow.
   Calendar, Deadlines — whichever your account may use). **More** opens
   the full menu with your name and role at the top, every section, and
   Log out at the bottom.
+
+**Refinements (v2.5.2).** The icons in the bottom bar and the slide-up
+panels are now **solid filled shapes** instead of outline drawings. The
+2-pixel outline style looked thick and clunky at phone sizes; the solid
+versions read cleanly at a glance. They come from a second macro,
+`icon_filled`, in `templates/_icons.html` — same icon set, same names,
+drawn filled (the keys: `fill="currentColor"`, no stroke). Only the
+phone markup in `templates/base.html` calls it; the desktop keeps the
+outline icons, unchanged. Colours: bar icons are soft white, and the
+active section's icon is solid white on its gold-tinted pill (solid gold
+was tried on paper — about 4:1 contrast against that pill, versus
+roughly 9.7:1 for white — so white won). Panel icons sit in their chips
+in navy (light mode) or pale blue (dark mode), as before.

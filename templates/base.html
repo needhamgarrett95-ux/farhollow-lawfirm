@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ app_version }}">
 </head>
 <body>
-{% from "_icons.html" import icon %}
+{% from "_icons.html" import icon, icon_filled %}
 {% if session.get('user_id') %}
 <header class="topbar-cf">
   <div class="nav-inner">
@@ -91,10 +91,10 @@
         <div class="msheet-rows">
           {% for item in group["items"] %}
           <a class="msheet-row {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
-            <span class="msheet-ric">{{ icon(item.icon, 20) }}</span>
+            <span class="msheet-ric">{{ icon_filled(item.icon, 20) }}</span>
             <span class="msheet-rtxt">{{ item.label }}</span>
             {% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}
-            {{ icon('chevron-right', 17, 'msheet-chev') }}
+            {{ icon_filled('chevron-right', 17, 'msheet-chev') }}
           </a>
           {% endfor %}
         </div>
@@ -102,12 +102,12 @@
       {% endfor %}
       <div class="msheet-rows msheet-account">
         <a class="msheet-row" href="{{ url_for('change_password') }}">
-          <span class="msheet-ric">{{ icon('password', 20) }}</span>
+          <span class="msheet-ric">{{ icon_filled('password', 20) }}</span>
           <span class="msheet-rtxt">Change password</span>
-          {{ icon('chevron-right', 17, 'msheet-chev') }}
+          {{ icon_filled('chevron-right', 17, 'msheet-chev') }}
         </a>
         <a class="msheet-row msheet-signout" href="{{ url_for('logout') }}">
-          <span class="msheet-ric">{{ icon('logout', 20) }}</span>
+          <span class="msheet-ric">{{ icon_filled('logout', 20) }}</span>
           <span class="msheet-rtxt">Log out</span>
         </a>
       </div>
@@ -131,10 +131,10 @@
         <div class="msheet-rows">
           {% for item in mns.practice_group["items"] %}
           <a class="msheet-row {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
-            <span class="msheet-ric">{{ icon(item.icon, 20) }}</span>
+            <span class="msheet-ric">{{ icon_filled(item.icon, 20) }}</span>
             <span class="msheet-rtxt">{{ item.label }}</span>
             {% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}
-            {{ icon('chevron-right', 17, 'msheet-chev') }}
+            {{ icon_filled('chevron-right', 17, 'msheet-chev') }}
           </a>
           {% endfor %}
         </div>
@@ -148,30 +148,30 @@
   {% if mns.home_group %}
   {% set hitem = mns.home_group["items"][0] %}
   <a class="mtab {% if hitem.active %}on{% endif %}" href="{{ url_for(hitem.endpoint) }}">
-    <span class="mtab-ic">{{ icon(hitem.icon, 25) }}</span>
+    <span class="mtab-ic">{{ icon_filled(hitem.icon, 25) }}</span>
     <span class="mtab-label">Home</span>
   </a>
   {% endif %}
   {% if mns.practice_group %}
   <button type="button" class="mtab {% if mns.practice_group.active %}on{% endif %}" data-msheet-open="practice" aria-haspopup="true">
-    <span class="mtab-ic">{{ icon(mns.practice_group.icon, 25) }}{% if mns.practice_group.badge_count %}<span class="mtab-bdg">{{ mns.practice_group.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-ic">{{ icon_filled(mns.practice_group.icon, 25) }}{% if mns.practice_group.badge_count %}<span class="mtab-bdg">{{ mns.practice_group.badge_count }}</span>{% endif %}</span>
     <span class="mtab-label">Practice</span>
   </button>
   {% endif %}
   {% if mns.clock_item %}
   <a class="mtab {% if mns.clock_item.active %}on{% endif %}" href="{{ url_for('timeclock') }}">
-    <span class="mtab-ic">{{ icon('alarm', 25) }}{% if mns.clock_item.badge_count %}<span class="mtab-bdg">{{ mns.clock_item.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-ic">{{ icon_filled('alarm', 25) }}{% if mns.clock_item.badge_count %}<span class="mtab-bdg">{{ mns.clock_item.badge_count }}</span>{% endif %}</span>
     <span class="mtab-label">Timeclock</span>
   </a>
   {% endif %}
   {% if mns.billing_item %}
   <a class="mtab {% if mns.billing_item.active %}on{% endif %}" href="{{ url_for('invoice_list') }}">
-    <span class="mtab-ic">{{ icon('billing', 25) }}</span>
+    <span class="mtab-ic">{{ icon_filled('billing', 25) }}</span>
     <span class="mtab-label">Billing</span>
   </a>
   {% endif %}
   <button type="button" class="mtab {% if mns.more_active %}on{% endif %}" data-msheet-open="all" aria-haspopup="true">
-    <span class="mtab-ic">{{ icon('grip', 25) }}</span>
+    <span class="mtab-ic">{{ icon_filled('grip', 25) }}</span>
     <span class="mtab-label">More</span>
   </button>
 </nav>

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Static audit for v2.5.1 (mobile sheet motion + bottom-bar sizing).
+"""Static audit for v2.5.1 (mobile sheet motion + bottom-bar sizing),
+extended in v2.5.2 with the filled mobile nav icons (section 7).
 
 Run with the app's Python env: /tmp/lawfirm-test-venv/bin/python tests/test_v251.py
 
@@ -37,6 +38,8 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSS = open(os.path.join(REPO, "static", "style.css")).read()
 HTML = open(os.path.join(REPO, "templates", "base.html")).read()
+ICONS = open(os.path.join(REPO, "templates", "_icons.html")).read()
+APP = open(os.path.join(REPO, "app.py")).read()
 
 FAILURES = []
 
@@ -227,6 +230,49 @@ def main():
           'data-msheet-open="all"' in HTML)
     check("markup: grab zones present (both sheets)",
           HTML.count('class="msheet-grabzone"') == 2)
+
+    # === 7. Filled nav icons (v2.5.2) =======================================
+    # The mobile bar + sheets use SOLID glyphs from a separate macro,
+    # icon_filled, in _icons.html. The desktop nav must keep the stroke
+    # set untouched — the filled macro is new names, not a replacement.
+    mstart = ICONS.index("macro icon_filled")
+    mend = ICONS.index("endmacro", mstart)
+    filled_macro = ICONS[mstart:mend]
+    check("icon_filled svg is solid (fill=currentColor, stroke=none)",
+          'fill="currentColor"' in filled_macro
+          and 'stroke="none"' in filled_macro
+          and "icon-filled" in filled_macro)
+    check("original stroke macro is untouched",
+          'fill="none" stroke="currentColor"' in ICONS)
+
+    # Every icon the nav can reference has a filled variant: all
+    # NAV_GROUPS item/group icons from app.py, plus the names base.html
+    # hardcodes into the mobile markup.
+    nav_block = APP[APP.index("NAV_GROUPS"):APP.index("NAV_ITEMS")]
+    nav_icons = sorted(set(re.findall(r'"icon":\s*"([a-z-]+)"', nav_block)))
+    hardcoded = ["alarm", "billing", "grip", "password", "logout",
+                 "chevron-right"]
+    for name in sorted(set(nav_icons) | set(hardcoded)):
+        check(f"filled variant exists: {name}",
+              f"name == '{name}'" in filled_macro)
+
+    # Template wiring: everything from the first sheet onward is the
+    # mobile block; the desktop header above it must not call the
+    # filled macro at all.
+    midx = HTML.index('id="msheetWrap"')
+    desktop_src, mobile_src = HTML[:midx], HTML[midx:]
+    check("desktop markup calls no filled icons",
+          "icon_filled(" not in desktop_src)
+    check("both sheets render row icons filled",
+          mobile_src.count("icon_filled(item.icon, 20)") == 2)
+    check("bar icons are filled (alarm/grip/billing at 25px)",
+          all(f"icon_filled('{n}', 25)" in mobile_src
+              for n in ("alarm", "grip", "billing")))
+    check("account rows use filled icons (password/logout)",
+          "icon_filled('password', 20)" in mobile_src
+          and "icon_filled('logout', 20)" in mobile_src)
+    check("no stroke icon() calls left in the mobile block",
+          re.search(r"(?<![\w])icon\(", mobile_src) is None)
 
     print()
     if FAILURES:
