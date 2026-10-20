@@ -1221,3 +1221,13 @@ Each dropdown only shows items you have permission for. If you have zero items i
 **Designed error pages:** If something goes wrong on the server, you now see a clean error page with a **Back to dashboard** button instead of a bare technical error screen. Access-denied pages (403) look the same way. Your data is never harmed by an error page — it's just a notification.
 
 **Employee day pages:** On the Timeclock **Day view**, admin/attorney can now click any employee's name to open **that employee's own day page** — same timeline bar, punches, and notes, with an employee picker at the top to switch between people. Date navigation works the same (arrows, date picker, Today), and the **Print** button prints just that employee's day sheet. Staff/accountants can only ever open their *own* day — if someone guesses the URL for another employee's page, they're blocked (this is enforced by the server, not just by hiding the link).
+
+## 43. Deleting a paid invoice (v2.4.4)
+
+When an invoice is marked paid, the accounting system automatically creates
+an income record linked to that invoice. In earlier versions, deleting the
+invoice (including the admin retention override) failed with an error page
+because that link blocked the deletion. Fixed: deleting an invoice now
+first unlinks the income record — the income record itself is kept (it
+represents money that was actually received), only the link to the deleted
+invoice is removed. The audit log still records the deletion as before.

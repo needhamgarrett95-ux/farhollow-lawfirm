@@ -3818,6 +3818,12 @@ def invoice_delete(invoice_id):
         "UPDATE time_entries SET invoiced = 0, invoice_id = NULL"
         " WHERE invoice_id = ?", (invoice_id,),
     )
+    # Unlink operating-ledger income auto-created when this invoice was
+    # marked paid (the money record stays; only the link is removed).
+    db.execute(
+        "UPDATE op_transactions SET invoice_id = NULL"
+        " WHERE invoice_id = ?", (invoice_id,),
+    )
     db.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
     db.execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
     db.commit()
