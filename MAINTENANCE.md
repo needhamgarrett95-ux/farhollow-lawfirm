@@ -1377,3 +1377,27 @@ bottom of `static/style.css` (the "MOBILE LAYER" section), the bottom
 bar and panel markup live in `templates/base.html` right after the
 desktop header, and both are driven by the same `nav_groups` data as the
 desktop menu — change permissions in one place and both menus follow.
+
+**Refinements (v2.5.1).** Three changes from phone testing:
+
+- **The bottom bar floats.** It no longer sits glued to the bottom edge
+  of the screen; it hovers as a dark navy rounded capsule with margins
+  on the sides and below (the look is borrowed from the floating tab
+  bars in modern phone apps). It is navy in both light and dark mode,
+  and the section you are in shows as a soft gold-tinted pill. The bar
+  is also taller, and every button is the full height of its segment —
+  the whole segment is the tap target, not just the icon.
+- **The slide-up panel moves smoothly and can be pulled down.** It
+  opens and closes with a gentle ~⅓-second glide instead of a snap,
+  and its background is fully solid (an earlier version let the page
+  ghost through while it moved). To close it, you can now also **drag
+  the little handle at the top of the panel downward** — the panel
+  follows your finger, and letting go past about a third of its height,
+  or flicking it down, closes it; letting go sooner springs it back.
+  Tapping the handle, tapping outside the panel, or choosing a section
+  still closes it too.
+- **Practice and More are different panels now.** **Practice** opens a
+  short panel with only the four Practice sections (Clients, Cases,
+  Calendar, Deadlines — whichever your account may use). **More** opens
+  the full menu with your name and role at the top, every section, and
+  Log out at the bottom.

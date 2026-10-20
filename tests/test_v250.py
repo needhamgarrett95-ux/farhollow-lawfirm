@@ -14,7 +14,7 @@ Covers:
   2. Bottom-bar tabs match each role's permissions exactly:
        admin/attorney/accountant: Home, Practice, Timeclock, Billing
        staff: Home, Practice, Timeclock — NO Billing (no view_billing)
-  3. Sheet contents match NAV_GROUPS permission filtering per role:
+  3. More-sheet contents match NAV_GROUPS permission filtering per role:
        staff sheet has Practice items but no Trust / Audit Log /
        Templates / Users / Integrations;
        accountant sheet has Trust + Accounting but no Cases / Deadlines
@@ -22,6 +22,9 @@ Covers:
        attorney sheet has Trust + Audit Log but NOT Users / Integrations
        (admin-only items follow the v2.4.7 hard role gate);
        admin sheet has everything, Users + Integrations included.
+  3b. (v2.5.1) The Practice sheet is scoped: it contains ONLY the
+       permitted Practice items — no other group's items, no profile
+       card, no Log out — for every role.
   4. Timeclock page carries the mobile hero markup (live clock ids,
      status pill, big button, today's punches, totals) alongside the
      untouched desktop hero; the clock-in flow flips the mobile status
@@ -86,10 +89,20 @@ def make_role_user(db, username, role, password="<redacted>"):
 
 
 def regions(html):
-    """Slice (sheet_markup, bottom_bar_markup) out of a rendered page."""
-    sheet = html[html.index('class="msheet-wrap"'):html.index('class="mtab-bar"')]
-    bar = html[html.index('class="mtab-bar"'):html.index("<main")]
-    return sheet, bar
+    """Slice (more_sheet, practice_sheet, bottom_bar) out of a page.
+
+    v2.5.1: there are TWO sheets. The More sheet (id=msheetWrap) is the
+    full menu; the Practice sheet (id=msheetPracticeWrap) is scoped to
+    the Practice group only. Page order: More sheet, Practice sheet,
+    bottom bar, <main>.
+    """
+    m_start = html.index('id="msheetWrap"')
+    p_start = html.index('id="msheetPracticeWrap"')
+    bar_start = html.index('class="mtab-bar"')
+    more = html[m_start:p_start]
+    practice = html[p_start:bar_start]
+    bar = html[bar_start:html.index("<main")]
+    return more, practice, bar
 
 
 def main():
@@ -133,7 +146,7 @@ def main():
               'class="nav-tabs"' in html)
         check(f"{role}: mobile sheet markup present",
               'class="msheet-wrap"' in html)
-        sheet, bar = regions(html)
+        sheet, practice, bar = regions(html)
         check(f"{role}: bar has Home tab", 'mtab-label">Home<' in bar)
         check(f"{role}: bar has Practice tab (sheet opener)",
               'data-msheet-open="practice"' in bar)
@@ -144,14 +157,14 @@ def main():
               "msheet-profile" in sheet and "Log out" in sheet)
 
     # Billing tab: everyone except staff (staff preset has no view_billing)
-    _, bar = regions(clients["staff"].get("/dashboard").get_data(as_text=True))
+    _, _, bar = regions(clients["staff"].get("/dashboard").get_data(as_text=True))
     check("staff: NO Billing tab in bottom bar", 'href="/invoices"' not in bar)
     for role in ("admin", "attorney", "accountant"):
-        _, bar = regions(clients[role].get("/dashboard").get_data(as_text=True))
+        _, _, bar = regions(clients[role].get("/dashboard").get_data(as_text=True))
         check(f"{role}: Billing tab in bottom bar", 'href="/invoices"' in bar)
 
-    # Sheet contents per role
-    sheet, _ = regions(clients["staff"].get("/dashboard").get_data(as_text=True))
+    # More-sheet (full menu) contents per role
+    sheet, _, _ = regions(clients["staff"].get("/dashboard").get_data(as_text=True))
     check("staff sheet: has Cases + Deadlines",
           ">Cases<" in sheet and ">Deadlines<" in sheet)
     for absent in (">Trust<", ">Audit Log<", ">Templates<",
@@ -160,14 +173,14 @@ def main():
     check("staff sheet: no /users or /integrations hrefs",
           'href="/users"' not in sheet and 'href="/integrations"' not in sheet)
 
-    sheet, _ = regions(clients["accountant"].get("/dashboard").get_data(as_text=True))
+    sheet, _, _ = regions(clients["accountant"].get("/dashboard").get_data(as_text=True))
     check("accountant sheet: has Trust + Accounting",
           ">Trust<" in sheet and ">Accounting<" in sheet)
     for absent in (">Cases<", ">Deadlines<", ">Audit Log<",
                    ">Users<", ">Integrations<"):
         check(f"accountant sheet: no {absent}", absent not in sheet)
 
-    sheet, _ = regions(clients["attorney"].get("/dashboard").get_data(as_text=True))
+    sheet, _, _ = regions(clients["attorney"].get("/dashboard").get_data(as_text=True))
     check("attorney sheet: has Trust + Audit Log",
           ">Trust<" in sheet and ">Audit Log<" in sheet)
     check("attorney sheet: no Users / Integrations (admin-role only)",
@@ -175,13 +188,46 @@ def main():
           and 'href="/users"' not in sheet
           and 'href="/integrations"' not in sheet)
 
-    sheet, _ = regions(clients["admin"].get("/dashboard").get_data(as_text=True))
+    sheet, _, _ = regions(clients["admin"].get("/dashboard").get_data(as_text=True))
     check("admin sheet: has Users + Integrations",
           'href="/users"' in sheet and 'href="/integrations"' in sheet)
     check("admin sheet: has every group label",
           all(lbl in sheet for lbl in
               ("Dashboard", "Practice", "Documents", "Financial",
                "Team", "System")))
+
+    # === 3b. Practice sheet (v2.5.1): Practice group ONLY ===============
+    # The Practice tab must NOT open the same menu as More: the scoped
+    # panel holds the permitted Practice destinations and nothing else —
+    # no other groups, no profile card, no account rows.
+    OTHER_GROUP_ITEMS = (">Trust<", ">Billing<", ">Accounting<",
+                         ">Templates<", ">Audit Log<", ">Users<",
+                         ">Integrations<")
+    for role, c in clients.items():
+        _, practice, _ = regions(c.get("/dashboard").get_data(as_text=True))
+        check(f"{role} practice sheet: present",
+              'aria-label="Practice sections"' in practice)
+        check(f"{role} practice sheet: no profile card / Log out",
+              "msheet-profile" not in practice and "Log out" not in practice)
+        for absent in OTHER_GROUP_ITEMS:
+            check(f"{role} practice sheet: no {absent}", absent not in practice)
+        check(f"{role} practice sheet: no /users or /integrations hrefs",
+              'href="/users"' not in practice
+              and 'href="/integrations"' not in practice)
+
+    _, practice, _ = regions(clients["staff"].get("/dashboard").get_data(as_text=True))
+    check("staff practice sheet: has Clients/Cases/Calendar/Deadlines",
+          all(lbl in practice for lbl in
+              (">Clients<", ">Cases<", ">Calendar<", ">Deadlines<")))
+    _, practice, _ = regions(clients["accountant"].get("/dashboard").get_data(as_text=True))
+    check("accountant practice sheet: has Clients only",
+          ">Clients<" in practice)
+    for absent in (">Cases<", ">Calendar<", ">Deadlines<"):
+        check(f"accountant practice sheet: no {absent}", absent not in practice)
+    _, practice, _ = regions(clients["attorney"].get("/dashboard").get_data(as_text=True))
+    check("attorney practice sheet: has all four practice items",
+          all(lbl in practice for lbl in
+              (">Clients<", ">Cases<", ">Calendar<", ">Deadlines<")))
 
     # === 4. Timeclock mobile hero ========================================
     c = clients["staff"]

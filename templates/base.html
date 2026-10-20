@@ -75,7 +75,7 @@
 <div class="msheet-wrap" id="msheetWrap" aria-hidden="true">
   <button type="button" class="msheet-scrim" data-msheet-close aria-label="Close menu"></button>
   <div class="msheet" role="dialog" aria-modal="true" aria-label="All sections">
-    <div class="msheet-grab" data-msheet-close></div>
+    <div class="msheet-grabzone"><div class="msheet-grab"></div></div>
     <div class="msheet-scroll">
       <div class="msheet-profile">
         <div class="avatar msheet-avatar">{{ (session.get('username') or 'U')[:2].upper() }}</div>
@@ -115,34 +115,63 @@
   </div>
 </div>
 
+{# ===== Practice sheet (v2.5.1) — a SHORT panel with ONLY the Practice
+   group in it. Practice and More are deliberately not the same menu:
+   Practice is the four practice destinations and nothing else (no other
+   groups, no profile card, no account rows). Same sheet component and
+   drag behaviour as the full menu above. ===== #}
+{% if mns.practice_group %}
+<div class="msheet-wrap msheet-wrap-practice" id="msheetPracticeWrap" aria-hidden="true">
+  <button type="button" class="msheet-scrim" data-msheet-close aria-label="Close menu"></button>
+  <div class="msheet" role="dialog" aria-modal="true" aria-label="Practice sections">
+    <div class="msheet-grabzone"><div class="msheet-grab"></div></div>
+    <div class="msheet-scroll">
+      <div class="msheet-group">
+        <div class="msheet-group-label">{{ mns.practice_group.label }}</div>
+        <div class="msheet-rows">
+          {% for item in mns.practice_group["items"] %}
+          <a class="msheet-row {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
+            <span class="msheet-ric">{{ icon(item.icon, 20) }}</span>
+            <span class="msheet-rtxt">{{ item.label }}</span>
+            {% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}
+            {{ icon('chevron-right', 17, 'msheet-chev') }}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <nav class="mtab-bar" aria-label="Mobile navigation">
   {% if mns.home_group %}
   {% set hitem = mns.home_group["items"][0] %}
   <a class="mtab {% if hitem.active %}on{% endif %}" href="{{ url_for(hitem.endpoint) }}">
-    <span class="mtab-ic">{{ icon(hitem.icon, 22) }}</span>
+    <span class="mtab-ic">{{ icon(hitem.icon, 25) }}</span>
     <span class="mtab-label">Home</span>
   </a>
   {% endif %}
   {% if mns.practice_group %}
   <button type="button" class="mtab {% if mns.practice_group.active %}on{% endif %}" data-msheet-open="practice" aria-haspopup="true">
-    <span class="mtab-ic">{{ icon(mns.practice_group.icon, 22) }}{% if mns.practice_group.badge_count %}<span class="mtab-bdg">{{ mns.practice_group.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-ic">{{ icon(mns.practice_group.icon, 25) }}{% if mns.practice_group.badge_count %}<span class="mtab-bdg">{{ mns.practice_group.badge_count }}</span>{% endif %}</span>
     <span class="mtab-label">Practice</span>
   </button>
   {% endif %}
   {% if mns.clock_item %}
   <a class="mtab {% if mns.clock_item.active %}on{% endif %}" href="{{ url_for('timeclock') }}">
-    <span class="mtab-ic">{{ icon('alarm', 22) }}{% if mns.clock_item.badge_count %}<span class="mtab-bdg">{{ mns.clock_item.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-ic">{{ icon('alarm', 25) }}{% if mns.clock_item.badge_count %}<span class="mtab-bdg">{{ mns.clock_item.badge_count }}</span>{% endif %}</span>
     <span class="mtab-label">Timeclock</span>
   </a>
   {% endif %}
   {% if mns.billing_item %}
   <a class="mtab {% if mns.billing_item.active %}on{% endif %}" href="{{ url_for('invoice_list') }}">
-    <span class="mtab-ic">{{ icon('billing', 22) }}</span>
+    <span class="mtab-ic">{{ icon('billing', 25) }}</span>
     <span class="mtab-label">Billing</span>
   </a>
   {% endif %}
   <button type="button" class="mtab {% if mns.more_active %}on{% endif %}" data-msheet-open="all" aria-haspopup="true">
-    <span class="mtab-ic">{{ icon('grip', 22) }}</span>
+    <span class="mtab-ic">{{ icon('grip', 25) }}</span>
     <span class="mtab-label">More</span>
   </button>
 </nav>
@@ -336,59 +365,118 @@ function toggleNoteForm(btn) {
 })();
 </script>
 <script>
-// Mobile bottom sheet (v2.5.0) — opened by the Practice / More tabs.
-// Closes on scrim tap, grab-handle tap, item tap, Escape, or swipe-down.
+// Mobile bottom sheets (v2.5.1) — TWO panels, deliberately different:
+//   Practice -> a short panel with only the Practice group in it.
+//   More     -> the full menu (profile card, every permitted group,
+//               change password, log out).
+// Both share this controller. Open/close animate on a ~320ms ease.
+// The grab handle drags the sheet 1:1 with the finger (no transition
+// while dragging); releasing past ~35% of the sheet height, or with a
+// downward flick, dismisses it — otherwise it springs back. A plain
+// tap on the handle closes, as before. Nothing scrolls the sheet
+// programmatically during the open animation: the scroll box is reset
+// to the top synchronously, while the sheet is still invisible.
 (function () {
-  var wrap = document.getElementById('msheetWrap');
-  if (!wrap) return;
-  var sheet = wrap.querySelector('.msheet');
-  var scroll = wrap.querySelector('.msheet-scroll');
-  function open(anchor) {
-    wrap.classList.add('open');
-    wrap.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('msheet-open');
-    if (anchor && anchor !== 'all') {
-      var g = document.getElementById('msheet-group-' + anchor);
-      if (g) {
-        g.classList.add('msheet-anchor');
-        setTimeout(function () { g.scrollIntoView({ block: 'start' }); }, 80);
-        return;
+  var controllers = {};
+
+  function makeSheet(wrap) {
+    if (!wrap) return null;
+    var sheet = wrap.querySelector('.msheet');
+    var scrim = wrap.querySelector('.msheet-scrim');
+    var scroll = wrap.querySelector('.msheet-scroll');
+    var handle = wrap.querySelector('.msheet-grabzone');
+
+    function open() {
+      document.querySelectorAll('.msheet-wrap.open').forEach(function (w) {
+        if (w !== wrap) {
+          w.classList.remove('open');
+          w.setAttribute('aria-hidden', 'true');
+        }
+      });
+      if (scroll) scroll.scrollTop = 0;
+      sheet.style.transform = '';
+      if (scrim) scrim.style.opacity = '';
+      wrap.classList.add('open');
+      wrap.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('msheet-open');
+    }
+    function close() {
+      wrap.classList.remove('open');
+      wrap.setAttribute('aria-hidden', 'true');
+      sheet.style.transform = '';
+      if (scrim) scrim.style.opacity = '';
+      if (!document.querySelector('.msheet-wrap.open')) {
+        document.body.classList.remove('msheet-open');
       }
     }
-    if (scroll) scroll.scrollTop = 0;
-  }
-  function close() {
-    wrap.classList.remove('open');
-    wrap.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('msheet-open');
-    wrap.querySelectorAll('.msheet-anchor').forEach(function (g) {
-      g.classList.remove('msheet-anchor');
+
+    wrap.querySelectorAll('[data-msheet-close]').forEach(function (el) {
+      el.addEventListener('click', close);
     });
+    wrap.querySelectorAll('.msheet-row').forEach(function (a) {
+      a.addEventListener('click', close);
+    });
+
+    /* --- Drag-to-dismiss on the grab handle (pointer events) --- */
+    var drag = null;
+    handle.addEventListener('pointerdown', function (e) {
+      drag = { y0: e.clientY, y: e.clientY, t: performance.now(),
+               vy: 0, moved: false };
+      wrap.classList.add('dragging');
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var now = performance.now();
+      var dt = now - drag.t;
+      if (dt > 0) drag.vy = (e.clientY - drag.y) / dt;  // px per ms
+      drag.y = e.clientY;
+      drag.t = now;
+      var dy = Math.max(0, e.clientY - drag.y0);
+      if (dy > 4) drag.moved = true;
+      sheet.style.transform = 'translateY(' + dy + 'px)';
+      if (scrim) {
+        var h = sheet.offsetHeight || 1;
+        scrim.style.opacity = String(Math.max(0, 1 - dy / h));
+      }
+    });
+    function endDrag() {
+      if (!drag) return;
+      var dy = Math.max(0, drag.y - drag.y0);
+      var vy = drag.vy;
+      var wasDrag = drag.moved;
+      drag = null;
+      wrap.classList.remove('dragging');
+      if (!wasDrag) { close(); return; }  // plain tap on the handle
+      if (dy > sheet.offsetHeight * 0.35 || vy > 0.45) {
+        close();
+      } else {
+        sheet.style.transform = '';
+        if (scrim) scrim.style.opacity = '';
+      }
+    }
+    handle.addEventListener('pointerup', endDrag);
+    handle.addEventListener('pointercancel', endDrag);
+
+    return { open: open, close: close };
   }
+
+  controllers.practice = makeSheet(document.getElementById('msheetPracticeWrap'));
+  controllers.all = makeSheet(document.getElementById('msheetWrap'));
+
   document.querySelectorAll('[data-msheet-open]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      open(btn.getAttribute('data-msheet-open'));
+      var c = controllers[btn.getAttribute('data-msheet-open')];
+      if (c) c.open();
     });
   });
-  wrap.querySelectorAll('[data-msheet-close]').forEach(function (el) {
-    el.addEventListener('click', close);
-  });
-  wrap.querySelectorAll('.msheet-row').forEach(function (a) {
-    a.addEventListener('click', close);
-  });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') close();
+    if (e.key !== 'Escape') return;
+    Object.keys(controllers).forEach(function (k) {
+      if (controllers[k]) controllers[k].close();
+    });
   });
-  var startY = null;
-  sheet.addEventListener('touchstart', function (e) {
-    startY = e.touches[0].clientY;
-  }, { passive: true });
-  sheet.addEventListener('touchend', function (e) {
-    if (startY === null) return;
-    var dy = e.changedTouches[0].clientY - startY;
-    if (dy > 70 && scroll && scroll.scrollTop <= 0) close();
-    startY = null;
-  }, { passive: true });
 })();
 </script>
 </body>
