@@ -251,13 +251,13 @@
     {% if w.id == 'portal' and portal_widget %}
     <div class="dash-card" data-widget="portal">
       <h3>{{ icon('mail', 18) }} Client Portal</h3>
-      <div class="mini"><div><div class="t">{{ portal_widget.pending_uploads }} upload{{ 's' if portal_widget.pending_uploads != 1 }} to review</div>
+      <div class="mini"><div><div class="t"><span data-notif-num="uploads">{{ portal_widget.pending_uploads }}</span> <span data-notif-noun="uploads">upload{{ 's' if portal_widget.pending_uploads != 1 }}</span> to review</div>
         <div class="s">Quarantined until accepted</div></div>
         <div class="r"><a class="m-action" href="{{ url_for('portal_review') }}">Review</a></div></div>
-      <div class="mini"><div><div class="t">{{ portal_widget.submitted_forms }} form{{ 's' if portal_widget.submitted_forms != 1 }} submitted</div>
+      <div class="mini"><div><div class="t"><span data-notif-num="forms">{{ portal_widget.submitted_forms }}</span> <span data-notif-noun="forms">form{{ 's' if portal_widget.submitted_forms != 1 }}</span> submitted</div>
         <div class="s">Waiting to be imported</div></div>
         <div class="r"><a class="m-action" href="{{ url_for('portal_review') }}">Review</a></div></div>
-      <div class="mini"><div><div class="t">{{ portal_widget.unread_messages }} unread message{{ 's' if portal_widget.unread_messages != 1 }}</div>
+      <div class="mini"><div><div class="t"><span data-notif-num="messages">{{ portal_widget.unread_messages }}</span> unread <span data-notif-noun="messages">message{{ 's' if portal_widget.unread_messages != 1 }}</span></div>
         <div class="s">From clients</div></div>
         <div class="r"><a class="m-action" href="{{ url_for('portal_staff_messages') }}">Inbox</a></div></div>
       {% if portal_widget.activity %}

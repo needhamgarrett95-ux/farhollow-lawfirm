@@ -2301,6 +2301,26 @@ def _cents_filter(value):
     return cents_to_str(value)
 
 
+def _nav_deadline_count(db):
+    """Nav badge: open calendar events due within 7 days. Shared by the
+    page-load context processor and the live-notification poller."""
+    soon = (date.today() + timedelta(days=7)).isoformat()
+    return db.execute(
+        "SELECT COUNT(*) AS c FROM calendar_events"
+        " WHERE completed = 0 AND event_date <= ?",
+        (soon,),
+    ).fetchone()["c"]
+
+
+def _nav_correction_count(db):
+    """Nav badge: timeclock corrections awaiting review. Shared by the
+    page-load context processor and the live-notification poller."""
+    return db.execute(
+        "SELECT COUNT(*) AS c FROM timeclock_corrections"
+        " WHERE status = 'pending'"
+    ).fetchone()["c"]
+
+
 @app.context_processor
 def inject_update_info():
     """Make the app version and update status available in every template."""
@@ -2319,19 +2339,11 @@ def inject_update_info():
             pass
         try:
             db = get_db()
-            soon = (date.today() + timedelta(days=7)).isoformat()
-            nav_deadline_count = db.execute(
-                "SELECT COUNT(*) AS c FROM calendar_events"
-                " WHERE completed = 0 AND event_date <= ?",
-                (soon,),
-            ).fetchone()["c"]
+            nav_deadline_count = _nav_deadline_count(db)
             # Pending timeclock corrections — only meaningful for reviewers
             # (admin/attorney with view_all_timeclocks), zero for everyone else.
             if user_has_perm(session.get("permissions", {}), "view_all_timeclocks"):
-                nav_correction_count = db.execute(
-                    "SELECT COUNT(*) AS c FROM timeclock_corrections"
-                    " WHERE status = 'pending'"
-                ).fetchone()["c"]
+                nav_correction_count = _nav_correction_count(db)
             # Unreviewed client-portal items (v2.6) — only for staff who
             # work with clients. portal_pending_count is defined in the
             # portal section below (resolved at call time).
@@ -2416,6 +2428,57 @@ def api_version():
     """Return the running server version. No login required — the desktop
     launcher polls this to detect available updates."""
     return jsonify({"version": APP_VERSION})
+
+
+@app.route("/api/notifications/summary")
+def api_notifications_summary():
+    """Live badge counts for the staff shell's notification poller
+    (v2.12.0). Returns the SAME numbers the page-load badges show —
+    computed by the same helpers (portal_pending_breakdown,
+    _nav_deadline_count, _nav_correction_count) — so a polled badge
+    can never disagree with a refreshed page.
+
+    Auth mirrors login_required (staff session, active account, idle
+    timeout enforced, forced password change respected) with ONE
+    deliberate difference: polling does NOT refresh
+    session['last_activity']. A background tab must not keep a session
+    alive forever — the 30-minute idle logout still applies, measured
+    from the last real page interaction. Anonymous and portal-realm
+    sessions get a 401 and never see a count."""
+    if "user_id" not in session:
+        return jsonify({"error": "not signed in"}), 401
+    db = get_db()
+    me = db.execute(
+        "SELECT is_active FROM users WHERE id = ?", (session["user_id"],)
+    ).fetchone()
+    if not me or not me["is_active"]:
+        return jsonify({"error": "account inactive"}), 401
+    if session.get("must_change_password"):
+        return jsonify({"error": "password change required"}), 403
+    last = session.get("last_activity")
+    if last:
+        try:
+            last_dt = datetime.fromisoformat(last)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - last_dt > timedelta(
+                    minutes=SESSION_TIMEOUT_MINUTES):
+                return jsonify({"error": "session expired"}), 401
+        except ValueError:
+            pass
+    perms = get_user_permissions(db, session["user_id"])
+    payload = {"deadlines": _nav_deadline_count(db), "portal": None,
+               "corrections": None}
+    if user_has_perm(perms, "view_clients"):
+        b = portal_pending_breakdown(db)
+        payload["portal"] = {
+            "uploads": b["uploads"], "forms": b["forms"],
+            "messages": b["messages"],
+            "total": b["uploads"] + b["forms"] + b["messages"],
+        }
+    if user_has_perm(perms, "view_all_timeclocks"):
+        payload["corrections"] = _nav_correction_count(db)
+    return jsonify(payload)
 
 
 # ----------------------------------------------------------------------------
@@ -2980,17 +3043,11 @@ def dashboard():
     # Only loaded for view_clients; others get None (widget hidden).
     portal_widget = None
     if user_has_perm(_perms, "view_clients"):
+        _pb = portal_pending_breakdown(db)
         portal_widget = {
-            "pending_uploads": db.execute(
-                "SELECT COUNT(*) AS c FROM portal_uploads"
-                " WHERE status = 'pending'").fetchone()["c"],
-            "submitted_forms": db.execute(
-                "SELECT COUNT(*) AS c FROM portal_form_submissions"
-                " WHERE status = 'submitted'").fetchone()["c"],
-            "unread_messages": db.execute(
-                "SELECT COUNT(*) AS c FROM portal_messages"
-                " WHERE sender_type = 'client'"
-                " AND read_by_staff_at IS NULL").fetchone()["c"],
+            "pending_uploads": _pb["uploads"],
+            "submitted_forms": _pb["forms"],
+            "unread_messages": _pb["messages"],
             "activity": db.execute(
                 "SELECT a.*, cl.first_name, cl.last_name FROM portal_activity a"
                 " JOIN clients cl ON cl.id = a.client_id"
@@ -7932,9 +7989,12 @@ def _portal_activity(db, client_id, kind, summary, ref_table=None,
     )
 
 
-def portal_pending_count(db):
-    """Unreviewed portal items: pending uploads + submitted forms +
-    client messages staff haven't read. Drives the nav badge."""
+def portal_pending_breakdown(db):
+    """Unreviewed portal items by kind: quarantined uploads awaiting
+    review, submitted forms awaiting review, client messages staff
+    haven't read. THE source for these numbers — the nav badge, the
+    dashboard widget, and the live-notification poller all read from
+    here so they can never disagree."""
     u = db.execute(
         "SELECT COUNT(*) AS c FROM portal_uploads WHERE status = 'pending'"
     ).fetchone()["c"]
@@ -7946,7 +8006,13 @@ def portal_pending_count(db):
         "SELECT COUNT(*) AS c FROM portal_messages"
         " WHERE sender_type = 'client' AND read_by_staff_at IS NULL"
     ).fetchone()["c"]
-    return int(u) + int(f) + int(m)
+    return {"uploads": int(u), "forms": int(f), "messages": int(m)}
+
+
+def portal_pending_count(db):
+    """Unreviewed portal items, total. Drives the nav badge."""
+    b = portal_pending_breakdown(db)
+    return b["uploads"] + b["forms"] + b["messages"]
 
 
 def _current_portal_user():

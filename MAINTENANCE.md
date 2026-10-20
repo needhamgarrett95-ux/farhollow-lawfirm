@@ -1973,3 +1973,112 @@ Family & Medical Leave and WA Cares withholdings included),
 portal invite single-use and expiry, mid-session revocation for
 clients and staff, session timeout, and backup creation with an
 integrity check.
+
+## 54. The giant radio bubbles on portal forms (v2.12.0)
+
+**What was wrong.** On the portal's "confirm your details" cards
+(the ones that show a saved fact — "We have: 1998-11-04" — with
+"Still right / It changed" choices), the little round select
+bubbles rendered as enormous discs, roughly 90 pixels across, and
+the choice labels were squeezed half out of their pill outlines.
+
+**Why it happened.** The shared stylesheet sizes text boxes with
+rules that say, in effect, "every input in a form gets the full
+width of its card" — right for text boxes, wrong for radio buttons.
+The confirm-card component never set its own bubble size, so the
+full-width rule won and the bubble stretched to fill its pill;
+the phone stylesheet's "inputs inside labels get tall touch
+padding" rule inflated it further. The upload type-picker cards
+looked fine only because that component happened to pin its own
+bubble size — and even it forgot to pin the checkbox version.
+
+**The fix (the rule going forward).** Every general input-sizing
+rule in the stylesheet now applies to text-like inputs only —
+radio and checkbox inputs are excluded by name, the same pattern
+the themed-controls rule has used since v2.4. Bubbles are sized
+ONLY by the bubble rules: 18px on desktop, 20px inside the
+choice-card components, 22px across the board on phones. If you
+ever add a new choice component, give its bubble an explicit
+fixed size like `.p-type-card` and `.p-confirm-choice` do, and
+never write a bare `input { width: ... }` rule without the
+checkbox/radio exclusion. The confirm pills themselves are now
+at least 44px tall, share the row evenly, and stack full-width
+on narrow screens instead of squeezing.
+
+## 55. Staff pages now update themselves (v2.12.0)
+
+**What changed.** Staff no longer have to refresh the page to see
+client activity. While a staff page is open, it quietly checks
+for new client activity about every 25 seconds and updates the
+red notification badges in place — top nav, phone bottom bar,
+and the menus — plus the Client Portal numbers on the dashboard.
+When something new arrives (and only then), one small dark pill
+appears at the bottom of the screen saying what it is — "New
+client message", "New form submitted for review", "New client
+upload to review" — and fades away on its own. Nothing ever
+reloads the page, so a half-typed form is never lost.
+
+**How it works.** The page asks the server's
+`/api/notifications/summary` address for the counts. Those counts
+come from the exact same counting code the page-load badges and
+the dashboard widget use (one shared counter for uploads, forms,
+and unread messages), so the live numbers can never disagree
+with a refreshed page. Counts respect permissions: someone
+without client access never receives the client counts, and the
+timeclock-correction count only goes to people who review
+corrections. Checking pauses while the browser tab is hidden
+and runs once more the moment you come back to it.
+
+**One deliberate safety choice.** The automatic check does NOT
+count as "activity" for the 30-minute idle sign-out. A forgotten
+open tab will still sign itself out on schedule; the checker
+simply stops when the session ends, and the next click goes to
+the normal sign-in screen.
+
+## 56. Light and dark theme readability (v2.12.0)
+
+**What was wrong.** Every text/background color pairing in the
+program was measured (not eyeballed) against the WCAG AA bar —
+at least 4.5:1 for text, 3:1 for form-field outlines. The worst
+offenders:
+
+- **The firm name was invisible in the client portal header, in
+  both themes (1.0:1 — literally the same color twice).** The
+  name used the navy *text* color while sitting on a navy bar.
+  The bar now uses the navy *surface* color and the name is
+  white (12.1:1 light, 7.0:1 dark).
+- **In dark mode, any bar built on the navy text color turned
+  pale blue with white writing on it (2.2:1)** — the portal top
+  bar and the portal's phone tab bar. Same root cause, same fix:
+  bars are built on the surface color, which stays navy in both
+  themes.
+- **The portal "Step X of Y" counter in dark mode (2.1:1)** used
+  the surface color as text. It now uses the text color.
+- **Form field outlines were nearly invisible in both themes
+  (1.3:1 light, 1.9:1 dark).** The field border color is now a
+  stronger slate: 3.25:1 on white (light), 3.1–3.6:1 (dark).
+  Fields read as fields again.
+- **Red error text on its pink background (4.45:1)**, the
+  "due soon" amber text on white (2.7:1), placeholder text in
+  form fields (3.2:1), small green/amber status labels
+  (3.9–4.5:1), the dark mode calendar "today" cell's gray text
+  (4.49:1), and white text on the dark mode delete-confirm
+  button (2.8:1) — all lifted over the 4.5:1 bar.
+- **Gold as a writing/UI color on light backgrounds (2.2:1).**
+  Gold is now split: the familiar gold stays for surfaces (the
+  DGM chip, selected pills, bubbles), and a deeper gold carries
+  gold-colored elements on light backgrounds, like the portal
+  progress bar (3.9:1).
+
+**The rules going forward.** (1) `--navy` is a TEXT color and
+`--brand` is the matching SURFACE color — never build a
+background out of `--navy` unless the component carries its own
+dark-mode override (the integrations icon, tab badges, and the
+client's own message bubbles do, deliberately). (2) Semantic
+text goes on its paired token: `--warning-text` for warning
+words, `--info-text` on `--info-bg`, and so on — the bright
+`--warning`/`--gold` tokens are for accents, not sentences.
+(3) Placeholders print at full `--muted` strength. (4) The
+contrast checks in tests/test_v212.py re-measure the shipped
+colors on every run; a future color change that drops a pairing
+under the bar fails the build.

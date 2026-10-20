@@ -28,14 +28,14 @@
     {% if group.is_single %}
     {# Single-item group renders as a direct link #}
     {% set item = group["items"][0] %}
-    <a class="tlink {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">{{ icon(item.icon, 15) }}<span class="tlink-label">{{ item.label }}</span>{% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}</a>
+    <a class="tlink {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">{{ icon(item.icon, 15) }}<span class="tlink-label">{{ item.label }}</span>{% if item.badge %}<span class="bdg" data-badge-for="{{ item.badge }}"{% if not item.badge_count %} hidden{% endif %}>{{ item.badge_count or "" }}</span>{% endif %}</a>
     {% else %}
     {# Multi-item group renders as a dropdown #}
     <div class="nav-dropdown {% if group.active %}active{% endif %}" data-dropdown>
-      <button type="button" class="tlink nav-drop-btn {% if group.active %}active{% endif %}" aria-haspopup="true" aria-expanded="false" data-drop-toggle>{{ icon(group.icon, 15) }}<span class="tlink-label">{{ group.label }}</span>{% if group.badge_count %}<span class="bdg">{{ group.badge_count }}</span>{% endif %}{{ icon('chevron-down', 13) }}</button>
+      <button type="button" class="tlink nav-drop-btn {% if group.active %}active{% endif %}" aria-haspopup="true" aria-expanded="false" data-drop-toggle>{{ icon(group.icon, 15) }}<span class="tlink-label">{{ group.label }}</span>{% set gkeys = group["items"] | selectattr("badge") | map(attribute="badge") | list %}{% if gkeys %}<span class="bdg" data-badge-sum="{{ gkeys | join(' ') }}"{% if not group.badge_count %} hidden{% endif %}>{{ group.badge_count or "" }}</span>{% endif %}{{ icon('chevron-down', 13) }}</button>
       <div class="nav-drop-menu" role="menu">
         {% for item in group["items"] %}
-        <a class="nav-drop-item {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}" role="menuitem">{{ icon(item.icon, 15) }}<span>{{ item.label }}</span>{% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}</a>
+        <a class="nav-drop-item {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}" role="menuitem">{{ icon(item.icon, 15) }}<span>{{ item.label }}</span>{% if item.badge %}<span class="bdg" data-badge-for="{{ item.badge }}"{% if not item.badge_count %} hidden{% endif %}>{{ item.badge_count or "" }}</span>{% endif %}</a>
         {% endfor %}
       </div>
     </div>
@@ -93,7 +93,7 @@
           <a class="msheet-row {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
             <span class="msheet-ric">{{ icon_filled(item.icon, 20) }}</span>
             <span class="msheet-rtxt">{{ item.label }}</span>
-            {% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}
+            {% if item.badge %}<span class="bdg" data-badge-for="{{ item.badge }}"{% if not item.badge_count %} hidden{% endif %}>{{ item.badge_count or "" }}</span>{% endif %}
             {{ icon_filled('chevron-right', 17, 'msheet-chev') }}
           </a>
           {% endfor %}
@@ -133,7 +133,7 @@
           <a class="msheet-row {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
             <span class="msheet-ric">{{ icon_filled(item.icon, 20) }}</span>
             <span class="msheet-rtxt">{{ item.label }}</span>
-            {% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}
+            {% if item.badge %}<span class="bdg" data-badge-for="{{ item.badge }}"{% if not item.badge_count %} hidden{% endif %}>{{ item.badge_count or "" }}</span>{% endif %}
             {{ icon_filled('chevron-right', 17, 'msheet-chev') }}
           </a>
           {% endfor %}
@@ -154,13 +154,13 @@
   {% endif %}
   {% if mns.practice_group %}
   <button type="button" class="mtab {% if mns.practice_group.active %}on{% endif %}" data-msheet-open="practice" aria-haspopup="true">
-    <span class="mtab-ic">{{ icon_filled(mns.practice_group.icon, 25) }}{% if mns.practice_group.badge_count %}<span class="mtab-bdg">{{ mns.practice_group.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-ic">{{ icon_filled(mns.practice_group.icon, 25) }}{% set gkeys = mns.practice_group["items"] | selectattr("badge") | map(attribute="badge") | list %}{% if gkeys %}<span class="mtab-bdg" data-badge-sum="{{ gkeys | join(' ') }}"{% if not mns.practice_group.badge_count %} hidden{% endif %}>{{ mns.practice_group.badge_count or "" }}</span>{% endif %}</span>
     <span class="mtab-label">Practice</span>
   </button>
   {% endif %}
   {% if mns.clock_item %}
   <a class="mtab {% if mns.clock_item.active %}on{% endif %}" href="{{ url_for('timeclock') }}">
-    <span class="mtab-ic">{{ icon_filled('alarm', 25) }}{% if mns.clock_item.badge_count %}<span class="mtab-bdg">{{ mns.clock_item.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-ic">{{ icon_filled('alarm', 25) }}{% if mns.clock_item.badge %}<span class="mtab-bdg" data-badge-for="{{ mns.clock_item.badge }}"{% if not mns.clock_item.badge_count %} hidden{% endif %}>{{ mns.clock_item.badge_count or "" }}</span>{% endif %}</span>
     <span class="mtab-label">Timeclock</span>
   </a>
   {% endif %}
@@ -171,7 +171,7 @@
   </a>
   {% endif %}
   <button type="button" class="mtab {% if mns.more_active %}on{% endif %}" data-msheet-open="all" aria-haspopup="true">
-    <span class="mtab-ic">{{ icon_filled('grip', 25) }}{% if nav_portal_count %}<span class="mtab-bdg">{{ nav_portal_count }}</span>{% endif %}</span>
+    <span class="mtab-ic">{{ icon_filled('grip', 25) }}<span class="mtab-bdg" data-badge-for="nav_portal_count"{% if not nav_portal_count %} hidden{% endif %}>{{ nav_portal_count or "" }}</span></span>
     <span class="mtab-label">More</span>
   </button>
 </nav>
@@ -479,5 +479,125 @@ function toggleNoteForm(btn) {
   });
 })();
 </script>
+{% if session.get('user_id') %}
+{# ===== Live notifications (v2.12.0) — staff shell only. The toast is
+   a single quiet pill; the poller below updates badges in place and
+   NEVER reloads the page or touches form state. ===== #}
+<div class="notif-toast" id="notifToast" role="status" aria-live="polite"></div>
+<script>
+// Live notification poller (v2.12.0). Polls the summary endpoint every
+// ~25s (and immediately when the tab becomes visible again; paused
+// while hidden). First response is the baseline — it never toasts for
+// things that were already waiting when the page loaded. A 401/403
+// (session expired / deactivated) stops polling quietly; the next real
+// click gets the normal login flow.
+(function () {
+  var ENDPOINT = "{{ url_for('api_notifications_summary') }}";
+  var INTERVAL = 25000;
+  var last = null;
+  var stopped = false;
+  var toastEl = document.getElementById('notifToast');
+  var toastQueue = [];
+  var toastBusy = false;
+
+  var NOUNS = {
+    uploads: ['upload', 'uploads'],
+    forms: ['form', 'forms'],
+    messages: ['message', 'messages']
+  };
+  var TOASTS = {
+    messages: ['New client message', ' new client messages'],
+    forms: ['New form submitted for review', ' new forms submitted for review'],
+    uploads: ['New client upload to review', ' new client uploads to review']
+  };
+
+  function setBadge(el, val) {
+    if (val > 0) { el.textContent = val; el.hidden = false; }
+    else { el.textContent = ''; el.hidden = true; }
+  }
+
+  function applyCounts(counts, portal) {
+    document.querySelectorAll('[data-badge-for]').forEach(function (el) {
+      var v = counts[el.getAttribute('data-badge-for')];
+      if (v === null || v === undefined) return;
+      setBadge(el, v);
+    });
+    document.querySelectorAll('[data-badge-sum]').forEach(function (el) {
+      var total = 0, known = true;
+      el.getAttribute('data-badge-sum').split(' ').forEach(function (k) {
+        var v = counts[k];
+        if (v === null || v === undefined) { known = false; }
+        else { total += v; }
+      });
+      if (known) setBadge(el, total);
+    });
+    if (portal) {
+      document.querySelectorAll('[data-notif-num]').forEach(function (el) {
+        var kind = el.getAttribute('data-notif-num');
+        if (portal[kind] === undefined) return;
+        el.textContent = portal[kind];
+        var noun = document.querySelector(
+          '[data-notif-noun="' + kind + '"]');
+        if (noun && NOUNS[kind]) {
+          noun.textContent = NOUNS[kind][portal[kind] === 1 ? 0 : 1];
+        }
+      });
+    }
+  }
+
+  function showNextToast() {
+    if (toastBusy || !toastQueue.length || !toastEl) return;
+    toastBusy = true;
+    toastEl.textContent = toastQueue.shift();
+    toastEl.classList.add('show');
+    setTimeout(function () {
+      toastEl.classList.remove('show');
+      setTimeout(function () {
+        toastBusy = false;
+        showNextToast();
+      }, 350);
+    }, 4500);
+  }
+
+  function poll() {
+    if (stopped || document.hidden) return;
+    fetch(ENDPOINT, {
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    }).then(function (res) {
+      if (!res.ok) { stopped = true; return null; }
+      return res.json();
+    }).then(function (data) {
+      if (!data) return;
+      var counts = {
+        nav_deadline_count: data.deadlines,
+        nav_correction_count: data.corrections,
+        nav_portal_count: data.portal ? data.portal.total : null
+      };
+      applyCounts(counts, data.portal);
+      if (data.portal) {
+        if (last) {
+          ['messages', 'forms', 'uploads'].forEach(function (kind) {
+            var d = (data.portal[kind] || 0) - (last[kind] || 0);
+            if (d > 0) {
+              toastQueue.push(d === 1 ? TOASTS[kind][0]
+                                      : d + TOASTS[kind][1]);
+            }
+          });
+          showNextToast();
+        }
+        last = data.portal;
+      }
+    }).catch(function () { /* network hiccup — next tick retries */ });
+  }
+
+  setInterval(poll, INTERVAL);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) poll();
+  });
+  setTimeout(poll, 1200);
+})();
+</script>
+{% endif %}
 </body>
 </html>

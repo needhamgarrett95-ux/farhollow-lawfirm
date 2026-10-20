@@ -5,13 +5,17 @@
   --navy-dark: #122a4a;
   --gold: #c9a227;
   --gold-light: #e3c563;
+  /* Gold as FOREGROUND on light surfaces (progress fill). --gold itself
+     is a surface/accent (monogram, active pills) and only reaches
+     ~2.2:1 as text/UI on white; --gold-deep reaches >=3:1 (v2.12.0). */
+  --gold-deep: #96771a;
   --bg: #f7f8fb;
   --card: #ffffff;
   --text: #1e2a3a;
   --muted: #5b6b82;   /* >= 4.5:1 on white and light surfaces */
   --border: #e8ecf3;
   --line: #e8ecf3;
-  --error: #c0392b;
+  --error: #ad3123;   /* >= 4.5:1 on white AND on --error-bg (v2.12.0) */
   --success: #1e7e4e;
   --warning: #d4910a;
   --info: #2b6cb0;
@@ -33,7 +37,7 @@
   --info-text: #1e40af;
   /* form controls (v2.4) */
   --input-bg: #ffffff;
-  --input-border: #d9dfe9;
+  --input-border: #7d90ac;   /* 3.25:1 on white — fields read as fields (v2.12.0) */
   --gold-ring: rgba(201, 162, 39, 0.22);
   --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.04);
   --shadow-lift: 0 4px 16px rgba(15, 23, 42, 0.12);
@@ -45,7 +49,8 @@ html[data-theme="dark"] {
   --brand: #2b5a94;
   --navy-dark: #0a1428;
   --gold: #d4af37;
-  --gold-light: #e8c95c;
+  --gold-light: #edd076;   /* >= 4.5:1 on --brand bar (v2.12.0) */
+  --gold-deep: #d4af37;    /* dark: --gold already >= 6:1 on dark surfaces */
   --bg: #0f172a;
   --card: #1e293b;
   --text: #e8edf3;
@@ -60,8 +65,8 @@ html[data-theme="dark"] {
   --surface-soft: #243044;
   --surface-hover: #2d3a52;
   --table-head: #243044;
-  --today-bg: #1e3a5f;
-  --error-bg: rgba(248,113,113,.13);
+  --today-bg: #1c3554;   /* muted text stays >= 4.5:1 on it (v2.12.0) */
+  --error-bg: rgba(248,113,113,.10);   /* .13 tint dropped error text to 4.43:1 */
   --error-border: rgba(248,113,113,.4);
   --success-bg: rgba(74,222,128,.13);
   --success-border: rgba(74,222,128,.4);
@@ -72,7 +77,7 @@ html[data-theme="dark"] {
   --info-text: #93c5fd;
   /* form controls (v2.4) */
   --input-bg: #141e30;
-  --input-border: #3a4a63;
+  --input-border: #5f759c;   /* >= 3.1:1 on input bg and card (v2.12.0) */
   --gold-ring: rgba(212, 175, 55, 0.28);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.25), 0 4px 14px rgba(0, 0, 0, 0.18);
   --shadow-lift: 0 4px 16px rgba(0, 0, 0, 0.45);
@@ -96,7 +101,7 @@ body {
 
 /* Top bar */
 .topbar {
-  background: var(--navy);
+  background: var(--brand);   /* never var(--navy): it flips light in dark mode */
   color: #fff;
   display: flex;
   align-items: center;
@@ -203,13 +208,17 @@ html[data-theme="dark"] .btn-primary {
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .form-grid .span2 { grid-column: span 2; }
 label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 2px; }
-label input, label select, label textarea {
+/* Text-like inputs inside a label stretch full width. Radio/checkbox
+   inputs are EXCLUDED — they keep their fixed bubble size (v2.12.0;
+   the unscoped rule is what blew the portal confirm-card bubbles up
+   to full pill width). Every bare-input sizing rule follows this. */
+label input:not([type="checkbox"]):not([type="radio"]), label select, label textarea {
   display: block; width: 100%; margin-top: 6px;
 }
 .form-actions { margin-top: 24px; display: flex; gap: 10px; align-items: center; }
 .danger-zone { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); }
 .search-row { display: flex; gap: 8px; margin-bottom: 16px; align-items: stretch; }
-.search-row input { flex: 1; }
+.search-row input:not([type="checkbox"]):not([type="radio"]) { flex: 1; }
 .search-row .btn { min-height: 44px; }
 
 /* Detail cards */
@@ -227,7 +236,7 @@ dd { margin: 0; }
 .plain-list.prose li { display: block; line-height: 1.55; }
 .inline { display: inline; }
 .child-form { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.child-form input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.child-form input:not([type="checkbox"]):not([type="radio"]) { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
 
 /* Tabs */
 .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 2px solid var(--border); }
@@ -252,7 +261,7 @@ dd { margin: 0; }
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .cal-dow { background: var(--table-head); padding: 8px; text-align: center; font-weight: 700; font-size: 12px; color: var(--muted); }
 .cal-cell { background: var(--card); min-height: 90px; padding: 6px; font-size: 12px; }
-.cal-cell.other-month { background: var(--bg); color: var(--muted); opacity: .6; }
+.cal-cell.other-month { background: var(--bg); color: var(--muted); }
 .cal-cell.today { background: var(--today-bg); }
 .cal-day { font-weight: 700; margin-bottom: 4px; }
 .cal-event { background: var(--info-bg); color: var(--info-text); border-radius: 4px; padding: 2px 6px; margin: 2px 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -352,12 +361,12 @@ dd { margin: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .span2 { grid-column: span 1; }
   .form-card { padding: 18px 16px; }
-  label input, label select, label textarea {
+  label input:not([type="checkbox"]):not([type="radio"]), label select, label textarea {
     padding: 12px; font-size: 16px; /* 16px stops iOS auto-zoom */
     min-height: 48px;
   }
   .search-row { flex-direction: column; }
-  .search-row input { font-size: 16px; padding: 12px; min-height: 48px; }
+  .search-row input:not([type="checkbox"]):not([type="radio"]) { font-size: 16px; padding: 12px; min-height: 48px; }
   .form-actions { flex-direction: column; align-items: stretch; }
   .form-actions .btn { text-align: center; min-height: 48px; display: flex; align-items: center; justify-content: center; }
 
@@ -397,7 +406,7 @@ dd { margin: 0; }
   /* Detail lists */
   .plain-list li { flex-direction: column; align-items: flex-start; gap: 8px; }
   .child-form { flex-direction: column; align-items: stretch; }
-  .child-form input { min-height: 44px; font-size: 16px; }
+  .child-form input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; font-size: 16px; }
   dl { grid-template-columns: 1fr; gap: 2px; }
   dd { margin-bottom: 10px; }
 
@@ -574,7 +583,7 @@ dd { margin: 0; }
 .mini .s { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 .mini .r { margin-left: auto; font-size: 12px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
 .mini .r.urgent { color: var(--error); }
-.mini .r.soon { color: var(--warning); }
+.mini .r.soon { color: var(--warning-text); }   /* --warning itself is 2.67:1 as text */
 .mini .r.muted { color: var(--muted); }
 .mini a.r { text-decoration: none; }
 .mini a.r:hover { text-decoration: underline; }
@@ -616,7 +625,7 @@ dd { margin: 0; }
 .layout-saved-pill {
   display: inline-block; margin-left: 12px; padding: 3px 12px;
   border-radius: 20px; font-size: 12px; font-weight: 600;
-  background: #e6f4ea; color: #1a7f37; opacity: 0;
+  background: #e6f4ea; color: #176e35; opacity: 0;
   transition: opacity .25s ease; vertical-align: middle;
 }
 .layout-saved-pill.show { opacity: 1; }
@@ -797,6 +806,9 @@ html[data-theme="dark"] .login-bg::after {
 .btn-modal-danger {
   background: var(--error); border-color: var(--error); color: #fff;
 }
+/* Dark --error is a bright red (for text on dark); white on it is only
+   2.77:1, so the filled button gets a deeper red in dark mode. */
+html[data-theme="dark"] .btn-modal-danger { background: #b91c1c; border-color: #b91c1c; }
 .btn-modal-danger:hover { filter: brightness(0.92); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -811,9 +823,9 @@ html[data-theme="dark"] .login-bg::after {
 .integration-icon { width: 46px; height: 46px; border-radius: 12px; background: var(--navy); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 html[data-theme="dark"] .integration-icon { background: var(--gold); color: var(--navy-dark); }
 .status-pill { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; padding: 3px 10px; border-radius: 20px; margin-top: 4px; }
-.status-connected { background: #e6f4ea; color: #1e7e4e; }
+.status-connected { background: #e6f4ea; color: #186e42; }
 .status-disconnected { background: var(--surface-soft); color: var(--muted); }
-.status-needs_reauth { background: #fef3e2; color: #b26a00; }
+.status-needs_reauth { background: #fef3e2; color: #8a5200; }
 html[data-theme="dark"] .status-connected { background: rgba(30,126,78,.25); color: #7ddba3; }
 html[data-theme="dark"] .status-disconnected { background: rgba(255,255,255,.08); color: var(--muted); }
 html[data-theme="dark"] .status-needs_reauth { background: rgba(210,145,10,.22); color: #f0c96a; }
@@ -822,7 +834,7 @@ html[data-theme="dark"] .status-needs_reauth { background: rgba(210,145,10,.22);
 .notice p { margin: 4px 0; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .stacked-form label { display: block; margin-bottom: 10px; font-weight: 600; font-size: 13px; }
-.stacked-form input { display: block; width: 100%; margin-top: 4px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--card); color: var(--text); }
+.stacked-form input:not([type="checkbox"]):not([type="radio"]) { display: block; width: 100%; margin-top: 4px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--card); color: var(--text); }
 .check-row { display: flex; align-items: center; gap: 8px; font-weight: 500 !important; }
 .tab-badge { background: var(--navy); color: #fff; font-size: 11px; font-weight: 700; border-radius: 10px; padding: 1px 8px; margin-left: 4px; }
 html[data-theme="dark"] .tab-badge { background: var(--gold); color: var(--navy-dark); }
@@ -838,7 +850,7 @@ html[data-theme="dark"] .tab-badge { background: var(--gold); color: var(--navy-
 .email-snippet { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .email-direction { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 2px 8px; border-radius: 12px; }
 .email-inbound { background: #e8f0fe; color: #2b6cb0; }
-.email-outbound { background: #e6f4ea; color: #1e7e4e; }
+.email-outbound { background: #e6f4ea; color: #186e42; }
 html[data-theme="dark"] .email-inbound { background: rgba(43,108,176,.25); color: #8ab8f0; }
 html[data-theme="dark"] .email-outbound { background: rgba(30,126,78,.25); color: #7ddba3; }
 .email-body { margin-top: 8px; }
@@ -851,7 +863,7 @@ html[data-theme="dark"] .email-body summary { color: var(--gold); }
 .compose-row { display: grid; grid-template-columns: 90px 1fr; gap: 12px; align-items: start; margin-bottom: 12px; }
 .compose-row > * { min-width: 0; }
 .compose-row label { font-weight: 600; font-size: 13px; padding-top: 9px; }
-.compose-row input, .compose-row select, .compose-row textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--card); color: var(--text); font-family: inherit; }
+.compose-row input:not([type="checkbox"]):not([type="radio"]), .compose-row select, .compose-row textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--card); color: var(--text); font-family: inherit; }
 .compose-row textarea { resize: vertical; min-height: 220px; }
 @media (max-width: 560px) {
   .compose-row { grid-template-columns: 1fr; }
@@ -894,7 +906,7 @@ textarea:focus {
   border-color: var(--gold);
   box-shadow: 0 0 0 3px var(--gold-ring);
 }
-::placeholder { color: var(--muted); opacity: .75; }
+::placeholder { color: var(--muted); opacity: 1; }   /* @.75 it fell to ~3.2:1 */
 input:disabled, select:disabled, textarea:disabled {
   opacity: .55; cursor: not-allowed; background: var(--surface-soft);
 }
@@ -1591,8 +1603,12 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 
 /* ---- Portal shell ---- */
 .portal-body { background: var(--bg); }
-.p-topbar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 12px 20px; background: var(--navy); color: #fff; }
+.p-topbar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 12px 20px; background: var(--brand); color: #fff; }
 .p-brand { display: flex; align-items: center; gap: 10px; }
+/* The shared .firm-name rule colors the name var(--navy) for the staff
+   header's light card background — on this navy bar that made the firm
+   name literally invisible (navy on navy, both themes). White here. */
+.p-topbar .firm-name { color: #fff; }
 .p-brand .firm-name small { display: block; color: var(--gold-light); font-weight: 600; letter-spacing: .04em; }
 .p-topnav { display: none; gap: 4px; margin-left: 12px; }
 .p-topnav a { color: #dbe4f0; text-decoration: none; padding: 7px 13px; border-radius: 999px; font-weight: 600; font-size: 14.5px; }
@@ -1613,11 +1629,11 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 .p-auth { max-width: 440px; margin: 5vh auto 0; }
 .p-form { display: flex; flex-direction: column; gap: 7px; }
 .p-form label { font-weight: 600; margin-top: 8px; }
-.p-form input, .p-form select, .p-form textarea { width: 100%; }
+.p-form input:not([type="checkbox"]):not([type="radio"]), .p-form select, .p-form textarea { width: 100%; }
 .p-block { width: 100%; margin-top: 12px; }
-.p-progress { font-weight: 700; color: var(--brand); }
+.p-progress { font-weight: 700; color: var(--navy); }   /* --brand as text is 2.08:1 in dark */
 .p-progressbar { height: 9px; border-radius: 999px; background: var(--surface-soft); overflow: hidden; margin: 10px 0 4px; }
-.p-progressbar span { display: block; height: 100%; background: var(--gold); border-radius: 999px; }
+.p-progressbar span { display: block; height: 100%; background: var(--gold-deep); border-radius: 999px; }
 .p-checklist { list-style: none; padding: 0; margin: 8px 0 0; }
 .p-checklist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .p-check { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--muted); }
@@ -1662,7 +1678,7 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
 .ptab-bar { display: none; }
 @media (max-width: 768px) {
   .ptab-bar { display: flex; position: fixed; left: 14px; right: 14px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 900;
-    background: var(--navy); border-radius: 999px; padding: 7px; gap: 2px;
+    background: var(--brand); border-radius: 999px; padding: 7px; gap: 2px;
     box-shadow: 0 14px 34px rgba(10,22,40,.42), 0 3px 10px rgba(10,22,40,.3), inset 0 1px 0 rgba(255,255,255,.09); }
   .ptab { flex: 1; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
     color: #c8d4e6; text-decoration: none; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
@@ -1711,7 +1727,7 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
   font-weight: 600; font-size: 14.5px; line-height: 1.3; min-height: 52px;
   -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
-.p-type-card input[type="radio"] { width: 20px; height: 20px; accent-color: var(--navy); flex: none; margin: 0; }
+.p-type-card input[type="radio"], .p-type-card input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--navy); flex: none; margin: 0; }
 .p-type-card:has(input:checked) {
   border-color: var(--brand); background: var(--surface-soft);
   box-shadow: 0 0 0 1px var(--brand);
@@ -1793,6 +1809,13 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
      same exclusions as the established v2.4 rule at <=700px. */
   input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=submit]):not([type=file]),
   select, textarea { font-size: 16px; }
+  /* Radio/checkbox bubbles on phones: one fixed 22px size everywhere
+     (v2.12.0). They are sized ONLY by the bubble rules — the global
+     18px rule, the component rules, and this band rule — never by
+     any text-input rule. */
+  input[type="checkbox"], input[type="radio"],
+  .p-type-card input[type="radio"], .p-type-card input[type="checkbox"],
+  .p-confirm-choice input[type="radio"] { width: 22px; height: 22px; }
   .upload-row { flex-direction: column; align-items: stretch; }
   .upload-row label { width: 100%; }
   .search-row { flex-direction: column; align-items: stretch; }
@@ -1859,7 +1882,7 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
   .stat-row .stat:last-child:nth-child(odd) { grid-column: span 2; }
 
   /* -- 7. Portal pages: the same rules through the client door -- */
-  .p-form input, .p-form select, .p-form textarea,
+  .p-form input:not([type="checkbox"]):not([type="radio"]), .p-form select, .p-form textarea,
   .p-composer textarea, .p-composer input[type="file"] {
     font-size: 16px; max-width: 100%; min-width: 0;
   }
@@ -1897,9 +1920,19 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
 .p-confirm-value { margin: 0 0 10px; font-size: 1.02rem; }
 .p-confirm-choices { display: flex; gap: 8px; flex-wrap: wrap; }
 .p-confirm-choice {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 8px;
   border: 1px solid var(--line); border-radius: 999px;
-  padding: 8px 14px; min-height: 40px; cursor: pointer; font-weight: 600;
+  padding: 8px 16px; min-height: 44px; cursor: pointer; font-weight: 600;
+  /* Each option takes an equal share and wraps to its own full-width
+     row when the card is too narrow for both — labels never squeeze
+     or spill out of the pill (v2.12.0). */
+  flex: 1 1 150px; max-width: 280px;
+}
+/* The bubble itself: fixed size, never sized by the text-input rules.
+   (v2.12.0 — this component had NO input rule, so the generic
+   .p-form width:100% rule stretched it into a ~90px disc.) */
+.p-confirm-choice input[type="radio"] {
+  width: 20px; height: 20px; flex: none; margin: 0;
 }
 .p-confirm-choice:has(input:checked) {
   border-color: var(--navy); background: var(--info-bg); color: var(--info-text);
@@ -1949,3 +1982,29 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
 .p-guidance { font-style: italic; }
 .p-info-body { display: block; overflow-wrap: anywhere; }
 .p-info-done summary { cursor: pointer; }
+
+/* ============================================================
+   v2.12.0 — live notification toast (staff shell only).
+   One slim pill, bottom center, above the mobile tab bar.
+   Pointer-events none: it can never block a tap or steal focus;
+   the poller shows one at a time, auto-fading.
+   ============================================================ */
+.notif-toast {
+  position: fixed; left: 50%; transform: translate(-50%, 16px);
+  bottom: 24px; z-index: 1500; pointer-events: none;
+  background: var(--navy-dark); color: #fff;
+  font-size: 14px; font-weight: 600; line-height: 1.35;
+  padding: 10px 18px; border-radius: 999px;
+  box-shadow: var(--shadow-lift);
+  opacity: 0; transition: opacity .3s ease, transform .3s ease;
+  max-width: min(92vw, 480px); text-align: center;
+}
+.notif-toast.show { opacity: 1; transform: translate(-50%, 0); }
+@media (max-width: 768px) {
+  /* Clear the floating mobile tab bar (68px + margins + safe area) */
+  .notif-toast { bottom: calc(96px + env(safe-area-inset-bottom)); }
+}
+/* Badges the poller manages always exist in the DOM (hidden at zero)
+   so they can appear without a reload; author display rules on
+   .mtab-bdg would otherwise override the hidden attribute. */
+[data-badge-for][hidden], [data-badge-sum][hidden] { display: none !important; }
