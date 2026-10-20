@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{% if employee %}Edit{% else %}Add{% endif %} Employee — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>{% if employee %}Edit Employee{% else %}Add Employee{% endif %}</h1>
+  <h1>{{ icon('users', 22) }} {% if employee %}Edit Employee{% else %}Add Employee{% endif %}</h1>
 </div>
 {% set active_tab = 'employees' %}
 {% include "_accounting_tabs.html" %}
@@ -24,31 +25,35 @@
         </select>
       </label>
       <label>Pay type *
-        <select name="pay_type" id="payType" required>
-          <option value="hourly" {% if employee and employee.pay_type == 'hourly' %}selected{% endif %}>Hourly</option>
-          <option value="salary" {% if employee and employee.pay_type == 'salary' %}selected{% endif %}>Salary</option>
-        </select>
+        <div class="seg" data-seg="payType">
+          <button type="button" class="seg-btn" data-val="hourly">Hourly</button>
+          <button type="button" class="seg-btn" data-val="salary">Salary</button>
+        </div>
+        <input type="hidden" name="pay_type" id="payType" value="{{ employee.pay_type if employee else 'hourly' }}">
+        <span class="muted small seg-hint" id="payRateHint">hourly rate</span>
       </label>
       <label>Pay rate ($) *
-        <span class="muted small" id="payRateHint">hourly rate</span>
-        <input type="number" name="pay_rate" required placeholder="0.00" step="0.01" min="0.01" inputmode="decimal"
+        <input type="number" name="pay_rate" required placeholder="e.g. 25.00" step="0.01" min="0.01" inputmode="decimal"
                {% if employee %}value="{{ '%.2f'|format(employee.pay_rate_cents / 100) }}"{% endif %}>
       </label>
       <label>Pay frequency *
-        <select name="pay_frequency" required>
-          {% for f in ['weekly', 'biweekly', 'semi-monthly', 'monthly'] %}
-          <option value="{{ f }}" {% if employee and employee.pay_frequency == f %}selected{% endif %}>{{ f|replace('_', '-')|capitalize }}</option>
-          {% endfor %}
-        </select>
+        <div class="seg" data-seg="payFrequency">
+          <button type="button" class="seg-btn" data-val="weekly">Weekly</button>
+          <button type="button" class="seg-btn" data-val="biweekly">Biweekly</button>
+          <button type="button" class="seg-btn" data-val="semi-monthly">Semi-monthly</button>
+          <button type="button" class="seg-btn" data-val="monthly">Monthly</button>
+        </div>
+        <input type="hidden" name="pay_frequency" id="payFrequency" value="{{ employee.pay_frequency if employee else 'biweekly' }}">
       </label>
       <label>Hire date
         <input type="date" name="hire_date" value="{{ employee.hire_date if employee and employee.hire_date else today }}">
       </label>
       <label>Filing status *
-        <select name="filing_status" required>
-          <option value="single" {% if employee and employee.filing_status == 'single' %}selected{% endif %}>Single</option>
-          <option value="married" {% if employee and employee.filing_status == 'married' %}selected{% endif %}>Married</option>
-        </select>
+        <div class="seg" data-seg="filingStatus">
+          <button type="button" class="seg-btn" data-val="single">Single</button>
+          <button type="button" class="seg-btn" data-val="married">Married</button>
+        </div>
+        <input type="hidden" name="filing_status" id="filingStatus" value="{{ employee.filing_status if employee else 'single' }}">
       </label>
       <label>Allowances
         <input type="number" name="allowances" min="0" step="1" placeholder="0"
@@ -64,12 +69,12 @@
 
 <script>
 (function () {
-  var typeSel = document.getElementById('payType');
+  var typeInput = document.getElementById('payType');
   var hint = document.getElementById('payRateHint');
   function toggle() {
-    hint.textContent = (typeSel.value === 'salary') ? 'annual salary' : 'hourly rate';
+    hint.textContent = (typeInput.value === 'salary') ? 'annual salary' : 'hourly rate';
   }
-  typeSel.addEventListener('change', toggle);
+  if (typeInput) typeInput.addEventListener('change', toggle);
   toggle();
 })();
 </script>

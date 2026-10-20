@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Trust Ledger — {{ client.first_name }} {{ client.last_name }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Trust Ledger: {{ client.first_name }} {{ client.last_name }}</h1>
+  <h1>{{ icon('trust', 22) }} Trust Ledger: {{ client.first_name }} {{ client.last_name }}</h1>
 </div>
 
 <form method="get" class="search-row">

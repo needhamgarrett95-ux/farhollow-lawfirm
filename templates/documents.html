@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Documents — {{ case.case_number }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Documents — {{ case.case_number }}</h1>
+  <h1>{{ icon('documents', 22) }} Documents — {{ case.case_number }}</h1>
   <a href="{{ url_for('case_detail', case_id=case.id) }}" class="btn">Back to case</a>
 </div>
 
@@ -53,6 +54,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No documents yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('documents', 22) }}</div>
+  <h3>No documents yet</h3>
+  <p>Upload a document and it will live here, versioned and safe.</p>
+</div>
 {% endif %}
 {% endblock %}

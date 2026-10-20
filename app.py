@@ -404,6 +404,25 @@ CREATE TABLE IF NOT EXISTS timeclock_entries (
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL
 );
+-- Time punch correction requests (v2.4): staff without run_payroll can ask
+-- for a fix instead of editing punches directly. Status: pending|approved|denied.
+CREATE TABLE IF NOT EXISTS timeclock_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    correction_date TEXT NOT NULL,   -- YYYY-MM-DD the request is about
+    correction_type TEXT NOT NULL,   -- missed_clock_in | missed_clock_out | wrong_time
+    correct_clock_in TEXT,           -- HH:MM the employee says is right (nullable)
+    correct_clock_out TEXT,          -- HH:MM the employee says is right (nullable)
+    reason TEXT NOT NULL,           -- why the correction is needed
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | denied
+    requested_by INTEGER NOT NULL REFERENCES users(id),
+    requested_at TEXT NOT NULL,
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    review_notes TEXT,               -- reason for denial / note on approval
+    applied_entry_id INTEGER REFERENCES timeclock_entries(id),
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS paychecks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_id INTEGER NOT NULL REFERENCES employees(id),
@@ -717,6 +736,20 @@ def init_db():
             clock_in TEXT NOT NULL, clock_out TEXT, manual_hours REAL,
             entry_date TEXT NOT NULL, notes TEXT,
             created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS timeclock_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL REFERENCES employees(id),
+            correction_date TEXT NOT NULL,
+            correction_type TEXT NOT NULL,
+            correct_clock_in TEXT, correct_clock_out TEXT,
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            requested_by INTEGER NOT NULL REFERENCES users(id),
+            requested_at TEXT NOT NULL,
+            reviewed_by INTEGER REFERENCES users(id),
+            reviewed_at TEXT, review_notes TEXT,
+            applied_entry_id INTEGER REFERENCES timeclock_entries(id),
+            created_at TEXT NOT NULL)""",
         """CREATE TABLE IF NOT EXISTS paychecks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL REFERENCES employees(id),
@@ -1617,7 +1650,8 @@ NAV_GROUPS = [
     ]},
     {"label": "Team", "icon": "users", "items": [
         {"label": "Timeclock", "icon": "alarm", "endpoint": "timeclock",
-         "permission": "use_timeclock", "active_prefixes": ["timeclock"]},
+         "permission": "use_timeclock", "active_prefixes": ["timeclock"],
+         "badge": "nav_correction_count"},
         {"label": "Users", "icon": "users", "endpoint": "user_list",
          "permission": "manage_users", "active_prefixes": ["user"]},
     ]},
@@ -1710,6 +1744,7 @@ def inject_update_info():
     # Theme preference (per-user, defaults to light)
     theme = "light"
     nav_deadline_count = 0
+    nav_correction_count = 0
     uid = session.get("user_id")
     if uid:
         try:
@@ -1724,6 +1759,13 @@ def inject_update_info():
                 " WHERE completed = 0 AND event_date <= ?",
                 (soon,),
             ).fetchone()["c"]
+            # Pending timeclock corrections — only meaningful for reviewers
+            # (admin/attorney with view_all_timeclocks), zero for everyone else.
+            if user_has_perm(session.get("permissions", {}), "view_all_timeclocks"):
+                nav_correction_count = db.execute(
+                    "SELECT COUNT(*) AS c FROM timeclock_corrections"
+                    " WHERE status = 'pending'"
+                ).fetchone()["c"]
         except Exception:
             pass
     # Build nav groups with active flags (single source of truth: NAV_GROUPS).
@@ -1740,6 +1782,8 @@ def inject_update_info():
             badge_count = 0
             if item.get("badge") == "nav_deadline_count":
                 badge_count = nav_deadline_count
+            elif item.get("badge") == "nav_correction_count":
+                badge_count = nav_correction_count
             items.append({**item, "active": active, "badge_count": badge_count})
         if not items:
             continue
@@ -1764,6 +1808,7 @@ def inject_update_info():
         "nav_groups": nav_groups,
         "theme": theme,
         "nav_deadline_count": nav_deadline_count,
+        "nav_correction_count": nav_correction_count,
         # The banner is admin-only; the footer version tag is for everyone
         # (it doubles as the "server updated" notice for office computers).
         "update_available": bool(info.get("available")) and is_admin(),
@@ -5001,10 +5046,38 @@ def timeclock():
         d = dict(r)
         d["hours"] = entry_hours(r)
         recent_list.append(d)
+    # --- Correction requests (v2.4) ---
+    # My own requests (any status) — staff see the state of things they asked for.
+    my_corrections = []
+    if my_employee_id:
+        my_corrections = [dict(r) for r in db.execute(
+            """SELECT c.*, e.full_name AS employee_name,
+                      rv.username AS reviewer_name
+               FROM timeclock_corrections c
+               JOIN employees e ON c.employee_id = e.id
+               LEFT JOIN users rv ON c.reviewed_by = rv.id
+               WHERE c.employee_id = ?
+               ORDER BY c.id DESC LIMIT 20""",
+            (my_employee_id,),
+        ).fetchall()]
+    # Pending queue for reviewers (admin/attorney with view_all_timeclocks).
+    pending_corrections = []
+    if can_view_all:
+        pending_corrections = [dict(r) for r in db.execute(
+            """SELECT c.*, e.full_name AS employee_name,
+                      rq.username AS requester_name
+               FROM timeclock_corrections c
+               JOIN employees e ON c.employee_id = e.id
+               LEFT JOIN users rq ON c.requested_by = rq.id
+               WHERE c.status = 'pending'
+               ORDER BY c.requested_at ASC""",
+        ).fetchall()]
     return render_template(
         "timeclock.html", employees=employees, open_entries=open_entries,
         recent=recent_list, today=date.today().isoformat(),
         can_view_all=can_view_all, my_employee_id=my_employee_id,
+        my_corrections=my_corrections,
+        pending_corrections=pending_corrections,
     )
 
 
@@ -5073,6 +5146,248 @@ def timeclock_clockout(entry_id):
 def timeclock_manual():
     # Alias that posts back to the timeclock view's manual-entry handler
     return timeclock()
+
+
+# --- Time punch correction requests (v2.4) ---
+# Staff without run_payroll can't edit punches directly, so they request a
+# fix; an admin/attorney (view_all_timeclocks) approves or denies it.
+# Everything is audit-logged.
+
+CORRECTION_TYPES = {
+    "missed_clock_in": "Missed clock-in",
+    "missed_clock_out": "Missed clock-out",
+    "wrong_time": "Wrong time recorded",
+}
+
+
+def _valid_hhmm(value):
+    """True for a strict HH:MM 24-hour time string."""
+    if not value:
+        return False
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        return False
+    try:
+        h, m = int(parts[0]), int(parts[1])
+    except ValueError:
+        return False
+    return 0 <= h <= 23 and 0 <= m <= 59
+
+
+@app.route("/timeclock/correction/request", methods=["POST"])
+@permission_required("use_timeclock")
+def timeclock_correction_request():
+    check_csrf()
+    db = get_db()
+    my_employee_id = _my_employee_id(db)
+    if not my_employee_id:
+        flash("Your login isn't linked to an employee record yet.", "error")
+        return redirect(url_for("timeclock"))
+    emp = db.execute("SELECT * FROM employees WHERE id = ? AND is_active = 1",
+                     (my_employee_id,)).fetchone()
+    if not emp:
+        abort(404)
+    correction_date = request.form.get("correction_date", "").strip()
+    correction_type = request.form.get("correction_type", "").strip()
+    correct_in = request.form.get("correct_clock_in", "").strip()
+    correct_out = request.form.get("correct_clock_out", "").strip()
+    reason = request.form.get("reason", "").strip()
+    # Validate
+    try:
+        date.fromisoformat(correction_date)
+    except ValueError:
+        flash("Pick a valid date for the correction.", "error")
+        return redirect(url_for("timeclock"))
+    if correction_type not in CORRECTION_TYPES:
+        flash("Pick what kind of correction you need.", "error")
+        return redirect(url_for("timeclock"))
+    if correct_in and not _valid_hhmm(correct_in):
+        flash("Clock-in time must look like 09:00.", "error")
+        return redirect(url_for("timeclock"))
+    if correct_out and not _valid_hhmm(correct_out):
+        flash("Clock-out time must look like 17:00.", "error")
+        return redirect(url_for("timeclock"))
+    if correction_type == "missed_clock_in" and not correct_in:
+        flash("Enter the time you actually clocked in.", "error")
+        return redirect(url_for("timeclock"))
+    if correction_type == "missed_clock_out" and not correct_out:
+        flash("Enter the time you actually clocked out.", "error")
+        return redirect(url_for("timeclock"))
+    if correction_type == "wrong_time" and not (correct_in or correct_out):
+        flash("Enter the correct clock-in and/or clock-out time.", "error")
+        return redirect(url_for("timeclock"))
+    if not reason:
+        flash("Add a short reason so the reviewer knows what happened.", "error")
+        return redirect(url_for("timeclock"))
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        """INSERT INTO timeclock_corrections
+           (employee_id, correction_date, correction_type, correct_clock_in,
+            correct_clock_out, reason, status, requested_by, requested_at,
+            created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
+        (my_employee_id, correction_date, correction_type,
+         correct_in or None, correct_out or None, reason,
+         session.get("user_id"), now, now),
+    )
+    db.commit()
+    audit("timeclock_correction_requested",
+          f"{emp['full_name']} requested {CORRECTION_TYPES[correction_type]} "
+          f"for {correction_date}: {reason}")
+    flash("Correction request sent — an admin or attorney will review it.", "success")
+    return redirect(url_for("timeclock"))
+
+
+@app.route("/timeclock/correction/<int:correction_id>/approve", methods=["POST"])
+@permission_required("use_timeclock")
+def timeclock_correction_approve(correction_id):
+    check_csrf()
+    db = get_db()
+    if not _can_view_all_timeclocks():
+        abort(403)
+    corr = db.execute(
+        """SELECT c.*, e.full_name AS employee_name
+           FROM timeclock_corrections c
+           JOIN employees e ON c.employee_id = e.id WHERE c.id = ?""",
+        (correction_id,),
+    ).fetchone()
+    if not corr or corr["status"] != "pending":
+        abort(404)
+    review_notes = request.form.get("review_notes", "").strip()
+    cdate = corr["correction_date"]
+    emp_id = corr["employee_id"]
+    applied_entry_id = None
+
+    def _dt(time_str):
+        return f"{cdate}T{time_str}:00"
+
+    if corr["correction_type"] == "missed_clock_out":
+        # Close the still-open entry for that day.
+        entry = db.execute(
+            """SELECT * FROM timeclock_entries
+               WHERE employee_id = ? AND clock_out IS NULL AND manual_hours IS NULL
+               ORDER BY (entry_date = ?) DESC, id DESC LIMIT 1""",
+            (emp_id, cdate),
+        ).fetchone()
+        if not entry:
+            flash("No open (un-clocked-out) entry found for that employee — "
+                  "the correction can't be applied. Deny it or fix it manually.",
+                  "error")
+            return redirect(url_for("timeclock"))
+        new_out = _dt(corr["correct_clock_out"])
+        if new_out <= entry["clock_in"]:
+            flash("That clock-out time isn't after the recorded clock-in — "
+                  "check the request before approving.", "error")
+            return redirect(url_for("timeclock"))
+        db.execute("UPDATE timeclock_entries SET clock_out = ? WHERE id = ?",
+                   (new_out, entry["id"]))
+        applied_entry_id = entry["id"]
+    elif corr["correction_type"] == "missed_clock_in":
+        new_in = _dt(corr["correct_clock_in"])
+        new_out = _dt(corr["correct_clock_out"]) if corr["correct_clock_out"] else None
+        if new_out and new_out <= new_in:
+            flash("That clock-out time isn't after the clock-in — "
+                  "check the request before approving.", "error")
+            return redirect(url_for("timeclock"))
+        if not new_out:
+            open_entry = db.execute(
+                """SELECT id FROM timeclock_entries
+                   WHERE employee_id = ? AND clock_out IS NULL
+                     AND manual_hours IS NULL""",
+                (emp_id,),
+            ).fetchone()
+            if open_entry:
+                flash("That employee already has an open entry — close it "
+                      "before approving a missed clock-in.", "error")
+                return redirect(url_for("timeclock"))
+        now = datetime.now(timezone.utc).isoformat()
+        cur = db.execute(
+            """INSERT INTO timeclock_entries
+               (employee_id, clock_in, clock_out, entry_date, notes,
+                created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (emp_id, new_in, new_out, cdate,
+             f"Correction #{corr['id']} approved",
+             session.get("user_id"), now),
+        )
+        applied_entry_id = cur.lastrowid
+    else:  # wrong_time — adjust the recorded entry for that date
+        entry = db.execute(
+            """SELECT * FROM timeclock_entries
+               WHERE employee_id = ? AND entry_date = ? AND manual_hours IS NULL
+               ORDER BY id DESC LIMIT 1""",
+            (emp_id, cdate),
+        ).fetchone()
+        if not entry:
+            flash("No time entry found on that date to correct — "
+                  "deny the request or fix it manually.", "error")
+            return redirect(url_for("timeclock"))
+        new_in = _dt(corr["correct_clock_in"]) if corr["correct_clock_in"] else entry["clock_in"]
+        new_out = _dt(corr["correct_clock_out"]) if corr["correct_clock_out"] else entry["clock_out"]
+        if new_out and new_out <= new_in:
+            flash("That would make clock-out come before clock-in — "
+                  "check the request before approving.", "error")
+            return redirect(url_for("timeclock"))
+        db.execute(
+            "UPDATE timeclock_entries SET clock_in = ?, clock_out = ? WHERE id = ?",
+            (new_in, new_out, entry["id"]),
+        )
+        applied_entry_id = entry["id"]
+
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        """UPDATE timeclock_corrections
+           SET status = 'approved', reviewed_by = ?, reviewed_at = ?,
+               review_notes = ?, applied_entry_id = ?
+           WHERE id = ?""",
+        (session.get("user_id"), now, review_notes or None,
+         applied_entry_id, correction_id),
+    )
+    db.commit()
+    audit("timeclock_correction_approved",
+          f"Approved correction #{correction_id} "
+          f"({CORRECTION_TYPES[corr['correction_type']]}) for "
+          f"{corr['employee_name']} on {cdate}"
+          + (f" — {review_notes}" if review_notes else ""))
+    flash(f"Correction approved and applied for {corr['employee_name']}.", "success")
+    return redirect(url_for("timeclock"))
+
+
+@app.route("/timeclock/correction/<int:correction_id>/deny", methods=["POST"])
+@permission_required("use_timeclock")
+def timeclock_correction_deny(correction_id):
+    check_csrf()
+    db = get_db()
+    if not _can_view_all_timeclocks():
+        abort(403)
+    corr = db.execute(
+        """SELECT c.*, e.full_name AS employee_name
+           FROM timeclock_corrections c
+           JOIN employees e ON c.employee_id = e.id WHERE c.id = ?""",
+        (correction_id,),
+    ).fetchone()
+    if not corr or corr["status"] != "pending":
+        abort(404)
+    review_notes = request.form.get("review_notes", "").strip()
+    if not review_notes:
+        flash("Add a reason for denying the request so the employee knows why.",
+              "error")
+        return redirect(url_for("timeclock"))
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        """UPDATE timeclock_corrections
+           SET status = 'denied', reviewed_by = ?, reviewed_at = ?,
+               review_notes = ?
+           WHERE id = ?""",
+        (session.get("user_id"), now, review_notes, correction_id),
+    )
+    db.commit()
+    audit("timeclock_correction_denied",
+          f"Denied correction #{correction_id} "
+          f"({CORRECTION_TYPES[corr['correction_type']]}) for "
+          f"{corr['employee_name']} on {corr['correction_date']}: {review_notes}")
+    flash(f"Correction request from {corr['employee_name']} denied.", "success")
+    return redirect(url_for("timeclock"))
 
 
 # --- Payroll ---

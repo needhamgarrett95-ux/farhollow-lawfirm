@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Users — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Users</h1>
+  <h1>{{ icon('users', 22) }} Users</h1>
   <a href="{{ url_for('user_new') }}" class="btn btn-primary">+ New user</a>
 </div>
 <p class="muted">Only administrators can see this page. Roles: <strong>Admin</strong> (full access),

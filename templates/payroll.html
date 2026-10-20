@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Run Payroll — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Run Payroll</h1>
+  <h1>{{ icon('billing', 22) }} Run Payroll</h1>
   <a href="{{ url_for('payroll_reports') }}" class="btn btn-link">Payroll reports</a>
 </div>
 {% set active_tab = 'payroll' %}
@@ -86,6 +87,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No paychecks generated yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('billing', 22) }}</div>
+  <h3>No paychecks yet</h3>
+  <p>Generated paychecks will appear here.</p>
+</div>
 {% endif %}
 {% endblock %}

@@ -202,5 +202,32 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
+<script>
+// Segmented pill selectors — click a pill to set the paired hidden input.
+// Markup: <div class="seg" data-seg="inputId"><button class="seg-btn" data-val="x">…</button>…</div>
+//         <input type="hidden" id="inputId" name="…" value="…">
+(function () {
+  document.querySelectorAll('.seg[data-seg]').forEach(function (seg) {
+    var target = document.getElementById(seg.getAttribute('data-seg'));
+    if (!target) return;
+    function sync() {
+      seg.querySelectorAll('.seg-btn').forEach(function (b) {
+        var on = b.getAttribute('data-val') === target.value;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    seg.querySelectorAll('.seg-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (target.value === b.getAttribute('data-val')) return;
+        target.value = b.getAttribute('data-val');
+        sync();
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    });
+    sync();
+  });
+})();
+</script>
 </body>
 </html>

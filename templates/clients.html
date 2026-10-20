@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Clients — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Clients</h1>
+  <h1>{{ icon('clients', 22) }} Clients</h1>
   {% if perms.get('manage_clients') %}
   {% if perms.get('manage_clients') %}<a href="{{ url_for('client_new') }}" class="btn btn-primary">+ New client</a>{% endif %}
   {% endif %}
@@ -35,6 +36,7 @@
 </table>
 {% else %}
 <div class="empty-state">
+  <div class="empty-icon">{{ icon('clients', 28) }}</div>
   <h2>No clients yet</h2>
   <p class="muted">Add your first client to get started. You only need a name — the rest can come later.</p>
   {% if perms.get('manage_clients') %}

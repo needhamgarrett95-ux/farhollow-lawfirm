@@ -4,7 +4,7 @@
 {% block content %}
 {% set active_tab = request.args.get('tab', 'overview') %}
 <div class="page-head">
-  <h1>{{ case.case_number }} — {{ case.title }}</h1>
+  <h1>{{ icon('cases', 24) }} {{ case.case_number }} — {{ case.title }}</h1>
   <div style="display:flex;gap:10px;">
     {% if perms.get('manage_cases') %}
     <a href="{{ url_for('case_compose', case_id=case.id) }}" class="btn btn-primary">{{ icon('send', 16) }} Send email</a>
@@ -60,7 +60,11 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="muted">No emails linked to this case yet. New messages matching the client's address or this case number will appear here automatically.</p>
+  <div class="empty-state mini">
+  <div class="empty-icon">{{ icon('mail', 22) }}</div>
+  <h3>No emails linked yet</h3>
+  <p>New messages matching the client's address or this case number will appear here automatically.</p>
+</div>
   {% endif %}
   {% if unlinked and perms.get('manage_cases') %}
   <h3>Link an email manually</h3>

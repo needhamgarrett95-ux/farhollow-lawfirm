@@ -3,7 +3,7 @@
 {% block title %}{{ account.name }} — Trust{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ account.name }}</h1>
+  <h1>{{ icon('trust', 22) }} {{ account.name }}</h1>
   <div>
     {% if perms.get('manage_trust') %}<a href="{{ url_for('trust_transaction_new', account_id=account.id) }}" class="btn btn-primary">Record transaction</a>{% endif %}
     {% if perms.get('manage_trust') %}<a href="{{ url_for('trust_reconcile', account_id=account.id) }}" class="btn">Reconcile</a>{% endif %}
@@ -52,7 +52,11 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No client funds in this account yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('billing', 22) }}</div>
+  <h3>No client funds yet</h3>
+  <p>Record a deposit and client funds will show up here.</p>
+</div>
 {% endif %}
 
 <h2>Recent transactions</h2>
@@ -74,7 +78,11 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No transactions yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('billing', 22) }}</div>
+  <h3>No transactions yet</h3>
+  <p>Deposits and disbursements for this account will appear here.</p>
+</div>
 {% endif %}
 
 <p class="muted small">Transactions are permanent and cannot be edited or deleted. To correct an error, use the <strong>Reverse</strong> link to create an offsetting entry.</p>

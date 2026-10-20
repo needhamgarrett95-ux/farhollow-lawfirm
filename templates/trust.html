@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Trust Accounts — Law Office of Derek G. Medina{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Trust Accounts</h1>
+  <h1>{{ icon('trust', 22) }} Trust Accounts</h1>
   {% if perms.get('manage_trust') %}<a href="{{ url_for('trust_account_new') }}" class="btn btn-primary">New trust account</a>{% endif %}
 </div>
 
@@ -33,6 +34,10 @@
   <a href="{{ url_for('trust_three_way') }}" class="btn">Three-way reconciliation report</a>
 </div>
 {% else %}
-<p class="muted">No trust accounts yet. Create one to start tracking client funds.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('trust', 22) }}</div>
+  <h3>No trust accounts yet</h3>
+  <p>Create one to start tracking client funds.</p>
+</div>
 {% endif %}
 {% endblock %}

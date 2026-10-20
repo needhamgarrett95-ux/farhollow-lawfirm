@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Time entries — {{ case.case_number }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Time — {{ case.case_number }}</h1>
+  <h1>{{ icon('clock', 22) }} Time — {{ case.case_number }}</h1>
   <a href="{{ url_for('case_detail', case_id=case.id) }}" class="btn">Back to case</a>
 </div>
 
@@ -66,6 +67,10 @@ function setHours(h) {
   </tbody>
 </table>
 {% else %}
-<p class="muted">No time entries yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('clock', 22) }}</div>
+  <h3>No time entries yet</h3>
+  <p>Time entries for this case will appear here.</p>
+</div>
 {% endif %}
 {% endblock %}

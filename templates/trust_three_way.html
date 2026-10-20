@@ -3,7 +3,7 @@
 {% block title %}Three-Way Reconciliation Report{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Three-Way Reconciliation</h1>
+  <h1>{{ icon('trust', 22) }} Three-Way Reconciliation</h1>
   <a href="{{ url_for('trust_overview') }}" class="btn btn-link">Back to trust</a>
 </div>
 <p class="muted">The gold standard of trust accounting: <strong>bank balance = book balance = sum of client ledgers</strong>. All three must agree.</p>

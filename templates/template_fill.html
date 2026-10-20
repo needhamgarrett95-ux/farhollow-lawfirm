@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ template.name }} — Templates{% endblock %}
 {% block content %}
-<h1>{{ template.name }}</h1>
+<h1>{{ icon('templates', 22) }} {{ template.name }}</h1>
 <p class="muted">{{ template.description }}</p>
 
 <form method="get" action="{{ url_for('template_fill', key=template.key) }}" class="form-card" style="margin-bottom:16px;">

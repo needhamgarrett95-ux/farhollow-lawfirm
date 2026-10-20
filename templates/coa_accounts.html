@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Chart of Accounts — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Chart of Accounts</h1>
+  <h1>{{ icon('billing', 22) }} Chart of Accounts</h1>
 </div>
 {% set active_tab = 'coa' %}
 {% include "_accounting_tabs.html" %}
@@ -68,7 +69,7 @@
     </tr>
   {% endfor %}
   {% if not ns.any %}
-    <tr><td colspan="5" class="muted">No {{ gtype }} accounts yet.</td></tr>
+    <tr><td colspan="5" class="muted" style="text-align:center;padding:18px">No {{ gtype }} accounts yet.</td></tr>
   {% endif %}
   </tbody>
 </table>

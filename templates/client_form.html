@@ -1,24 +1,25 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ 'Edit client' if client else 'New client' }} — Case Management{% endblock %}
 {% block content %}
-<h1>{{ 'Edit client' if client else 'New client' }}</h1>
+<h1>{{ icon('clients', 22) }} {{ 'Edit client' if client else 'New client' }}</h1>
 <form method="post" action="{{ url_for('client_edit', client_id=client.id) if client else url_for('client_new') }}" class="form-card">
   <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
   <div class="form-grid">
     <label>First name *
-      <input type="text" name="first_name" value="{{ client.first_name if client else '' }}" required>
+      <input type="text" name="first_name" value="{{ client.first_name if client else '' }}" required placeholder="e.g. Maria">
     </label>
     <label>Last name *
-      <input type="text" name="last_name" value="{{ client.last_name if client else '' }}" required>
+      <input type="text" name="last_name" value="{{ client.last_name if client else '' }}" required placeholder="e.g. Garcia">
     </label>
     <label>Email
-      <input type="email" name="email" value="{{ client.email if client else '' }}">
+      <input type="email" name="email" value="{{ client.email if client else '' }}" placeholder="e.g. maria@example.com">
     </label>
     <label>Phone
-      <input type="tel" name="phone" value="{{ client.phone if client else '' }}">
+      <input type="tel" name="phone" value="{{ client.phone if client else '' }}" placeholder="e.g. (360) 555-0123">
     </label>
     <label class="span2">Address
-      <input type="text" name="address" value="{{ client.address if client else '' }}">
+      <input type="text" name="address" value="{{ client.address if client else '' }}" placeholder="e.g. 210 E 5th St, Port Angeles, WA 98362">
     </label>
     <label>Date of birth
       <input type="date" name="date_of_birth" value="{{ client.date_of_birth if client else '' }}">
@@ -28,7 +29,7 @@
              placeholder="XXX-XX-XXXX" pattern="\d{3}-?\d{2}-?\d{4}" title="Format: XXX-XX-XXXX">
     </label>
     <label>Spouse / partner name
-      <input type="text" name="spouse_name" value="{{ client.spouse_name if client else '' }}">
+      <input type="text" name="spouse_name" value="{{ client.spouse_name if client else '' }}" placeholder="e.g. James Garcia">
     </label>
     <label>Spouse / partner date of birth
       <input type="date" name="spouse_dob" value="{{ client.spouse_dob if client else '' }}">

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Profit &amp; Loss — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Profit &amp; Loss</h1>
+  <h1>{{ icon('billing', 22) }} Profit &amp; Loss</h1>
   <a href="{{ url_for('report_export_csv', report='pl', from_date=from_date, to_date=to_date) }}" class="btn">{{ icon('download', 15) }} Export CSV</a>
 </div>
 {% set active_tab = 'reports' %}

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Operating Transactions — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Operating Transactions</h1>
+  <h1>{{ icon('billing', 22) }} Operating Transactions</h1>
   {% if perms.get('manage_accounting') %}<a href="{{ url_for('op_txn_new') }}" class="btn btn-primary">{{ icon('plus', 15) }} Record transaction</a>{% endif %}
 </div>
 {% set active_tab = 'transactions' %}
@@ -59,6 +60,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No transactions match these filters.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('billing', 22) }}</div>
+  <h3>No transactions match these filters</h3>
+  <p>Try widening the date range or clearing the search.</p>
+</div>
 {% endif %}
 {% endblock %}

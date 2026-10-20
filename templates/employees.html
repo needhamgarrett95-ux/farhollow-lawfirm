@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Employees — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Employees</h1>
+  <h1>{{ icon('users', 22) }} Employees</h1>
   <a href="{{ url_for('employee_new') }}" class="btn btn-primary">{{ icon('plus', 15) }} Add employee</a>
 </div>
 {% set active_tab = 'employees' %}
@@ -46,6 +47,11 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No employees yet. <a href="{{ url_for('employee_new') }}">Add the first one</a>.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('users', 22) }}</div>
+  <h3>No employees yet</h3>
+  <p>Add your first employee to get payroll and timeclock going.</p>
+  <a href="{{ url_for('employee_new') }}" class="btn btn-primary">Add your first employee</a>
+</div>
 {% endif %}
 {% endblock %}

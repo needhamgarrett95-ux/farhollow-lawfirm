@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Trust Trial Balance{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Trust Trial Balance</h1>
+  <h1>{{ icon('trust', 22) }} Trust Trial Balance</h1>
   <a href="{{ url_for('trust_overview') }}" class="btn btn-link">Back to trust</a>
 </div>
 <p class="muted">Every client's ledger balance, per account. The sum of client ledgers must equal the account's book balance.</p>

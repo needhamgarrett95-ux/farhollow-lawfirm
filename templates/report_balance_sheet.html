@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Balance Sheet — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Balance Sheet</h1>
+  <h1>{{ icon('billing', 22) }} Balance Sheet</h1>
   <a href="{{ url_for('report_export_csv', report='balance_sheet', as_of=as_of) }}" class="btn">{{ icon('download', 15) }} Export CSV</a>
 </div>
 {% set active_tab = 'reports' %}

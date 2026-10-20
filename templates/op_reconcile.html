@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Reconcile {{ account.name }} — Accounting{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Reconcile: {{ account.name }}</h1>
+  <h1>{{ icon('checkmark', 22) }} Reconcile: {{ account.name }}</h1>
   <a href="{{ url_for('coa_list') }}" class="btn btn-link">Back to chart of accounts</a>
 </div>
 {% set active_tab = 'reconcile' %}
@@ -58,6 +59,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No reconciliations recorded yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('checkmark', 22) }}</div>
+  <h3>No reconciliations yet</h3>
+  <p>Completed reconciliations will be listed here.</p>
+</div>
 {% endif %}
 {% endblock %}

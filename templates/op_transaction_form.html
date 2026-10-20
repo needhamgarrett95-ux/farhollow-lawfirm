@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{% if txn %}Edit{% else %}Record{% endif %} Operating Transaction — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>{% if txn %}Edit Transaction{% else %}Record Transaction{% endif %}</h1>
+  <h1>{{ icon('billing', 22) }} {% if txn %}Edit Transaction{% else %}Record Transaction{% endif %}</h1>
 </div>
 {% set active_tab = 'transactions' %}
 {% include "_accounting_tabs.html" %}

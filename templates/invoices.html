@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Invoices — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Invoices</h1>
+  <h1>{{ icon('billing', 22) }} Invoices</h1>
   {% if perms.get('manage_billing') %}<a href="{{ url_for('invoice_new') }}" class="btn btn-primary">New invoice</a>{% endif %}
 </div>
 
@@ -25,6 +26,7 @@
 </table>
 {% else %}
 <div class="empty-state">
+  <div class="empty-icon">{{ icon('billing', 28) }}</div>
   <h2>No invoices yet</h2>
   <p class="muted">Create your first invoice from a client's unbilled time.</p>
   {% if perms.get('manage_billing') %}<a href="{{ url_for('invoice_new') }}" class="btn btn-primary">+ Create your first invoice</a>{% endif %}

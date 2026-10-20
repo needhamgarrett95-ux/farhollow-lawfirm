@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Backup history — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -29,6 +30,10 @@ The app backs up automatically once a day and keeps the 30 most recent backups.
   </tbody>
 </table>
 {% else %}
-<p class="muted">No backups recorded yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('checkmark', 22) }}</div>
+  <h3>No backups yet</h3>
+  <p>Run your first backup to protect the firm's data.</p>
+</div>
 {% endif %}
 {% endblock %}

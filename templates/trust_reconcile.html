@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Reconcile {{ account.name }} — Trust{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Reconcile: {{ account.name }}</h1>
+  <h1>{{ icon('checkmark', 22) }} Reconcile: {{ account.name }}</h1>
   <a href="{{ url_for('trust_account_detail', account_id=account.id) }}" class="btn btn-link">Back to account</a>
 </div>
 
@@ -56,6 +57,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No reconciliations recorded yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('checkmark', 22) }}</div>
+  <h3>No reconciliations yet</h3>
+  <p>Completed reconciliations will be listed here.</p>
+</div>
 {% endif %}
 {% endblock %}

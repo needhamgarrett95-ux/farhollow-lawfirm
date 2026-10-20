@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Tax Settings — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Tax Settings</h1>
+  <h1>{{ icon('settings', 22) }} Tax Settings</h1>
 </div>
 {% set active_tab = 'tax' %}
 {% include "_accounting_tabs.html" %}
@@ -27,7 +28,11 @@
       <button type="submit" class="btn btn-primary">{{ icon('checkmark', 15) }} Save tax rates</button>
     </div>
     {% else %}
-    <p class="muted">No tax rates configured yet.</p>
+    <div class="empty-state mini">
+  <div class="empty-icon">{{ icon('settings', 22) }}</div>
+  <h3>No tax rates yet</h3>
+  <p>Rates will appear here once they are configured.</p>
+</div>
     {% endif %}
   </form>
 </div>

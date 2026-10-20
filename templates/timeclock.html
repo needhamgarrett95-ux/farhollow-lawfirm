@@ -3,107 +3,286 @@
 {% block title %}Timeclock — Case Management{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ icon('alarm', 22) }} Timeclock</h1>
-  {% if can_view_all %}
-  <p class="dash-sub">Who's at work and full time history</p>
-  {% else %}
-  <p class="dash-sub">Your time entries</p>
+  <h1>{{ icon('alarm', 24) }} Timeclock</h1>
+  {% if pending_corrections %}
+  <span class="badge status-pending">{{ pending_corrections|length }} correction{{ 's' if pending_corrections|length != 1 }} to review</span>
   {% endif %}
 </div>
+<p class="page-sub">{% if can_view_all %}Who's at work and full time history{% else %}Your time entries{% endif %}</p>
 
 {% if not employees %}
 <div class="empty-state">
+  <div class="empty-icon">{{ icon('alarm', 28) }}</div>
   <h3>No employee record linked</h3>
-  <p class="muted">Your login isn't linked to an employee record yet. Ask an admin to link your account on the Employees page.</p>
+  <p>Your login isn't linked to an employee record yet. Ask an admin to link your account on the Employees page.</p>
+  {% if perms.get('run_payroll') %}<a href="{{ url_for('employee_list') }}" class="btn btn-primary">Go to Employees</a>{% endif %}
 </div>
 {% else %}
 
-<h2>Clock in / out</h2>
-<div class="detail-grid">
-{% for e in employees %}
-  {% set ns = namespace(open=none) %}
-  {% for o in open_entries %}{% if o.employee_id == e.id %}{% set ns.open = o %}{% endif %}{% endfor %}
-  <div class="detail-card">
-    <h2>{{ e.full_name }}</h2>
-    {% if ns.open %}
-    <p class="muted small">Clocked in at {{ ns.open.clock_in[:16].replace('T', ' ') }}</p>
-    <form method="post" action="{{ url_for('timeclock_clockout', entry_id=ns.open.id) }}">
+{# ---- Hero: my own clock ---- #}
+{% set ns = namespace(me=none, my_open=none) %}
+{% for e in employees %}{% if e.id == my_employee_id %}{% set ns.me = e %}{% endif %}{% endfor %}
+{% for o in open_entries %}{% if o.employee_id == my_employee_id %}{% set ns.my_open = o %}{% endif %}{% endfor %}
+{% if ns.me %}
+<div class="tc-hero">
+  <div class="tc-live"><span id="tcTime">--:--</span><span class="tc-sec" id="tcSec"></span></div>
+  <div class="tc-date" id="tcDate">{{ today }}</div>
+  {% if ns.my_open %}
+  <div class="tc-status on"><span class="pulse-dot"></span> Clocked in since {{ ns.my_open.clock_in[:16].replace('T', ' ') }}</div>
+  <form method="post" action="{{ url_for('timeclock_clockout', entry_id=ns.my_open.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <button type="submit" class="btn btn-danger btn-xl">{{ icon('alarm', 18) }} Clock out</button>
+  </form>
+  {% else %}
+  <div class="tc-status">{{ icon('clock', 16) }} Not currently clocked in</div>
+  <form method="post" action="{{ url_for('timeclock_clockin', employee_id=ns.me.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <button type="submit" class="btn btn-primary btn-xl">{{ icon('alarm', 18) }} Clock in</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ---- Correction request (staff without manual-entry permission) ---- #}
+{% if not perms.get('run_payroll') %}
+<details class="collapse-card" id="corrRequestCard">
+  <summary>{{ icon('edit', 17) }} Request a correction
+    <span class="muted small" style="font-weight:400">— missed a punch? Ask an admin to fix it.</span>
+    {{ icon('chevron-down', 16, 'chev') }}
+  </summary>
+  <div class="collapse-body">
+    <form method="post" action="{{ url_for('timeclock_correction_request') }}">
       <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
-      <button type="submit" class="btn btn-danger btn-block">{{ icon('alarm', 15) }} Clock out</button>
+      <div class="form-grid">
+        <label>Date *
+          <input type="date" name="correction_date" value="{{ today }}" required>
+        </label>
+        <label>What's wrong? *
+          <div class="seg" data-seg="corrType">
+            <button type="button" class="seg-btn" data-val="missed_clock_in">Missed clock-in</button>
+            <button type="button" class="seg-btn" data-val="missed_clock_out">Missed clock-out</button>
+            <button type="button" class="seg-btn" data-val="wrong_time">Wrong time</button>
+          </div>
+          <input type="hidden" name="correction_type" id="corrType" value="missed_clock_in">
+        </label>
+        <label>Correct clock-in time
+          <input type="time" name="correct_clock_in" placeholder="09:00">
+        </label>
+        <label>Correct clock-out time
+          <input type="time" name="correct_clock_out" placeholder="17:00">
+        </label>
+        <label class="span2">What happened? *
+          <textarea name="reason" rows="3" required placeholder="e.g. Forgot to clock in before the morning meeting"></textarea>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Send request</button>
+      </div>
     </form>
-    {% else %}
-    <p class="muted small">Not currently clocked in.</p>
-    <form method="post" action="{{ url_for('timeclock_clockin', employee_id=e.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
-      <button type="submit" class="btn btn-primary btn-block">{{ icon('alarm', 15) }} Clock in</button>
-    </form>
+  </div>
+</details>
+{% endif %}
+
+{# ---- My correction requests ---- #}
+{% if my_corrections %}
+<h2 class="section-h">{{ icon('clock', 18) }} My correction requests</h2>
+<div class="corr-list">
+  {% for c in my_corrections %}
+  <div class="corr-card {{ c.status }}">
+    <div class="corr-head">
+      <span class="t">{{ {'missed_clock_in': 'Missed clock-in', 'missed_clock_out': 'Missed clock-out', 'wrong_time': 'Wrong time'}[c.correction_type] }}</span>
+      <span class="badge status-{{ c.status }}">{{ c.status|capitalize }}</span>
+      <span class="muted small" style="margin-left:auto">{{ c.correction_date }} · asked {{ c.requested_at[:16].replace('T', ' ') }}</span>
+    </div>
+    <div class="corr-detail">
+      {% if c.correct_clock_in %}<b>Clock-in:</b> {{ c.correct_clock_in }}{% endif %}
+      {% if c.correct_clock_out %}<b>Clock-out:</b> {{ c.correct_clock_out }}{% endif %}
+    </div>
+    <div class="corr-reason">"{{ c.reason }}"</div>
+    {% if c.status != 'pending' %}
+    <div class="corr-review">
+      {% if c.status == 'approved' %}{{ icon('checkmark', 14) }} Approved{% else %}{{ icon('x', 14) }} Denied{% endif %}
+      by {{ c.reviewer_name or 'admin' }} · {{ c.reviewed_at[:16].replace('T', ' ') if c.reviewed_at else '' }}
+      {% if c.review_notes %} — {{ c.review_notes }}{% endif %}
+    </div>
     {% endif %}
   </div>
-{% endfor %}
+  {% endfor %}
 </div>
+{% endif %}
 
+{# ---- Pending review (admin/attorney) ---- #}
+{% if can_view_all and pending_corrections %}
+<h2 class="section-h">{{ icon('alert', 18) }} Corrections to review <span class="badge status-pending">{{ pending_corrections|length }}</span></h2>
+<div class="corr-list">
+  {% for c in pending_corrections %}
+  <div class="corr-card pending">
+    <div class="corr-head">
+      <span class="t">{{ c.employee_name }}</span>
+      <span class="badge status-pending">{{ {'missed_clock_in': 'Missed clock-in', 'missed_clock_out': 'Missed clock-out', 'wrong_time': 'Wrong time'}[c.correction_type] }}</span>
+      <span class="muted small" style="margin-left:auto">{{ c.correction_date }} · asked by {{ c.requester_name or 'staff' }} {{ c.requested_at[:16].replace('T', ' ') }}</span>
+    </div>
+    <div class="corr-detail">
+      {% if c.correct_clock_in %}<b>Clock-in should be:</b> {{ c.correct_clock_in }}{% endif %}
+      {% if c.correct_clock_out %}<b>Clock-out should be:</b> {{ c.correct_clock_out }}{% endif %}
+    </div>
+    <div class="corr-reason">"{{ c.reason }}"</div>
+    <div class="corr-actions">
+      <form method="post" action="{{ url_for('timeclock_correction_approve', correction_id=c.id) }}" class="grow">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+        <label class="muted small">Note (optional)
+          <input type="text" name="review_notes" placeholder="e.g. Verified against calendar">
+        </label>
+        <button type="submit" class="btn btn-primary" style="margin-top:8px">{{ icon('checkmark', 15) }} Approve &amp; apply</button>
+      </form>
+      <form method="post" action="{{ url_for('timeclock_correction_deny', correction_id=c.id) }}" class="grow"
+            onsubmit="return modalConfirmSubmit(this, 'Deny this correction request?', {title: 'Deny request', confirmText: 'Deny', danger: true});">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+        <label class="muted small">Reason for denial *
+          <input type="text" name="review_notes" required placeholder="e.g. Hours don't match the schedule">
+        </label>
+        <button type="submit" class="btn btn-danger" style="margin-top:8px">{{ icon('x', 15) }} Deny</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ---- Who's at work now ---- #}
 {% if can_view_all %}
-<h2>Who's at work now</h2>
+<h2 class="section-h">{{ icon('users', 18) }} Who's at work now</h2>
 {% if open_entries %}
-<div class="chip-row">
+<div class="tc-now">
   {% for o in open_entries %}
-  <div class="chip"><span class="c-av" style="background:var(--green)">{{ o.employee_name[:2].upper() }}</span>{{ o.employee_name }} <span class="muted small">since {{ o.clock_in[:16].replace('T', ' ') }}</span></div>
+  <div class="tc-chip"><span class="c-av" style="background:var(--brand)">{{ o.employee_name[:2].upper() }}</span>{{ o.employee_name }} <span class="muted small">since {{ o.clock_in[:16].replace('T', ' ') }}</span></div>
   {% endfor %}
 </div>
 {% else %}
-<p class="muted">Nobody is clocked in right now.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('users', 22) }}</div>
+  <h3>Nobody clocked in</h3>
+  <p>Everyone's out right now.</p>
+</div>
+{% endif %}
+
+{# ---- Team cards (other employees) ---- #}
+{% set others = employees|rejectattr('id', 'equalto', my_employee_id)|list %}
+{% if others %}
+<h2 class="section-h">{{ icon('alarm', 18) }} Team</h2>
+<div class="tc-team-grid">
+  {% for e in others %}
+  {% set ns2 = namespace(open=none) %}
+  {% for o in open_entries %}{% if o.employee_id == e.id %}{% set ns2.open = o %}{% endif %}{% endfor %}
+  <div class="tc-member">
+    <span class="tc-av">{{ e.full_name[:2].upper() }}</span>
+    <div>
+      <div class="tc-name">{{ e.full_name }}</div>
+      <div class="tc-sub">{% if ns2.open %}Clocked in since {{ ns2.open.clock_in[:16].replace('T', ' ') }}{% else %}Not clocked in{% endif %}</div>
+    </div>
+    <div class="tc-act">
+      {% if ns2.open %}
+      <form method="post" action="{{ url_for('timeclock_clockout', entry_id=ns2.open.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+        <button type="submit" class="btn btn-small btn-danger">Clock out</button>
+      </form>
+      {% else %}
+      <form method="post" action="{{ url_for('timeclock_clockin', employee_id=e.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+        <button type="submit" class="btn btn-small btn-primary">Clock in</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
 {% endif %}
 {% endif %}
 
+{# ---- Manual entry (run_payroll) — collapsible, secondary ---- #}
 {% if perms.get('run_payroll') %}
-<h2>Manual entry</h2>
-<div class="form-card" style="margin-bottom:18px;">
-  <form method="post" action="{{ url_for('timeclock_manual') }}">
-    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
-    <div class="form-grid">
-      <label>Employee *
-        <select name="employee_id" required>
-          <option value="">— choose —</option>
-          {% for e in employees %}
-          <option value="{{ e.id }}">{{ e.full_name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Date *
-        <input type="date" name="entry_date" value="{{ today }}" required>
-      </label>
-      <label>Hours *
-        <input type="number" name="hours" required placeholder="0.00" step="0.01" min="0.01" inputmode="decimal">
-      </label>
-      <label>Notes
-        <input type="text" name="notes" placeholder="e.g. Adjusted for missed clock-in">
-      </label>
-      <div class="form-actions span2">
+<details class="collapse-card">
+  <summary>{{ icon('edit', 17) }} Manual entry
+    <span class="muted small" style="font-weight:400">— add hours by hand</span>
+    {{ icon('chevron-down', 16, 'chev') }}
+  </summary>
+  <div class="collapse-body">
+    <form method="post" action="{{ url_for('timeclock_manual') }}">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+      <div class="form-grid">
+        <label>Employee *
+          <select name="employee_id" required>
+            <option value="">— choose —</option>
+            {% for e in employees %}
+            <option value="{{ e.id }}">{{ e.full_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Date *
+          <input type="date" name="entry_date" value="{{ today }}" required>
+        </label>
+        <label>Hours *
+          <input type="number" name="hours" required placeholder="e.g. 8.00" step="0.01" min="0.01" inputmode="decimal">
+        </label>
+        <label>Notes
+          <input type="text" name="notes" placeholder="e.g. Adjusted for missed clock-in">
+        </label>
+      </div>
+      <div class="form-actions">
         <button type="submit" class="btn btn-primary">Add entry</button>
       </div>
-    </div>
-  </form>
-</div>
+    </form>
+  </div>
+</details>
 {% endif %}
 
-<h2>Recent entries</h2>
+{# ---- Recent entries timeline ---- #}
+<h2 class="section-h">{{ icon('clock', 18) }} Recent entries</h2>
 {% if recent %}
-<table class="table">
-  <thead><tr>{% if can_view_all %}<th>Employee</th>{% endif %}<th>Clock in</th><th>Clock out</th><th>Hours</th><th>Notes</th></tr></thead>
-  <tbody>
+<div class="tc-timeline">
   {% for r in recent %}
-    <tr>
-      {% if can_view_all %}<td>{{ r.employee_name }}</td>{% endif %}
-      <td class="nowrap">{{ r.clock_in[:16].replace('T', ' ') if r.clock_in else '—' }}</td>
-      <td class="nowrap">{{ r.clock_out[:16].replace('T', ' ') if r.clock_out else '— still out' }}</td>
-      <td class="nowrap">{{ r.hours }}</td>
-      <td>{{ r.notes or '' }}</td>
-    </tr>
+  <div class="tc-entry">
+    {% if can_view_all %}<div class="tc-who">{{ r.employee_name }}</div>{% endif %}
+    <div class="tc-when">
+      {{ r.clock_in[:16].replace('T', ' ') if r.clock_in else '—' }}
+      →
+      {{ r.clock_out[:16].replace('T', ' ') if r.clock_out else 'still out' }}
+      <span class="tc-hours">{{ r.hours }}h</span>
+    </div>
+    {% if r.notes %}<div class="tc-notes">{{ r.notes }}</div>{% endif %}
+  </div>
   {% endfor %}
-  </tbody>
-</table>
+</div>
 {% else %}
-<p class="muted">No time entries yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('clock', 22) }}</div>
+  <h3>No time entries yet</h3>
+  <p>Clock in above and your hours will show up here.</p>
+</div>
 {% endif %}
 {% endif %}
+
+<script>
+/* Live clock for the hero card */
+(function () {
+  var t = document.getElementById('tcTime'),
+      s = document.getElementById('tcSec'),
+      d = document.getElementById('tcDate');
+  if (!t) return;
+  function tick() {
+    var n = new Date();
+    var h = n.getHours(), m = n.getMinutes(), ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    t.textContent = h + ':' + String(m).padStart(2, '0') + ' ' + ap;
+    if (s) s.textContent = ':' + String(n.getSeconds()).padStart(2, '0');
+    if (d) {
+      var days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      d.textContent = days[n.getDay()] + ', ' + months[n.getMonth()] + ' ' + n.getDate() + ', ' + n.getFullYear();
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
 {% endblock %}

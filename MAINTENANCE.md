@@ -1181,3 +1181,25 @@ won't update further).
 Each dropdown only shows items you have permission for. If you have zero items in a group, the whole dropdown is hidden. Click the group name to open/close; click an item to go there. Press Escape to close.
 
 **UI permission audit:** Every button and link in the app now checks your permissions before showing. If you can't do something, you won't see the button for it — no more "Forbidden" pages from clicking visible buttons.
+
+## 40. UI polish + timeclock correction requests (v2.4.0)
+
+**Premium UI overhaul.** The whole app now uses one consistent design system:
+- **Form fields** — every input, dropdown, date picker, and text area is themed to the app (dark slate fields in dark mode, warm gray in light mode) with a gold focus ring. No more stark white boxes.
+- **Segmented pills** — short choices (pay type, pay frequency, filing status, user role) now use tap-friendly pill selectors instead of dropdowns.
+- **Tables** — hover highlighting, quieter header text, consistent padding.
+- **Empty states** — every list page shows a designed card with an icon, a headline, and a "first action" button instead of plain text.
+- **Page headers** — every page leads with an icon + title, and card headers match.
+
+**Timeclock redesign.** The Timeclock page now opens with a large live clock card: current time, today's date, your clocked-in status (with a soft pulsing green dot), and one big Clock In / Clock Out button. Below it:
+- **Who's at work** — avatar chips with green dots showing everyone currently clocked in.
+- **Team** — one card per employee with their status and a clock in/out button (admin/attorney).
+- **Recent entries** — a timeline instead of a raw table.
+- **Manual entry** — collapsed by default; it's a secondary tool now.
+
+**Correction requests (new).** Staff who can't enter time manually can fix a bad punch properly:
+1. On the Timeclock page, use **Request a correction** — pick the date, what's wrong (missed clock-in / missed clock-out / wrong time), the correct time(s), and a short reason.
+2. The request lands in the admin/attorney review queue on the Timeclock page, and the **Team** menu shows a badge with the number waiting.
+3. Reviewer can **Approve** (the correction is applied to the time entry right then) or **Deny** (a reason is required, and the employee sees it).
+4. The employee's own requests are listed on their Timeclock page with their status (pending / approved / denied).
+5. Every request, approval, and denial is written to the Audit Log.

@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ 'Edit user' if user else 'New user' }} — Case Management{% endblock %}
 {% block content %}
-<h1>{{ 'Edit user' if user else 'New user' }}</h1>
+<h1>{{ icon('users', 22) }} {{ 'Edit user' if user else 'New user' }}</h1>
 <form method="post" action="{{ url_for('user_edit', user_id=user.id) if user else url_for('user_new') }}" class="form-card">
   <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
   <div class="form-grid">
@@ -10,11 +11,11 @@
       <input type="text" value="{{ user.username }}" disabled>
       <span class="muted small">Usernames cannot be changed.</span>
       {% else %}
-      <input type="text" name="username" required autocomplete="off">
+      <input type="text" name="username" required autocomplete="off" placeholder="e.g. jgarcia">
       {% endif %}
     </label>
     <label>Full name *
-      <input type="text" name="full_name" value="{{ user.full_name if user else '' }}" required>
+      <input type="text" name="full_name" value="{{ user.full_name if user else '' }}" required placeholder="e.g. Jane Garcia">
     </label>
     {% if not user %}
     <label>Password * <span class="muted small">(min 8 characters)</span>
@@ -22,11 +23,12 @@
     </label>
     {% endif %}
     <label>Role *
-      <select name="role">
+      <div class="seg" data-seg="roleInput">
         {% for r in roles %}
-        <option value="{{ r }}" {% if user and user.role == r %}selected{% endif %}>{{ r|capitalize }}</option>
+        <button type="button" class="seg-btn" data-val="{{ r }}">{{ r|capitalize }}</button>
         {% endfor %}
-      </select>
+      </div>
+      <input type="hidden" name="role" id="roleInput" value="{{ user.role if user else 'staff' }}">
     </label>
   </div>
   <p class="muted small">
@@ -76,19 +78,19 @@
 <script>
 (function () {
   var presets = {{ role_presets | tojson }};
-  var roleSelect = document.querySelector('select[name="role"]');
+  var roleInput = document.getElementById('roleInput');
   function applyPreset(role) {
     var preset = presets[role] || {};
     document.querySelectorAll('input[data-perm]').forEach(function (cb) {
       cb.checked = !!preset[cb.getAttribute('data-perm')];
     });
   }
-  if (roleSelect) {
-    roleSelect.addEventListener('change', function () { applyPreset(roleSelect.value); });
+  if (roleInput) {
+    roleInput.addEventListener('change', function () { applyPreset(roleInput.value); });
   }
   var resetBtn = document.getElementById('resetPerms');
-  if (resetBtn && roleSelect) {
-    resetBtn.addEventListener('click', function () { applyPreset(roleSelect.value); });
+  if (resetBtn && roleInput) {
+    resetBtn.addEventListener('click', function () { applyPreset(roleInput.value); });
   }
 })();
 </script>

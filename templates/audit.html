@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Audit Log — Case Management{% endblock %}
 {% block content %}
-<h1>Audit Log</h1>
+<h1>{{ icon('documents', 22) }} Audit Log</h1>
 <p class="muted">Every login and every record viewed, created, changed, or deleted is recorded here.</p>
 {% if entries %}
 <table class="table">
@@ -18,6 +19,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No audit entries yet.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('documents', 22) }}</div>
+  <h3>No audit entries yet</h3>
+  <p>Actions will be recorded here automatically as people use the app.</p>
+</div>
 {% endif %}
 {% endblock %}

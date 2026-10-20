@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Software Update{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Software Update</h1>
+  <h1>{{ icon('sync', 22) }} Software Update</h1>
 </div>
 
 <p>Current version: <strong>v{{ current_version }}</strong>

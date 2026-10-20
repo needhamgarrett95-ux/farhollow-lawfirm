@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Record Trust Transaction{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>{% if reverse_of %}Reverse Transaction{% else %}Record Trust Transaction{% endif %}</h1>
+  <h1>{{ icon('trust', 22) }} {% if reverse_of %}Reverse Transaction{% else %}Record Trust Transaction{% endif %}</h1>
 </div>
 
 {% if reverse_of %}
