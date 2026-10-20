@@ -1,0 +1,19 @@
+{% extends "portal_base.html" %}
+{% block title %}Log in — Client Portal{% endblock %}
+{% block content %}
+<div class="p-auth">
+  <div class="p-card">
+    <h1>Client Portal</h1>
+    <p class="p-muted">Log in to see your case, send documents, and message the office. Your login is separate from anything else — it only ever shows your own information.</p>
+    <form method="post" class="p-form">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <label for="email">Email address</label>
+      <input type="email" id="email" name="email" required autocomplete="username" placeholder="you@example.com">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Your password">
+      <button type="submit" class="btn btn-primary btn-lg p-block">Log in</button>
+    </form>
+    <p class="p-muted p-small">New here? The office will send you an invite link to set up your account. If you can't get in, call the office and they'll send a fresh link.</p>
+  </div>
+</div>
+{% endblock %}

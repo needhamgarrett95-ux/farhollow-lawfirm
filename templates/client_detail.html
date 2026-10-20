@@ -97,6 +97,109 @@
 </div>
 {% endif %}
 
+{# Client portal (v2.6) #}
+<div class="detail-card">
+  <div class="page-head" style="margin-bottom: 8px;">
+    <h2>{{ icon('mail', 18) }} Client Portal</h2>
+    <a class="btn btn-small" href="{{ url_for('portal_review') }}">Review queue</a>
+  </div>
+  {% if portal.opp_warning %}
+  <div class="flash flash-warning">Heads up: {{ portal.opp_warning | join(', ') }} — the opposing party in this client's case — also has portal access under their own client record. Accounts are fully separate and neither side can see the other's information, but expect portal activity from both parties.</div>
+  {% endif %}
+  <p>
+    <strong>Status:</strong>
+    {% if portal.user and portal.user.is_active %}
+      <span class="badge badge-active">Active</span>
+      <span class="muted">login {{ portal.user.email }}{% if portal.user.last_login_at %} · last login {{ portal.user.last_login_at[:16].replace('T', ' ') }}{% endif %}</span>
+    {% elif portal.user %}
+      <span class="badge badge-danger">Revoked</span>
+      <span class="muted">Send a new invite to restore access.</span>
+    {% elif portal.pending_invite %}
+      <span class="badge badge-pending">Invite sent</span>
+      <span class="muted">expires {{ portal.pending_invite.expires_at[:16].replace('T', ' ') }} — the link works once.</span>
+    {% else %}
+      <span class="badge badge-closed">No portal access</span>
+    {% endif %}
+    {% if portal.unread_msgs %} · <a href="{{ url_for('portal_staff_thread', client_id=client.id) }}"><strong>{{ portal.unread_msgs }} unread message{{ 's' if portal.unread_msgs != 1 }}</strong></a>{% endif %}
+  </p>
+  {% if portal.invite_link %}
+  <div class="portal-invite-box">
+    <label>Invite link — copy it and send it to the client (text, email, or in person). It works once and expires in 72 hours:</label>
+    <div class="mono small" style="word-break: break-all;">{{ portal.invite_link }}</div>
+  </div>
+  {% endif %}
+  <div class="actions-row">
+    {% if perms.get('manage_clients') %}
+    {% if not portal.user or not portal.user.is_active %}
+    <form method="post" action="{{ url_for('portal_invite_create', client_id=client.id) }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <button type="submit" class="btn btn-primary btn-small" {% if not portal.has_email %}disabled title="Add an email address to this client first"{% endif %}>{{ 'Resend invite' if portal.pending_invite or portal.user else 'Send invite' }}</button>
+    </form>
+    {% endif %}
+    {% if portal.user and portal.user.is_active %}
+    <form method="post" action="{{ url_for('portal_revoke', client_id=client.id) }}" class="inline" onsubmit="return confirm('Revoke portal access for {{ client.first_name }} {{ client.last_name }}? They will no longer be able to log in.');">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <button type="submit" class="btn btn-small">Revoke access</button>
+    </form>
+    {% endif %}
+    {% else %}
+    <span class="muted">Invites and revoking need the Manage Clients permission.</span>
+    {% endif %}
+    <a class="btn btn-small" href="{{ url_for('portal_staff_thread', client_id=client.id) }}">Open message thread</a>
+  </div>
+
+  <h3 style="margin-top:16px;">Document requests</h3>
+  {% if portal.requests %}
+  <ul class="clean-list">
+    {% for r in portal.requests %}
+    <li>
+      <strong>{{ r.title }}</strong>
+      <span class="badge {% if r.status == 'open' %}badge-pending{% elif r.status == 'fulfilled' %}badge-active{% else %}badge-closed{% endif %}">{{ r.status }}</span>
+      {% if r.case_number %}<span class="muted">case {{ r.case_number }}</span>{% endif %}
+      <span class="muted">· {{ r.created_at[:10] }}</span>
+      {% if r.status == 'open' and perms.get('manage_clients') %}
+      <form method="post" action="{{ url_for('portal_request_cancel', client_id=client.id, request_id=r.id) }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+        <button type="submit" class="btn btn-small">Cancel</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No requests yet. Ask for a document below and it appears on the client's portal home as a checklist item.</p>
+  {% endif %}
+  {% if perms.get('manage_clients') %}
+  <form method="post" action="{{ url_for('portal_request_create', client_id=client.id) }}" class="portal-request-form">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <input type="text" name="title" placeholder="What do you need? e.g. 2024 tax return" required>
+    <input type="text" name="note" placeholder="Optional note for the client">
+    <select name="case_id">
+      <option value="">Any case / client-level</option>
+      {% for c in cases %}<option value="{{ c.id }}">{{ c.case_number }} — {{ c.title or c.case_type }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-small btn-primary">Request document</button>
+  </form>
+  {% endif %}
+
+  {% if portal.uploads %}
+  <h3 style="margin-top:16px;">Recent portal uploads</h3>
+  <ul class="clean-list">
+    {% for u in portal.uploads %}
+    <li>{{ u.original_name }} — <span class="badge {% if u.status == 'pending' %}badge-pending{% elif u.status == 'accepted' %}badge-active{% else %}badge-danger{% endif %}">{{ u.status }}</span> <span class="muted">{{ u.uploaded_at[:10] }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if portal.activity %}
+  <h3 style="margin-top:16px;">Recent portal activity</h3>
+  <ul class="clean-list">
+    {% for a in portal.activity %}
+    <li><span class="muted">{{ a.created_at[:16].replace('T', ' ') }}</span> — {{ a.summary }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+
 {# Quick notes (v2.4.1) #}
 {% from "_notes.html" import notes_section %}
 {{ notes_section(notes, 'client', client.id) }}

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Portal Review — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('mail', 22) }} Portal Review</h1>
+  <a class="btn" href="{{ url_for('portal_staff_messages') }}">Message inbox</a>
+</div>
+<p class="muted">Everything clients send through the portal lands here first. Uploads stay <strong>quarantined</strong> — they are not in any case file — until you accept them.</p>
+
+<div class="detail-card">
+  <h2>Pending uploads ({{ pending_uploads | length }})</h2>
+  {% if pending_uploads %}
+  {% for u in pending_uploads %}
+  <div class="portal-review-row">
+    <div class="portal-review-main">
+      <strong>{{ u.original_name }}</strong>
+      <span class="badge">{{ doc_types[u.doc_type].label if u.doc_type in doc_types else u.doc_type }}</span>
+      {% if u.detected_type == 'heic' %}<span class="badge" title="HEIC photo — opens on phones and modern computers">HEIC</span>{% endif %}
+      <br>
+      <span class="muted">From <a href="{{ url_for('client_detail', client_id=u.client_id) }}">{{ u.first_name }} {{ u.last_name }}</a>
+      · {{ (u.file_size / 1024) | round(1) }} KB · {{ u.uploaded_at[:16].replace('T', ' ') }}
+      {% if u.request_title %} · answers request “{{ u.request_title }}”{% endif %}
+      {% if u.message_id %} · attached to a <a href="{{ url_for('portal_staff_thread', client_id=u.client_id) }}">message</a>{% endif %}
+      {% if u.case_number %} · suggested case {{ u.case_number }}{% elif not u.case_id %} · <strong>no case yet — pick one when accepting, or accept as a client-level file</strong>{% endif %}
+      </span>
+    </div>
+    <a class="btn btn-small" href="{{ url_for('portal_upload_download', upload_id=u.id) }}">{{ icon('download', 14) }} Review file</a>
+    <form method="post" action="{{ url_for('portal_upload_accept', upload_id=u.id) }}" class="portal-review-form">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <select name="case_id" title="File into case">
+        <option value="">Client-level file (no case)</option>
+        {% for c in client_cases.get(u.client_id, []) %}
+        <option value="{{ c.id }}" {% if u.case_id == c.id %}selected{% endif %}>{{ c.case_number }} — {{ c.title or c.case_type }}</option>
+        {% endfor %}
+      </select>
+      <select name="category" title="Document category">
+        {% for cat in categories %}
+        <option value="{{ cat }}" {% if (doc_types[u.doc_type].category if u.doc_type in doc_types else 'other') == cat %}selected{% endif %}>{{ cat | title }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-primary btn-small">Accept &amp; file</button>
+    </form>
+    <form method="post" action="{{ url_for('portal_upload_reject', upload_id=u.id) }}" class="portal-review-form">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <input type="text" name="staff_note" placeholder="Note the client will see (e.g. too blurry — please retake)">
+      <button type="submit" class="btn btn-small">Reject</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="muted">No uploads waiting. When a client sends a document or a message attachment, it shows up here.</p>
+  {% endif %}
+</div>
+
+<div class="detail-card">
+  <h2>Submitted forms ({{ submitted_forms | length }})</h2>
+  {% if submitted_forms %}
+  <table class="table">
+    <thead><tr><th>Form</th><th>Client</th><th>Case</th><th>Submitted</th><th></th></tr></thead>
+    <tbody>
+    {% for s in submitted_forms %}
+      <tr>
+        <td>{{ form_defs[s.form_key].title if s.form_key in form_defs else s.form_key }}</td>
+        <td><a href="{{ url_for('client_detail', client_id=s.client_id) }}">{{ s.first_name }} {{ s.last_name }}</a></td>
+        <td>{{ s.case_number or '—' }}</td>
+        <td>{{ (s.submitted_at or '')[:16].replace('T', ' ') }}</td>
+        <td><a class="btn btn-small btn-primary" href="{{ url_for('portal_form_review', sub_id=s.id) }}">Review</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No forms waiting for review.</p>
+  {% endif %}
+</div>
+
+<div class="detail-card">
+  <h2>Message threads</h2>
+  {% if threads %}
+  <table class="table">
+    <thead><tr><th>Client</th><th>Unread</th><th>Last activity</th><th></th></tr></thead>
+    <tbody>
+    {% for t in threads %}
+      <tr>
+        <td><a href="{{ url_for('client_detail', client_id=t.client_id) }}">{{ t.first_name }} {{ t.last_name }}</a></td>
+        <td>{% if t.unread %}<span class="bdg">{{ t.unread }}</span>{% else %}—{% endif %}</td>
+        <td>{{ (t.last_at or '')[:16].replace('T', ' ') }}</td>
+        <td><a class="btn btn-small" href="{{ url_for('portal_staff_thread', client_id=t.client_id) }}">Open thread</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No client messages yet.</p>
+  {% endif %}
+</div>
+
+<div class="detail-card">
+  <h2>Recent portal activity</h2>
+  {% if activity %}
+  <ul class="clean-list">
+    {% for a in activity %}
+    <li><span class="muted">{{ a.created_at[:16].replace('T', ' ') }}</span> — <strong>{{ a.first_name }} {{ a.last_name }}</strong>: {{ a.summary }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Nothing yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

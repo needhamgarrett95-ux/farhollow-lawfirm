@@ -1,0 +1,15 @@
+{% extends "portal_base.html" %}
+{% block title %}Something went wrong — Client Portal{% endblock %}
+{% block content %}
+<div class="p-auth">
+  <div class="p-card">
+    <h1>{{ code }}</h1>
+    <p class="p-muted">{{ message }}</p>
+    {% if pu %}
+    <a class="btn btn-primary" href="{{ url_for('portal_home') }}">Back to your portal home</a>
+    {% else %}
+    <a class="btn btn-primary" href="{{ url_for('portal_login') }}">Go to the login page</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

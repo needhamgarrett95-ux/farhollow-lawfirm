@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Messages with {{ client.first_name }} {{ client.last_name }} — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('mail', 22) }} {{ client.first_name }} {{ client.last_name }}</h1>
+  <span>
+    <a class="btn" href="{{ url_for('client_detail', client_id=client.id) }}">Client record</a>
+    <a class="btn" href="{{ url_for('portal_staff_messages') }}">All threads</a>
+  </span>
+</div>
+<div class="flash flash-info">{{ disclaimer }} <span class="muted">(This note is shown to the client above their composer.)</span></div>
+
+<div class="detail-card">
+  <div class="staff-chat">
+    {% if messages %}
+    {% for m in messages %}
+    <div class="p-bubble-row {% if m.sender_type == 'staff' %}mine{% else %}theirs{% endif %}">
+      <div class="p-bubble {% if m.sender_type == 'staff' %}staff-bubble{% endif %}">
+        <div class="p-bubble-name">{{ m.sender_name }}{% if m.sender_type == 'client' %} · client{% endif %}</div>
+        {% if m.body %}<div class="p-bubble-body">{{ m.body }}</div>{% endif %}
+        {% if m.attachment_upload_id %}
+        <div class="p-att-box">
+          {{ icon('documents', 14) }} {{ m.att_name or 'Attachment' }}
+          {% if m.att_status == 'pending' %}
+          <span class="badge">pending review</span>
+          <a href="{{ url_for('portal_review') }}">review in the queue</a>
+          {% elif m.att_status == 'accepted' %}
+          <span class="badge">filed</span>
+          <a href="{{ url_for('portal_upload_download', upload_id=m.att_id) }}">download</a>
+          {% elif m.att_status == 'rejected' %}
+          <span class="badge">rejected</span>
+          {% endif %}
+        </div>
+        {% endif %}
+        <div class="p-bubble-time">{{ m.created_at[:16].replace('T', ' ') }}</div>
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No messages in this thread yet.</p>
+    {% endif %}
+  </div>
+
+  {% if perms.get('manage_clients') %}
+  <form method="post" class="staff-reply">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <label for="body">Reply as the office</label>
+    <textarea id="body" name="body" rows="3" placeholder="Write a reply — the client sees it in their portal…"></textarea>
+    <button type="submit" class="btn btn-primary">Send reply</button>
+  </form>
+  {% else %}
+  <p class="muted">You can read this thread, but replying needs the Manage Clients permission.</p>
+  {% endif %}
+</div>
+{% endblock %}

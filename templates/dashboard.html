@@ -3,7 +3,7 @@
 {% block title %}Dashboard — Law Office of Derek G. Medina{% endblock %}
 {% block content %}
 <div class="dash-wrap">
-  {% set widget_names = {'alerts': 'Alerts', 'deadlines': 'Filing Deadlines', 'schedule': "Today's Schedule", 'actions': 'Quick Actions', 'trust': 'Trust Balance', 'caseload': 'Active Caseload', 'clients': 'Recent Clients', 'week': 'This Week', 'backup': 'Backup Status', 'timeclock': 'Timeclock'} %}
+  {% set widget_names = {'alerts': 'Alerts', 'deadlines': 'Filing Deadlines', 'schedule': "Today's Schedule", 'actions': 'Quick Actions', 'trust': 'Trust Balance', 'caseload': 'Active Caseload', 'clients': 'Recent Clients', 'week': 'This Week', 'backup': 'Backup Status', 'timeclock': 'Timeclock', 'portal': 'Client Portal'} %}
   <div class="dash-head">
     <div>
       <h1>Overview</h1>
@@ -38,7 +38,7 @@
 
   <div class="masonry" id="dashMasonry">
     {% for w in layout %}
-    {% if w.visible and not (w.id == 'trust' and not perms.get('view_trust')) and not (w.id == 'backup' and not perms.get('manage_backups')) and not (w.id == 'timeclock' and not perms.get('use_timeclock')) %}
+    {% if w.visible and not (w.id == 'trust' and not perms.get('view_trust')) and not (w.id == 'backup' and not perms.get('manage_backups')) and not (w.id == 'timeclock' and not perms.get('use_timeclock')) and not (w.id == 'portal' and not perms.get('view_clients')) %}
 
     {% if w.id == 'alerts' and (overdue or schedule_alert) %}
     <div class="dash-card accent-red" data-widget="alerts">
@@ -245,6 +245,26 @@
         </form>
         <a href="{{ url_for('backup_history') }}" class="btn btn-small">History</a>
       </div>
+    </div>
+    {% endif %}
+
+    {% if w.id == 'portal' and portal_widget %}
+    <div class="dash-card" data-widget="portal">
+      <h3>{{ icon('mail', 18) }} Client Portal</h3>
+      <div class="mini"><div><div class="t">{{ portal_widget.pending_uploads }} upload{{ 's' if portal_widget.pending_uploads != 1 }} to review</div>
+        <div class="s">Quarantined until accepted</div></div>
+        <div class="r"><a href="{{ url_for('portal_review') }}">Review</a></div></div>
+      <div class="mini"><div><div class="t">{{ portal_widget.submitted_forms }} form{{ 's' if portal_widget.submitted_forms != 1 }} submitted</div>
+        <div class="s">Waiting to be imported</div></div>
+        <div class="r"><a href="{{ url_for('portal_review') }}">Review</a></div></div>
+      <div class="mini"><div><div class="t">{{ portal_widget.unread_messages }} unread message{{ 's' if portal_widget.unread_messages != 1 }}</div>
+        <div class="s">From clients</div></div>
+        <div class="r"><a href="{{ url_for('portal_staff_messages') }}">Inbox</a></div></div>
+      {% if portal_widget.activity %}
+      <div class="dash-sub" style="margin-top:8px">Latest: <strong>{{ portal_widget.activity[0].first_name }} {{ portal_widget.activity[0].last_name }}</strong> — {{ portal_widget.activity[0].summary }} ({{ portal_widget.activity[0].created_at[:10] }})</div>
+      {% else %}
+      <div class="dash-sub" style="margin-top:8px">No portal activity yet — invite a client from their record page.</div>
+      {% endif %}
     </div>
     {% endif %}
 

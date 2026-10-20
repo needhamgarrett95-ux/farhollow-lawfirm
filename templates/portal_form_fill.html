@@ -1,0 +1,62 @@
+{% extends "portal_base.html" %}
+{% block title %}{{ fdef.title }} — Client Portal{% endblock %}
+{% block content %}
+<p class="p-muted"><a href="{{ url_for('portal_forms') }}">← All forms</a></p>
+<h1 class="p-h1">{{ fdef.title }}</h1>
+<p class="p-muted">Step {{ step_idx + 1 }} of {{ total_steps }} — <strong>{{ step.title }}</strong></p>
+<div class="p-progressbar"><span style="width: {{ ((step_idx + 1) * 100 // total_steps) }}%"></span></div>
+
+<div class="p-card">
+  <form method="post" class="p-form">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <input type="hidden" name="step" value="{{ step_idx }}">
+    {% if fdef.case_required and step_idx == 0 %}
+    <label for="case_id">Which case is this for?</label>
+    {% if draft and draft.case_id %}
+    <select id="case_id" name="case_id">
+      {% for c in cases %}<option value="{{ c.id }}" {% if draft.case_id == c.id %}selected{% endif %}>{{ c.case_number }} — {{ c.title or c.case_type }}</option>{% endfor %}
+    </select>
+    {% elif cases | length == 1 %}
+    <p><strong>{{ cases[0].case_number }} — {{ cases[0].title or cases[0].case_type }}</strong></p>
+    <input type="hidden" name="case_id" value="{{ cases[0].id }}">
+    {% else %}
+    <select id="case_id" name="case_id" required>
+      <option value="">Choose a case…</option>
+      {% for c in cases %}<option value="{{ c.id }}">{{ c.case_number }} — {{ c.title or c.case_type }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    {% endif %}
+    {% for f in step.fields %}
+    <label for="f_{{ f.name }}">{{ f.label }}{% if f.required %} <span class="p-req">*</span>{% endif %}</label>
+    {% if f.type == 'textarea' %}
+    <textarea id="f_{{ f.name }}" name="{{ f.name }}" rows="{{ f.rows or 3 }}">{{ data.get(f.name, '') }}</textarea>
+    {% elif f.type == 'date' %}
+    <input type="date" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% elif f.type == 'currency' %}
+    <input type="text" inputmode="decimal" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}" placeholder="e.g. 3,200">
+    {% elif f.type == 'email' %}
+    <input type="email" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% elif f.type == 'tel' %}
+    <input type="tel" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% else %}
+    <input type="text" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% endif %}
+    {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    {% endfor %}
+    <div class="p-form-actions">
+      {% if step_idx > 0 %}
+      <button type="submit" name="action" value="back" class="btn" formnovalidate>← Back</button>
+      {% endif %}
+      <button type="submit" name="action" value="save_exit" class="btn" formnovalidate>Save &amp; finish later</button>
+      {% if step_idx < total_steps - 1 %}
+      <button type="submit" name="action" value="next" class="btn btn-primary btn-lg">Save &amp; continue →</button>
+      {% else %}
+      <button type="submit" name="action" value="submit" class="btn btn-primary btn-lg">Review done — submit to the office</button>
+      {% endif %}
+    </div>
+    {% if step_idx == total_steps - 1 %}
+    <p class="p-muted p-small">Submitting sends a copy to the office exactly as you've filled it in. They review it before anything is added to your file.</p>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "portal_base.html" %}
+{% block title %}Messages — Client Portal{% endblock %}
+{% block content %}
+<h1 class="p-h1">Messages</h1>
+<div class="p-disclaimer">{{ disclaimer }}</div>
+
+<div class="p-chat">
+  {% if messages %}
+  {% for m in messages %}
+  <div class="p-bubble-row {% if m.sender_type == 'client' %}mine{% else %}theirs{% endif %}">
+    <div class="p-bubble">
+      {% if m.sender_type == 'staff' %}<div class="p-bubble-name">{{ m.sender_name }} · the office</div>{% endif %}
+      {% if m.body %}<div class="p-bubble-body">{{ m.body }}</div>{% endif %}
+      {% if m.attachment_upload_id %}
+      <a class="p-att" href="{{ url_for('portal_document_download', upload_id=m.attachment_upload_id) }}">{{ m.att_name or 'Attachment' }}{% if m.att_status == 'pending' %} · waiting for office review{% endif %}</a>
+      {% endif %}
+      <div class="p-bubble-time">{{ m.created_at[:16].replace('T', ' ') }}</div>
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="p-muted p-chat-empty">No messages yet. Send the office a message below — they'll reply here.</p>
+  {% endif %}
+</div>
+
+<form method="post" enctype="multipart/form-data" class="p-card p-composer">
+  <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+  <label for="body">Your message</label>
+  <textarea id="body" name="body" rows="3" placeholder="Write to the office…"></textarea>
+  <label for="file">Attach a document (optional)</label>
+  <input type="file" id="file" name="file">
+  <button type="submit" class="btn btn-primary btn-lg p-block">Send</button>
+</form>
+{% endblock %}

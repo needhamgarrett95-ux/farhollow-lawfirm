@@ -10,6 +10,7 @@ import re
 import io
 import json
 import math
+import hashlib
 import sqlite3
 import secrets
 import shutil
@@ -19,6 +20,7 @@ import threading
 import time
 import urllib.request
 import uuid
+import zipfile
 from datetime import datetime, timedelta, date, timezone
 from functools import wraps
 
@@ -79,6 +81,12 @@ INVOICE_STATUSES = ["draft", "sent", "paid", "overdue"]
 # Uploaded documents live on disk (not in the DB), namespaced per case.
 DOCUMENTS_DIR = os.path.join(INSTANCE_DIR, "documents")
 os.makedirs(DOCUMENTS_DIR, exist_ok=True)
+
+# Client portal uploads (v2.6) live in their own area, namespaced per
+# client, until staff accept them into a case's documents (quarantine).
+PORTAL_UPLOAD_DIR = os.path.join(INSTANCE_DIR, "portal_uploads")
+os.makedirs(PORTAL_UPLOAD_DIR, exist_ok=True)
+PORTAL_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB per portal file
 
 # Never allow executable uploads — a law office cannot risk malware.
 BLOCKED_EXTENSIONS = {
@@ -561,6 +569,134 @@ CREATE TABLE IF NOT EXISTS calendar_sync_map (
     google_event_id TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+-- Client portal (v2.6). Portal accounts are a SEPARATE auth realm from
+-- staff users: one portal account per client record, invite-only.
+-- Portal sessions use session["portal_user_id"] and can never satisfy
+-- the staff login_required (which keys on session["user_id"]).
+CREATE TABLE IF NOT EXISTS portal_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER UNIQUE NOT NULL REFERENCES clients(id),
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT,
+    last_login_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+-- Single-use, expiring invite tokens. Only the SHA-256 hash is stored;
+-- the raw token exists only in the link staff hand to the client.
+CREATE TABLE IF NOT EXISTS portal_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
+-- Login throttling for unknown emails (account lockout lives on
+-- portal_users itself). Pruned opportunistically.
+CREATE TABLE IF NOT EXISTS portal_login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    ip TEXT NOT NULL DEFAULT '',
+    attempted_at TEXT NOT NULL
+);
+-- Files a client uploaded. status: pending (quarantine) | accepted |
+-- rejected. case_id NULL means "not filed to a case yet" — either a
+-- client-level file (e.g. photo ID) or staff triage. On acceptance into
+-- a case, the file moves into the case's documents and document_id
+-- points at the real documents row.
+CREATE TABLE IF NOT EXISTS portal_uploads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    case_id INTEGER REFERENCES cases(id),
+    request_id INTEGER REFERENCES portal_doc_requests(id),
+    message_id INTEGER REFERENCES portal_messages(id),
+    doc_type TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    file_size INTEGER NOT NULL DEFAULT 0,
+    detected_type TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    staff_note TEXT,
+    document_id INTEGER REFERENCES documents(id),
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    uploaded_at TEXT NOT NULL
+);
+-- A specific document the firm asked a client for ("your 2024 tax
+-- return"). Fulfilled when a linked upload is accepted by staff.
+CREATE TABLE IF NOT EXISTS portal_doc_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    case_id INTEGER REFERENCES cases(id),
+    title TEXT NOT NULL,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    fulfilled_at TEXT,
+    fulfilled_upload_id INTEGER REFERENCES portal_uploads(id)
+);
+-- Quick-fill form submissions. data_json is the working draft;
+-- snapshot_json is the immutable copy frozen at submit time. Staff
+-- import applies the snapshot, never the draft.
+CREATE TABLE IF NOT EXISTS portal_form_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    case_id INTEGER REFERENCES cases(id),
+    form_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    data_json TEXT NOT NULL DEFAULT '{}',
+    snapshot_json TEXT,
+    submitted_at TEXT,
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+-- One message thread per client. sender_type: client | staff.
+-- read_by_*_at NULL = unread for that side.
+CREATE TABLE IF NOT EXISTS portal_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    case_id INTEGER REFERENCES cases(id),
+    sender_type TEXT NOT NULL,
+    sender_id INTEGER,
+    sender_name TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    attachment_upload_id INTEGER REFERENCES portal_uploads(id),
+    read_by_client_at TEXT,
+    read_by_staff_at TEXT,
+    created_at TEXT NOT NULL
+);
+-- Firm-side activity feed for the portal (dashboard widget + review
+-- queue). kind: upload | form | message | request.
+CREATE TABLE IF NOT EXISTS portal_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    ref_table TEXT,
+    ref_id INTEGER,
+    seen_by_staff INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+-- Imported per-case financial values (from the client's Financial
+-- Worksheet). Key/value so the worksheet can grow without migrations.
+-- Keys: client_gross_income, client_net_income, other_parent_net_income,
+-- daycare, health_insurance, monthly_expenses, assets_notes, debts_notes.
+CREATE TABLE IF NOT EXISTS case_financials (
+    case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (case_id, key)
+);
 """
 
 
@@ -902,6 +1038,113 @@ def init_db():
     if "external_id" not in _ce_cols:
         db.execute("ALTER TABLE calendar_events ADD COLUMN external_id TEXT"
                    " NOT NULL DEFAULT ''")
+    db.commit()
+
+    # Migration for v2.6: client portal tables + case_financials. Same
+    # pattern as v2.1/v2.2 — CREATE TABLE IF NOT EXISTS in SCHEMA covers
+    # fresh installs; existing DBs get the tables here.
+    for _ddl in (
+        """CREATE TABLE IF NOT EXISTS portal_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER UNIQUE NOT NULL REFERENCES clients(id),
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            failed_attempts INTEGER NOT NULL DEFAULT 0,
+            locked_until TEXT,
+            last_login_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS portal_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            email TEXT NOT NULL,
+            token_hash TEXT UNIQUE NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_by INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS portal_login_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            ip TEXT NOT NULL DEFAULT '',
+            attempted_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS portal_uploads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            case_id INTEGER REFERENCES cases(id),
+            request_id INTEGER REFERENCES portal_doc_requests(id),
+            message_id INTEGER REFERENCES portal_messages(id),
+            doc_type TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            stored_name TEXT NOT NULL,
+            file_size INTEGER NOT NULL DEFAULT 0,
+            detected_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            staff_note TEXT,
+            document_id INTEGER REFERENCES documents(id),
+            reviewed_by INTEGER REFERENCES users(id),
+            reviewed_at TEXT,
+            uploaded_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS portal_doc_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            case_id INTEGER REFERENCES cases(id),
+            title TEXT NOT NULL,
+            note TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_by INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL,
+            fulfilled_at TEXT,
+            fulfilled_upload_id INTEGER REFERENCES portal_uploads(id))""",
+        """CREATE TABLE IF NOT EXISTS portal_form_submissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            case_id INTEGER REFERENCES cases(id),
+            form_key TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            data_json TEXT NOT NULL DEFAULT '{}',
+            snapshot_json TEXT,
+            submitted_at TEXT,
+            reviewed_by INTEGER REFERENCES users(id),
+            reviewed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS portal_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            case_id INTEGER REFERENCES cases(id),
+            sender_type TEXT NOT NULL,
+            sender_id INTEGER,
+            sender_name TEXT NOT NULL DEFAULT '',
+            body TEXT NOT NULL DEFAULT '',
+            attachment_upload_id INTEGER REFERENCES portal_uploads(id),
+            read_by_client_at TEXT,
+            read_by_staff_at TEXT,
+            created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS portal_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            ref_table TEXT,
+            ref_id INTEGER,
+            seen_by_staff INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS case_financials (
+            case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (case_id, key))""",
+        """CREATE INDEX IF NOT EXISTS idx_portal_uploads_client
+            ON portal_uploads(client_id, status)""",
+        """CREATE INDEX IF NOT EXISTS idx_portal_messages_client
+            ON portal_messages(client_id, created_at)""",
+        """CREATE INDEX IF NOT EXISTS idx_portal_activity_seen
+            ON portal_activity(seen_by_staff, created_at)""",
+    ):
+        db.execute(_ddl)
     db.commit()
 
     # Seed default admin on first run
@@ -1757,6 +2000,16 @@ NAV_GROUPS = [
          "permission": "manage_users", "admin_only": True,
          "active_prefixes": ["integration"]},
     ]},
+    # Client portal (v2.6): the staff review queue. The badge counts
+    # unreviewed portal items (pending uploads + submitted forms +
+    # unread client messages) for anyone who works with clients.
+    {"label": "Portal", "icon": "trust", "items": [
+        {"label": "Portal Review", "icon": "mail", "endpoint": "portal_review",
+         "permission": "view_clients",
+         "active_prefixes": ["portal_review", "portal_form_review",
+                             "portal_staff"],
+         "badge": "nav_portal_count"},
+    ]},
 ]
 
 # Flat list for backwards compatibility (first_allowed_endpoint, etc.)
@@ -1859,6 +2112,7 @@ def inject_update_info():
     theme = "light"
     nav_deadline_count = 0
     nav_correction_count = 0
+    nav_portal_count = 0
     uid = session.get("user_id")
     if uid:
         try:
@@ -1880,6 +2134,11 @@ def inject_update_info():
                     "SELECT COUNT(*) AS c FROM timeclock_corrections"
                     " WHERE status = 'pending'"
                 ).fetchone()["c"]
+            # Unreviewed client-portal items (v2.6) — only for staff who
+            # work with clients. portal_pending_count is defined in the
+            # portal section below (resolved at call time).
+            if user_has_perm(session.get("permissions", {}), "view_clients"):
+                nav_portal_count = portal_pending_count(db)
         except Exception:
             pass
     # Build nav groups with active flags (single source of truth: NAV_GROUPS).
@@ -1902,6 +2161,8 @@ def inject_update_info():
                 badge_count = nav_deadline_count
             elif item.get("badge") == "nav_correction_count":
                 badge_count = nav_correction_count
+            elif item.get("badge") == "nav_portal_count":
+                badge_count = nav_portal_count
             items.append({**item, "active": active, "badge_count": badge_count})
         if not items:
             continue
@@ -1927,6 +2188,7 @@ def inject_update_info():
         "theme": theme,
         "nav_deadline_count": nav_deadline_count,
         "nav_correction_count": nav_correction_count,
+        "nav_portal_count": nav_portal_count,
         # The banner is admin-only; the footer version tag is for everyone
         # (it doubles as the "server updated" notice for office computers).
         "update_available": bool(info.get("available")) and is_admin(),
@@ -2274,6 +2536,7 @@ DEFAULT_DASHBOARD_WIDGETS = [
     {"id": "week", "visible": True},        # this week events
     {"id": "backup", "visible": True},      # backup status (attorney/admin only)
     {"id": "timeclock", "visible": True},    # clock in/out (use_timeclock only)
+    {"id": "portal", "visible": True},       # client portal activity (v2.6, view_clients only)
 ]
 KNOWN_DASHBOARD_WIDGETS = {w["id"] for w in DEFAULT_DASHBOARD_WIDGETS}
 
@@ -2515,6 +2778,27 @@ def dashboard():
                 "clock_in": open_entry["clock_in"] if open_entry else None,
             }
 
+    # Client portal widget (v2.6): unreviewed counts + latest activity.
+    # Only loaded for view_clients; others get None (widget hidden).
+    portal_widget = None
+    if user_has_perm(_perms, "view_clients"):
+        portal_widget = {
+            "pending_uploads": db.execute(
+                "SELECT COUNT(*) AS c FROM portal_uploads"
+                " WHERE status = 'pending'").fetchone()["c"],
+            "submitted_forms": db.execute(
+                "SELECT COUNT(*) AS c FROM portal_form_submissions"
+                " WHERE status = 'submitted'").fetchone()["c"],
+            "unread_messages": db.execute(
+                "SELECT COUNT(*) AS c FROM portal_messages"
+                " WHERE sender_type = 'client'"
+                " AND read_by_staff_at IS NULL").fetchone()["c"],
+            "activity": db.execute(
+                "SELECT a.*, cl.first_name, cl.last_name FROM portal_activity a"
+                " JOIN clients cl ON cl.id = a.client_id"
+                " ORDER BY a.id DESC LIMIT 6").fetchall(),
+        }
+
     layout = get_dashboard_layout(session["user_id"])
     theme = get_user_theme(session["user_id"])
 
@@ -2528,6 +2812,7 @@ def dashboard():
         trust_summary=trust_summary, caseload_by_type=caseload_by_type,
         recent_clients=recent_clients, layout=layout,
         theme=theme, timeclock_status=timeclock_status,
+        portal_widget=portal_widget,
     )
 
 
@@ -2736,6 +3021,7 @@ def client_detail(client_id):
     return render_template(
         "client_detail.html", client=client, children=kids, cases=cases,
         notes=get_notes(db, "client", client_id),
+        portal=_client_portal_context(db, client_id),
     )
 
 
@@ -3039,12 +3325,22 @@ def case_detail(case_id):
     email_connected = db.execute(
         "SELECT COUNT(*) AS c FROM integrations WHERE status = 'connected'"
         " AND provider IN ('gmail', 'outlook')").fetchone()["c"] > 0
+    # Client portal messages for this case's client (v2.6): unread count
+    # for the Messages tab next to Emails.
+    portal_msg_unread = 0
+    if case["client_id"]:
+        portal_msg_unread = db.execute(
+            "SELECT COUNT(*) AS c FROM portal_messages"
+            " WHERE client_id = ? AND sender_type = 'client'"
+            " AND read_by_staff_at IS NULL",
+            (case["client_id"],)).fetchone()["c"]
     audit("case_view", f"Viewed case {case['case_number']} (id={case_id})")
     return render_template("case_detail.html", case=case, parties=parties,
                            doc_count=doc_count, upcoming=upcoming,
                            time_totals=time_totals, emails=emails,
                            unlinked=unlinked,
                            email_connected=email_connected,
+                           portal_msg_unread=portal_msg_unread,
                            notes=get_notes(db, "case", case_id))
 
 
@@ -7169,6 +7465,1744 @@ def case_compose(case_id):
     return render_template("email_compose.html", case=case,
                            email_providers=email_providers,
                            default_subject=default_subject)
+
+
+
+# ----------------------------------------------------------------------------
+# Client portal (v2.6)
+#
+# A client-shaped window into the SAME system — not a second product.
+# Everything a client produces lands in the firm's real structures: the
+# document store (with versioning), the client/case records, the case
+# page, the nav badges, the dashboard, and the one append-only audit log.
+#
+# SECURITY IS THE ARCHITECTURE:
+#   * Separate auth realm: portal_users, one account per client record,
+#     invite-only. Portal sessions key on session["portal_user_id"];
+#     staff sessions key on session["user_id"]. Neither satisfies the
+#     other realm's decorator — a portal-only session hitting a staff
+#     route is redirected to the STAFF login by login_required, and a
+#     staff-only session hitting a portal route is redirected to the
+#     PORTAL login by portal_login_required.
+#   * Every portal query is scoped by the session's client_id. IDs from
+#     the request are always verified against that client before use.
+#   * Uploads are quarantined (status 'pending') and invisible in case
+#     documents until staff accept them.
+#   * tests/test_v260.py is the boundary hammer: Client A attacks every
+#     Client B URL and must get nothing.
+# ----------------------------------------------------------------------------
+PORTAL_INVITE_TTL_HOURS = 72
+PORTAL_LOGIN_MAX_ATTEMPTS = 5        # per account before lockout
+PORTAL_LOGIN_LOCK_MINUTES = 15
+PORTAL_LOGIN_IP_WINDOW_ATTEMPTS = 12  # per email+IP in 15 min
+
+PORTAL_MESSAGE_DISCLAIMER = (
+    "Messages are reviewed during office hours. For emergencies call 911; "
+    "for urgent court matters call the office."
+)
+
+# Document types a client can pick, with routing + filing defaults.
+# target: client  -> client-level file (never needs a case)
+#         case    -> a case's documents (client picks, or the only case)
+#         triage  -> staff decide in the review queue
+PORTAL_DOC_TYPES = {
+    "photo_id": {
+        "label": "Photo ID",
+        "hint": "Driver's license, passport, or other government ID.",
+        "target": "client", "category": "other",
+    },
+    "pay_stubs": {
+        "label": "Pay stubs",
+        "hint": "Recent pay stubs — usually the last three months.",
+        "target": "case", "category": "evidence",
+    },
+    "tax_return": {
+        "label": "Tax return",
+        "hint": "Full return including all schedules and W-2s.",
+        "target": "case", "category": "evidence",
+    },
+    "bank_statement": {
+        "label": "Bank statements",
+        "hint": "Statements for all accounts, all pages.",
+        "target": "case", "category": "evidence",
+    },
+    "declaration": {
+        "label": "Declaration",
+        "hint": "A signed declaration or written statement.",
+        "target": "case", "category": "pleadings",
+    },
+    "child_records": {
+        "label": "Child's school / medical records",
+        "hint": "Report cards, attendance, medical or counseling records.",
+        "target": "case", "category": "evidence",
+    },
+    "other": {
+        "label": "Other document",
+        "hint": "Anything else the office asked for, or that helps your case.",
+        "target": "triage", "category": "other",
+    },
+}
+
+_PORTAL_EXT_BY_DETECTED = {
+    "pdf": "pdf", "jpeg": "jpg", "png": "png", "heic": "heic",
+    "docx": "docx", "xlsx": "xlsx", "pptx": "pptx", "doc": "doc",
+}
+
+
+def _sniff_upload_type(data):
+    """Identify an uploaded file by its CONTENT (magic bytes), never by
+    its name. Returns a detected-type key or None if not allowed.
+
+    Allowed: PDF, JPEG, PNG, HEIC (accepted; staff open it on a phone/
+    modern computer), Word/Excel/PowerPoint (zip-based, verified by the
+    archive's contents), and legacy Word .doc (OLE header).
+    """
+    if not data:
+        return None
+    if data.startswith(b"%PDF-"):
+        return "pdf"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    # HEIC/HEIF: ISO-BMFF 'ftyp' box with a heif brand.
+    if len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in (
+            b"heic", b"heix", b"heim", b"heis", b"mif1", b"msf1", b"avif"):
+        return "heic"
+    # Legacy Office (.doc/.xls/.ppt): OLE compound file header.
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "doc"
+    # Modern Office files are zips — verify by what's inside, so a
+    # renamed random zip (or .exe) does not pass.
+    if data[:4] == b"PK\x03\x04":
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(data))
+            names = zf.namelist()
+        except Exception:
+            return None
+        if any(n.startswith("word/") for n in names):
+            return "docx"
+        if any(n.startswith("xl/") for n in names):
+            return "xlsx"
+        if any(n.startswith("ppt/") for n in names):
+            return "pptx"
+        return None
+    return None
+
+
+def _portal_audit(action, details, portal_user=None):
+    """Audit-log entry for a portal-side action. Mirrors audit() but the
+    actor is the portal account (username 'portal:<email>'), never a
+    staff user. The audit log itself stays the same append-only table."""
+    db = get_db()
+    label = ""
+    if portal_user is not None:
+        try:
+            label = portal_user["email"]
+        except Exception:
+            label = ""
+    db.execute(
+        "INSERT INTO audit_log (timestamp, user_id, username, action, details)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (datetime.now(timezone.utc).isoformat(), None,
+         f"portal:{label}" if label else "portal", action, details),
+    )
+    db.commit()
+
+
+def _portal_activity(db, client_id, kind, summary, ref_table=None,
+                     ref_id=None):
+    """Add a row to the firm-side portal activity feed. Caller commits."""
+    db.execute(
+        "INSERT INTO portal_activity (client_id, kind, summary, ref_table,"
+        " ref_id, seen_by_staff, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+        (client_id, kind, summary, ref_table, ref_id,
+         datetime.now(timezone.utc).isoformat()),
+    )
+
+
+def portal_pending_count(db):
+    """Unreviewed portal items: pending uploads + submitted forms +
+    client messages staff haven't read. Drives the nav badge."""
+    u = db.execute(
+        "SELECT COUNT(*) AS c FROM portal_uploads WHERE status = 'pending'"
+    ).fetchone()["c"]
+    f = db.execute(
+        "SELECT COUNT(*) AS c FROM portal_form_submissions"
+        " WHERE status = 'submitted'"
+    ).fetchone()["c"]
+    m = db.execute(
+        "SELECT COUNT(*) AS c FROM portal_messages"
+        " WHERE sender_type = 'client' AND read_by_staff_at IS NULL"
+    ).fetchone()["c"]
+    return int(u) + int(f) + int(m)
+
+
+def _current_portal_user():
+    """The portal account for this session, or None. Also enforces the
+    account still being active."""
+    pid = session.get("portal_user_id")
+    if not pid:
+        return None
+    db = get_db()
+    row = db.execute(
+        "SELECT pu.*, cl.first_name AS client_first_name,"
+        " cl.last_name AS client_last_name FROM portal_users pu"
+        " JOIN clients cl ON cl.id = pu.client_id WHERE pu.id = ?",
+        (pid,),
+    ).fetchone()
+    if not row or not row["is_active"]:
+        return None
+    return row
+
+
+def portal_login_required(f):
+    """Portal-realm gate. Deliberately separate from login_required: a
+    staff session does NOT satisfy this, and this never sets or reads
+    session['user_id'], so a portal session can never satisfy staff
+    routes either."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        pu = _current_portal_user()
+        if pu is None:
+            session.pop("portal_user_id", None)
+            return redirect(url_for("portal_login"))
+        last = session.get("portal_last_activity")
+        if last:
+            try:
+                last_dt = datetime.fromisoformat(last)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - last_dt > timedelta(
+                        minutes=SESSION_TIMEOUT_MINUTES):
+                    session.pop("portal_user_id", None)
+                    flash("You were logged out due to inactivity.", "warning")
+                    return redirect(url_for("portal_login"))
+            except ValueError:
+                pass
+        session["portal_last_activity"] = datetime.now(
+            timezone.utc).isoformat()
+        g.portal_user = pu
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def _portal_client_cases(db, client_id):
+    """All cases belonging to a client, newest activity first."""
+    return db.execute(
+        "SELECT * FROM cases WHERE client_id = ? ORDER BY updated_at DESC",
+        (client_id,),
+    ).fetchall()
+
+
+def _portal_open_cases(db, client_id):
+    return [c for c in _portal_client_cases(db, client_id)
+            if c["status"] != "closed"]
+
+
+def _portal_resolve_case(db, client_id, doc_type, form_case_id, request_row):
+    """Decide which case an upload belongs to. Returns a case id or None
+    (None = client-level file or staff triage — never a guess).
+
+    A linked document request wins. Photo ID is always client-level.
+    Otherwise: the case the client picked (verified theirs), else their
+    only open case, else None for staff to sort out."""
+    if request_row is not None:
+        return request_row["case_id"]
+    target = PORTAL_DOC_TYPES.get(doc_type, {}).get("target", "triage")
+    if target == "client":
+        return None
+    if form_case_id:
+        ok = db.execute(
+            "SELECT id FROM cases WHERE id = ? AND client_id = ?",
+            (form_case_id, client_id),
+        ).fetchone()
+        return int(form_case_id) if ok else None
+    if target == "triage":
+        return None
+    open_cases = _portal_open_cases(db, client_id)
+    if len(open_cases) == 1:
+        return open_cases[0]["id"]
+    if not open_cases:
+        all_cases = _portal_client_cases(db, client_id)
+        if len(all_cases) == 1:
+            return all_cases[0]["id"]
+    return None
+
+
+def _portal_store_upload(db, portal_user, file_storage, doc_type,
+                         case_id=None, request_id=None, message_id=None):
+    """Validate + store one uploaded file in quarantine.
+
+    Returns (upload_id, error) where error is None on success, else one
+    of 'empty' | 'too_large' | 'bad_type'. Content is sniffed by magic
+    bytes — a renamed executable is rejected even as 'file.pdf'."""
+    raw = file_storage.read()
+    if not raw:
+        return None, "empty"
+    if len(raw) > PORTAL_MAX_UPLOAD_BYTES:
+        return None, "too_large"
+    detected = _sniff_upload_type(raw)
+    if detected is None:
+        return None, "bad_type"
+    ext = _PORTAL_EXT_BY_DETECTED[detected]
+    original = secure_filename(file_storage.filename or "") or f"upload.{ext}"
+    stored = f"{uuid.uuid4().hex}.{ext}"
+    dest_dir = os.path.join(PORTAL_UPLOAD_DIR, str(portal_user["client_id"]))
+    os.makedirs(dest_dir, exist_ok=True)
+    with open(os.path.join(dest_dir, stored), "wb") as fh:
+        fh.write(raw)
+    now = datetime.now(timezone.utc).isoformat()
+    cur = db.execute(
+        "INSERT INTO portal_uploads (client_id, case_id, request_id,"
+        " message_id, doc_type, original_name, stored_name, file_size,"
+        " detected_type, status, uploaded_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+        (portal_user["client_id"], case_id, request_id, message_id,
+         doc_type, original, stored, len(raw), detected, now),
+    )
+    return cur.lastrowid, None
+
+
+def _portal_upload_path(upload_row):
+    """On-disk path of a portal upload that has NOT been filed into a
+    case yet (accepted case documents live in the documents store)."""
+    return os.path.join(PORTAL_UPLOAD_DIR, str(upload_row["client_id"]),
+                        upload_row["stored_name"])
+
+
+# ----------------------------------------------------------------------------
+# Portal form definitions (data-driven, like template_defs). Each field:
+#   name, label, type (text|email|tel|date|textarea|currency|select),
+#   required, help, target:
+#     ("client", <clients column>)  — imported into the client record
+#     ("child", <slot>, "name"|"dob") — imported into children rows
+#     ("financial", <key>)          — imported into case_financials
+#     None                          — reference only, kept in the snapshot
+# ----------------------------------------------------------------------------
+PORTAL_FORM_DEFS = {
+    "client_intake": {
+        "key": "client_intake",
+        "title": "Client Intake Form",
+        "description": "Tell us about you, your family, and how to reach "
+                       "you. The office reviews everything before it is "
+                       "added to your file.",
+        "case_required": False,
+        "steps": [
+            {"title": "Your contact information", "fields": [
+                {"name": "email", "label": "Email address", "type": "email",
+                 "required": True, "target": ("client", "email")},
+                {"name": "phone", "label": "Phone number", "type": "tel",
+                 "required": True, "target": ("client", "phone")},
+                {"name": "address", "label": "Mailing address",
+                 "type": "textarea", "rows": 3,
+                 "target": ("client", "address")},
+                {"name": "date_of_birth", "label": "Your date of birth",
+                 "type": "date", "target": ("client", "date_of_birth")},
+            ]},
+            {"title": "Your spouse / the other parent", "fields": [
+                {"name": "spouse_name", "label": "Full legal name",
+                 "type": "text", "target": ("client", "spouse_name")},
+                {"name": "spouse_dob", "label": "Their date of birth",
+                 "type": "date", "target": ("client", "spouse_dob")},
+            ]},
+            {"title": "Your children", "fields": [
+                {"name": "child1_name", "label": "Child 1 — full name",
+                 "type": "text", "target": ("child", 1, "name")},
+                {"name": "child1_dob", "label": "Child 1 — date of birth",
+                 "type": "date", "target": ("child", 1, "dob")},
+                {"name": "child2_name", "label": "Child 2 — full name",
+                 "type": "text", "target": ("child", 2, "name")},
+                {"name": "child2_dob", "label": "Child 2 — date of birth",
+                 "type": "date", "target": ("child", 2, "dob")},
+                {"name": "child3_name", "label": "Child 3 — full name",
+                 "type": "text", "target": ("child", 3, "name")},
+                {"name": "child3_dob", "label": "Child 3 — date of birth",
+                 "type": "date", "target": ("child", 3, "dob")},
+                {"name": "children_notes",
+                 "label": "Anything else about your children?",
+                 "type": "textarea", "rows": 3, "target": None},
+            ]},
+            {"title": "Work & income basics", "fields": [
+                {"name": "employer_name", "label": "Your employer",
+                 "type": "text", "target": None,
+                 "help": "Kept with your submission for the office's "
+                         "reference."},
+                {"name": "monthly_income",
+                 "label": "Your monthly take-home pay ($)",
+                 "type": "currency", "target": None,
+                 "help": "Roughly is fine — the Financial Worksheet goes "
+                         "into detail."},
+            ]},
+        ],
+    },
+    "financial_worksheet": {
+        "key": "financial_worksheet",
+        "title": "Financial Worksheet",
+        "description": "Your income, the other parent's income, and the "
+                       "children's costs. The office uses this to prepare "
+                       "your child support worksheet.",
+        "case_required": True,
+        "steps": [
+            {"title": "Your income", "fields": [
+                {"name": "client_gross_income",
+                 "label": "Your monthly GROSS income ($)",
+                 "type": "currency", "required": True,
+                 "target": ("financial", "client_gross_income")},
+                {"name": "client_net_income",
+                 "label": "Your monthly NET (take-home) income ($)",
+                 "type": "currency", "required": True,
+                 "target": ("financial", "client_net_income")},
+                {"name": "other_income_notes",
+                 "label": "Other income (overtime, second job, benefits…)",
+                 "type": "textarea", "rows": 3, "target": None},
+            ]},
+            {"title": "The other parent's income", "fields": [
+                {"name": "other_parent_net_income",
+                 "label": "Their monthly NET income ($, best estimate)",
+                 "type": "currency",
+                 "target": ("financial", "other_parent_net_income")},
+            ]},
+            {"title": "Children's costs", "fields": [
+                {"name": "daycare", "label": "Monthly daycare costs ($)",
+                 "type": "currency", "target": ("financial", "daycare")},
+                {"name": "health_insurance",
+                 "label": "Monthly health insurance for the children ($)",
+                 "type": "currency",
+                 "target": ("financial", "health_insurance")},
+            ]},
+            {"title": "Expenses, assets & debts", "fields": [
+                {"name": "monthly_expenses",
+                 "label": "Your total monthly expenses ($)",
+                 "type": "currency",
+                 "target": ("financial", "monthly_expenses")},
+                {"name": "assets_notes",
+                 "label": "Assets (home, vehicles, accounts, retirement…)",
+                 "type": "textarea", "rows": 4,
+                 "target": ("financial", "assets_notes")},
+                {"name": "debts_notes",
+                 "label": "Debts (cards, loans, arrears…)",
+                 "type": "textarea", "rows": 4,
+                 "target": ("financial", "debts_notes")},
+            ]},
+        ],
+    },
+}
+
+
+def _portal_form_fields(fdef):
+    """Flat list of a form's fields across its steps."""
+    return [f for step in fdef["steps"] for f in step["fields"]]
+
+
+def _portal_financials(db, case_id):
+    """case_financials as a plain dict for one case."""
+    if not case_id:
+        return {}
+    return {r["key"]: r["value"] for r in db.execute(
+        "SELECT key, value FROM case_financials WHERE case_id = ?",
+        (case_id,)).fetchall()}
+
+
+def _portal_set_financial(db, case_id, key, value):
+    db.execute(
+        "INSERT INTO case_financials (case_id, key, value, updated_at)"
+        " VALUES (?, ?, ?, ?)"
+        " ON CONFLICT(case_id, key) DO UPDATE SET value = excluded.value,"
+        " updated_at = excluded.updated_at",
+        (case_id, key, value, datetime.now(timezone.utc).isoformat()),
+    )
+
+
+# ----------------------------------------------------------------------------
+# Portal auth: invite accept, login, logout
+# ----------------------------------------------------------------------------
+def _invite_by_token(db, token):
+    if not token:
+        return None
+    h = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return db.execute(
+        "SELECT * FROM portal_invites WHERE token_hash = ?", (h,)
+    ).fetchone()
+
+
+@app.context_processor
+def inject_portal_info():
+    """Portal chrome data (unread firm-message count for the capsule
+    nav badge). Only computed for portal sessions."""
+    portal_unread = 0
+    pid = session.get("portal_user_id")
+    if pid:
+        try:
+            db = get_db()
+            row = db.execute(
+                "SELECT client_id FROM portal_users WHERE id = ?",
+                (pid,),
+            ).fetchone()
+            if row:
+                portal_unread = db.execute(
+                    "SELECT COUNT(*) AS c FROM portal_messages"
+                    " WHERE client_id = ? AND sender_type = 'staff'"
+                    " AND read_by_client_at IS NULL",
+                    (row["client_id"],),
+                ).fetchone()["c"]
+        except Exception:
+            pass
+    return {"portal_unread": portal_unread}
+
+
+@app.route("/portal/accept-invite/<token>", methods=["GET", "POST"])
+def portal_accept_invite(token):
+    db = get_db()
+    inv = _invite_by_token(db, token)
+    now = datetime.now(timezone.utc)
+    valid = bool(inv and not inv["used_at"]
+                 and inv["expires_at"] >= now.isoformat())
+    if request.method == "POST":
+        check_csrf()
+        if not valid:
+            flash("That invite link is no longer valid. Ask the office to "
+                  "send a new one.", "error")
+            return redirect(url_for("portal_login"))
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+        if len(password) < 10:
+            flash("Choose a password of at least 10 characters.", "error")
+            return render_template("portal_accept_invite.html",
+                                   invite=inv, valid=True)
+        if password != confirm:
+            flash("Those passwords don't match. Try again.", "error")
+            return render_template("portal_accept_invite.html",
+                                   invite=inv, valid=True)
+        existing = db.execute(
+            "SELECT * FROM portal_users WHERE client_id = ?",
+            (inv["client_id"],),
+        ).fetchone()
+        if existing and existing["is_active"]:
+            flash("This account is already set up. Log in instead — or "
+                  "ask the office to reset your access.", "error")
+            return redirect(url_for("portal_login"))
+        ts = now.isoformat()
+        if existing:
+            db.execute(
+                "UPDATE portal_users SET email = ?, password_hash = ?,"
+                " is_active = 1, failed_attempts = 0, locked_until = NULL,"
+                " updated_at = ? WHERE id = ?",
+                (inv["email"], generate_password_hash(password), ts,
+                 existing["id"]),
+            )
+        else:
+            db.execute(
+                "INSERT INTO portal_users (client_id, email, password_hash,"
+                " is_active, created_at, updated_at)"
+                " VALUES (?, ?, ?, 1, ?, ?)",
+                (inv["client_id"], inv["email"],
+                 generate_password_hash(password), ts, ts),
+            )
+        db.execute(
+            "UPDATE portal_invites SET used_at = ? WHERE id = ?",
+            (ts, inv["id"]),
+        )
+        db.commit()
+        _portal_audit("portal_invite_accepted",
+                      f"Portal account activated for client"
+                      f" (id={inv['client_id']}) via invite")
+        flash("Your account is ready. Log in with your email and the "
+              "password you just chose.", "success")
+        return redirect(url_for("portal_login"))
+    return render_template("portal_accept_invite.html",
+                           invite=inv, valid=valid)
+
+
+@app.route("/portal/login", methods=["GET", "POST"])
+def portal_login():
+    if session.get("portal_user_id"):
+        return redirect(url_for("portal_home"))
+    if request.method == "POST":
+        check_csrf()
+        db = get_db()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        ip = request.remote_addr or ""
+        now = datetime.now(timezone.utc)
+        window_start = (now - timedelta(
+            minutes=PORTAL_LOGIN_LOCK_MINUTES)).isoformat()
+        recent = db.execute(
+            "SELECT COUNT(*) AS c FROM portal_login_attempts"
+            " WHERE email = ? AND ip = ? AND attempted_at >= ?",
+            (email, ip, window_start),
+        ).fetchone()["c"]
+        db.execute(
+            "INSERT INTO portal_login_attempts (email, ip, attempted_at)"
+            " VALUES (?, ?, ?)",
+            (email, ip, now.isoformat()),
+        )
+        db.commit()
+        pu = db.execute(
+            "SELECT * FROM portal_users WHERE email = ?", (email,)
+        ).fetchone()
+        locked = bool(pu and pu["locked_until"]
+                      and pu["locked_until"] >= now.isoformat())
+        ok = bool(
+            pu and pu["is_active"] and not locked
+            and recent < PORTAL_LOGIN_IP_WINDOW_ATTEMPTS
+            and check_password_hash(pu["password_hash"], password)
+        )
+        if ok:
+            db.execute(
+                "UPDATE portal_users SET failed_attempts = 0,"
+                " locked_until = NULL, last_login_at = ? WHERE id = ?",
+                (now.isoformat(), pu["id"]),
+            )
+            db.commit()
+            session["portal_user_id"] = pu["id"]
+            session["portal_last_activity"] = now.isoformat()
+            new_csrf_token()
+            _portal_audit("portal_login",
+                          f"Portal login for client (id={pu['client_id']})",
+                          pu)
+            return redirect(url_for("portal_home"))
+        # Failure: bump the account counter (lockout), stay generic.
+        if pu and pu["is_active"] and not locked:
+            fails = int(pu["failed_attempts"] or 0) + 1
+            locked_until = None
+            if fails >= PORTAL_LOGIN_MAX_ATTEMPTS:
+                locked_until = (now + timedelta(
+                    minutes=PORTAL_LOGIN_LOCK_MINUTES)).isoformat()
+                fails = 0
+            db.execute(
+                "UPDATE portal_users SET failed_attempts = ?,"
+                " locked_until = ? WHERE id = ?",
+                (fails, locked_until, pu["id"]),
+            )
+            db.commit()
+        _portal_audit("portal_login_failed",
+                      f"Failed portal login attempt for '{email}'")
+        flash("That email and password combination didn't work. Check "
+              "both and try again.", "error")
+    return render_template("portal_login.html")
+
+
+@app.route("/portal/logout")
+def portal_logout():
+    pu = _current_portal_user()
+    if pu is not None:
+        _portal_audit("portal_logout",
+                      f"Portal logout for client (id={pu['client_id']})", pu)
+    session.pop("portal_user_id", None)
+    session.pop("portal_last_activity", None)
+    return redirect(url_for("portal_login"))
+
+
+
+# ----------------------------------------------------------------------------
+# Portal pages (client side). Every query below is scoped by
+# g.portal_user["client_id"] — IDs from the request are verified against
+# it before use, every time.
+# ----------------------------------------------------------------------------
+@app.route("/portal/")
+@portal_login_required
+def portal_home():
+    pu = g.portal_user
+    db = get_db()
+    cid = pu["client_id"]
+    today = date.today().isoformat()
+    open_requests = db.execute(
+        "SELECT r.*, c.case_number FROM portal_doc_requests r"
+        " LEFT JOIN cases c ON c.id = r.case_id"
+        " WHERE r.client_id = ? AND r.status = 'open'"
+        " ORDER BY r.created_at",
+        (cid,),
+    ).fetchall()
+    req_counts = db.execute(
+        "SELECT COUNT(*) AS total,"
+        " COALESCE(SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END), 0)"
+        " AS done FROM portal_doc_requests WHERE client_id = ?",
+        (cid,),
+    ).fetchone()
+    cases = []
+    for c in _portal_client_cases(db, cid):
+        nxt = db.execute(
+            "SELECT event_date, event_time, title FROM calendar_events"
+            " WHERE case_id = ? AND completed = 0"
+            " AND event_type = 'court_date' AND event_date >= ?"
+            " ORDER BY event_date LIMIT 1",
+            (c["id"], today),
+        ).fetchone()
+        cases.append({"case": c, "next_hearing": nxt})
+    recent_uploads = db.execute(
+        "SELECT * FROM portal_uploads WHERE client_id = ?"
+        " ORDER BY uploaded_at DESC LIMIT 5",
+        (cid,),
+    ).fetchall()
+    unread = db.execute(
+        "SELECT COUNT(*) AS c FROM portal_messages"
+        " WHERE client_id = ? AND sender_type = 'staff'"
+        " AND read_by_client_at IS NULL",
+        (cid,),
+    ).fetchone()["c"]
+    form_states = {}
+    for key in PORTAL_FORM_DEFS:
+        row = db.execute(
+            "SELECT status FROM portal_form_submissions"
+            " WHERE client_id = ? AND form_key = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (cid, key),
+        ).fetchone()
+        form_states[key] = row["status"] if row else None
+    _portal_audit("portal_home_view",
+                  f"Portal home viewed (client id={cid})", pu)
+    return render_template(
+        "portal_home.html", pu=pu, open_requests=open_requests,
+        req_total=req_counts["total"], req_done=req_counts["done"],
+        cases=cases, recent_uploads=recent_uploads, unread=unread,
+        form_states=form_states, form_defs=PORTAL_FORM_DEFS,
+        doc_types=PORTAL_DOC_TYPES,
+    )
+
+
+@app.route("/portal/documents")
+@portal_login_required
+def portal_documents():
+    pu = g.portal_user
+    db = get_db()
+    cid = pu["client_id"]
+    uploads = db.execute(
+        "SELECT u.*, r.title AS request_title, c.case_number"
+        " FROM portal_uploads u"
+        " LEFT JOIN portal_doc_requests r ON r.id = u.request_id"
+        " LEFT JOIN cases c ON c.id = u.case_id"
+        " WHERE u.client_id = ? ORDER BY u.uploaded_at DESC",
+        (cid,),
+    ).fetchall()
+    open_requests = db.execute(
+        "SELECT r.*, c.case_number FROM portal_doc_requests r"
+        " LEFT JOIN cases c ON c.id = r.case_id"
+        " WHERE r.client_id = ? AND r.status = 'open'"
+        " ORDER BY r.created_at",
+        (cid,),
+    ).fetchall()
+    _portal_audit("portal_documents_view",
+                  f"Portal documents viewed (client id={cid})", pu)
+    return render_template(
+        "portal_documents.html", pu=pu, uploads=uploads,
+        open_requests=open_requests, doc_types=PORTAL_DOC_TYPES,
+        cases=_portal_client_cases(db, cid),
+        preselect_request=request.args.get("request", type=int),
+        preselect_type=request.args.get("type", ""),
+    )
+
+
+@app.route("/portal/documents/upload", methods=["POST"])
+@portal_login_required
+def portal_document_upload():
+    pu = g.portal_user
+    db = get_db()
+    cid = pu["client_id"]
+    check_csrf()
+    doc_type = request.form.get("doc_type", "other")
+    if doc_type not in PORTAL_DOC_TYPES:
+        doc_type = "other"
+    request_id = request.form.get("request_id", type=int)
+    req_row = None
+    if request_id:
+        req_row = db.execute(
+            "SELECT * FROM portal_doc_requests"
+            " WHERE id = ? AND client_id = ? AND status = 'open'",
+            (request_id, cid),
+        ).fetchone()
+        if not req_row:
+            request_id = None
+    case_id = _portal_resolve_case(
+        db, cid, doc_type, request.form.get("case_id", type=int), req_row)
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("Choose a file to upload.", "error")
+        return redirect(url_for("portal_documents"))
+    upload_id, err = _portal_store_upload(
+        db, pu, f, doc_type, case_id=case_id, request_id=request_id)
+    if err == "too_large":
+        return render_template(
+            "portal_error.html", code=413, pu=pu,
+            message="That file is larger than 25 MB. Try a smaller file, "
+                    "or split it into parts."), 413
+    if err == "bad_type":
+        flash("That file type isn't accepted. Please send a PDF, a photo "
+              "(JPG, PNG, or HEIC), or a Word/Excel document.", "error")
+        return redirect(url_for("portal_documents"))
+    if err:
+        flash("Choose a file to upload.", "error")
+        return redirect(url_for("portal_documents"))
+    db.commit()
+    label = PORTAL_DOC_TYPES[doc_type]["label"]
+    _portal_activity(
+        db, cid, "upload",
+        f"Uploaded {label}: {f.filename}", "portal_uploads", upload_id)
+    db.commit()
+    _portal_audit("portal_upload",
+                  f"Client uploaded {label} (upload id={upload_id},"
+                  f" case id={case_id})", pu)
+    flash("Received — the office will review it shortly. You'll see it "
+          "marked as filed once it's accepted.", "success")
+    return redirect(url_for("portal_documents"))
+
+
+@app.route("/portal/documents/<int:upload_id>/download")
+@portal_login_required
+def portal_document_download(upload_id):
+    pu = g.portal_user
+    db = get_db()
+    up = db.execute(
+        "SELECT * FROM portal_uploads WHERE id = ? AND client_id = ?",
+        (upload_id, pu["client_id"]),
+    ).fetchone()
+    if not up:
+        abort(404)
+    if up["document_id"]:
+        doc = db.execute(
+            "SELECT * FROM documents WHERE id = ?",
+            (up["document_id"],),
+        ).fetchone()
+        path = os.path.join(_case_doc_dir(doc["case_id"]),
+                            doc["stored_name"]) if doc else None
+    else:
+        path = _portal_upload_path(up)
+    if not path or not os.path.exists(path):
+        flash("That file isn't available right now. Please ask the "
+              "office.", "error")
+        return redirect(url_for("portal_documents"))
+    _portal_audit("portal_document_download",
+                  f"Client downloaded their upload (id={upload_id})", pu)
+    return send_file(path, as_attachment=True,
+                     download_name=up["original_name"])
+
+
+# ----------------------------------------------------------------------------
+# Portal quick-fill forms
+# ----------------------------------------------------------------------------
+@app.route("/portal/forms")
+@portal_login_required
+def portal_forms():
+    pu = g.portal_user
+    db = get_db()
+    cid = pu["client_id"]
+    subs = {}
+    for key in PORTAL_FORM_DEFS:
+        subs[key] = db.execute(
+            "SELECT * FROM portal_form_submissions"
+            " WHERE client_id = ? AND form_key = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (cid, key),
+        ).fetchone()
+    return render_template(
+        "portal_forms.html", pu=pu, form_defs=PORTAL_FORM_DEFS, subs=subs)
+
+
+def _portal_get_draft(db, client_id, form_key):
+    return db.execute(
+        "SELECT * FROM portal_form_submissions"
+        " WHERE client_id = ? AND form_key = ? AND status = 'draft'"
+        " ORDER BY id DESC LIMIT 1",
+        (client_id, form_key),
+    ).fetchone()
+
+
+@app.route("/portal/forms/<key>", methods=["GET", "POST"])
+@portal_login_required
+def portal_form_fill(key):
+    fdef = PORTAL_FORM_DEFS.get(key)
+    if not fdef:
+        abort(404)
+    pu = g.portal_user
+    db = get_db()
+    cid = pu["client_id"]
+    steps = fdef["steps"]
+    draft = _portal_get_draft(db, cid, key)
+    data = {}
+    if draft:
+        try:
+            data = json.loads(draft["data_json"] or "{}")
+        except (ValueError, TypeError):
+            data = {}
+    cases = _portal_open_cases(db, cid)
+    if fdef["case_required"] and not cases:
+        flash("This form needs an open case. Please message the office.",
+              "error")
+        return redirect(url_for("portal_forms"))
+
+    if request.method == "POST":
+        check_csrf()
+        step_idx = request.form.get("step", type=int) or 0
+        step_idx = max(0, min(step_idx, len(steps) - 1))
+        action = request.form.get("action", "next")
+        # Merge this step's fields into the working data.
+        for f in steps[step_idx]["fields"]:
+            data[f["name"]] = request.form.get(f["name"], "")
+        case_id = draft["case_id"] if draft else None
+        if fdef["case_required"]:
+            picked = request.form.get("case_id", type=int)
+            if picked and db.execute(
+                    "SELECT id FROM cases WHERE id = ? AND client_id = ?",
+                    (picked, cid)).fetchone():
+                case_id = picked
+            if not case_id and len(cases) == 1:
+                case_id = cases[0]["id"]
+        now = datetime.now(timezone.utc).isoformat()
+        if draft:
+            db.execute(
+                "UPDATE portal_form_submissions SET data_json = ?,"
+                " case_id = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(data), case_id, now, draft["id"]),
+            )
+            sub_id = draft["id"]
+        else:
+            cur = db.execute(
+                "INSERT INTO portal_form_submissions (client_id, case_id,"
+                " form_key, status, data_json, created_at, updated_at)"
+                " VALUES (?, ?, ?, 'draft', ?, ?, ?)",
+                (cid, case_id, key, json.dumps(data), now, now),
+            )
+            sub_id = cur.lastrowid
+        db.commit()
+        if action == "save_exit":
+            flash("Your progress is saved. You can pick up right where "
+                  "you left off.", "success")
+            return redirect(url_for("portal_forms"))
+        if action == "submit" and step_idx == len(steps) - 1:
+            missing = [f["label"] for f in _portal_form_fields(fdef)
+                       if f.get("required")
+                       and not str(data.get(f["name"], "")).strip()]
+            if fdef["case_required"] and not case_id:
+                missing.append("the case this is for")
+            if missing:
+                flash("Almost there — these still need an answer: "
+                      + ", ".join(missing), "error")
+                return redirect(url_for(
+                    "portal_form_fill", key=key, step=step_idx))
+            db.execute(
+                "UPDATE portal_form_submissions SET status = 'submitted',"
+                " snapshot_json = ?, submitted_at = ?, updated_at = ?"
+                " WHERE id = ?",
+                (json.dumps(data), now, now, sub_id),
+            )
+            db.commit()
+            _portal_activity(
+                db, cid, "form",
+                f"Submitted the {fdef['title']}",
+                "portal_form_submissions", sub_id)
+            db.commit()
+            _portal_audit("portal_form_submitted",
+                          f"Client submitted form '{key}'"
+                          f" (submission id={sub_id}, case id={case_id})",
+                          pu)
+            flash("Sent to the office. They'll review it and add it to "
+                  "your file.", "success")
+            return redirect(url_for("portal_forms"))
+        next_step = step_idx + 1 if action == "next" else step_idx - 1
+        next_step = max(0, min(next_step, len(steps) - 1))
+        return redirect(url_for("portal_form_fill", key=key,
+                                step=next_step))
+
+    step_idx = request.args.get("step", type=int) or 0
+    step_idx = max(0, min(step_idx, len(steps) - 1))
+    return render_template(
+        "portal_form_fill.html", pu=pu, fdef=fdef, step_idx=step_idx,
+        step=steps[step_idx], data=data, draft=draft, cases=cases,
+        total_steps=len(steps))
+
+
+# ----------------------------------------------------------------------------
+# Portal messaging — one thread per client, iOS-style chat
+# ----------------------------------------------------------------------------
+@app.route("/portal/messages", methods=["GET", "POST"])
+@portal_login_required
+def portal_messages():
+    pu = g.portal_user
+    db = get_db()
+    cid = pu["client_id"]
+    if request.method == "POST":
+        check_csrf()
+        body = request.form.get("body", "").strip()
+        f = request.files.get("file")
+        has_file = bool(f and f.filename)
+        if not body and not has_file:
+            flash("Write a message, or attach a file.", "error")
+            return redirect(url_for("portal_messages"))
+        now = datetime.now(timezone.utc).isoformat()
+        upload_id = None
+        if has_file:
+            upload_id, err = _portal_store_upload(db, pu, f, "other")
+            if err == "too_large":
+                return render_template(
+                    "portal_error.html", code=413, pu=pu,
+                    message="That file is larger than 25 MB."), 413
+            if err:
+                flash("That file type isn't accepted. Please send a PDF, "
+                      "a photo, or a Word/Excel document.", "error")
+                return redirect(url_for("portal_messages"))
+            db.commit()
+        cur = db.execute(
+            "INSERT INTO portal_messages (client_id, sender_type,"
+            " sender_id, sender_name, body, attachment_upload_id,"
+            " read_by_staff_at, created_at)"
+            " VALUES (?, 'client', ?, ?, ?, ?, NULL, ?)",
+            (cid, pu["id"],
+             f"{pu['client_first_name']} {pu['client_last_name']}".strip(),
+             body, upload_id, now),
+        )
+        msg_id = cur.lastrowid
+        if upload_id:
+            db.execute(
+                "UPDATE portal_uploads SET message_id = ? WHERE id = ?",
+                (msg_id, upload_id),
+            )
+        db.commit()
+        _portal_activity(db, cid, "message",
+                         "Sent a message to the office",
+                         "portal_messages", msg_id)
+        db.commit()
+        _portal_audit("portal_message_sent",
+                      f"Client sent a message (id={msg_id})", pu)
+        return redirect(url_for("portal_messages"))
+    msgs = db.execute(
+        "SELECT m.*, u.original_name AS att_name,"
+        " u.status AS att_status FROM portal_messages m"
+        " LEFT JOIN portal_uploads u ON u.id = m.attachment_upload_id"
+        " WHERE m.client_id = ? ORDER BY m.created_at, m.id",
+        (cid,),
+    ).fetchall()
+    db.execute(
+        "UPDATE portal_messages SET read_by_client_at = ?"
+        " WHERE client_id = ? AND sender_type = 'staff'"
+        " AND read_by_client_at IS NULL",
+        (datetime.now(timezone.utc).isoformat(), cid),
+    )
+    db.commit()
+    _portal_audit("portal_messages_view",
+                  f"Portal messages viewed (client id={cid})", pu)
+    return render_template(
+        "portal_messages.html", pu=pu, messages=msgs,
+        disclaimer=PORTAL_MESSAGE_DISCLAIMER)
+
+
+
+# ----------------------------------------------------------------------------
+# Staff side of the portal: client-page section, review queue, form
+# review, messaging inbox. All staff routes use the normal staff
+# permissions — the portal never weakens the staff-side gates.
+# ----------------------------------------------------------------------------
+def _client_portal_context(db, client_id):
+    """Everything client_detail.html needs for its Portal section."""
+    puser = db.execute(
+        "SELECT * FROM portal_users WHERE client_id = ?", (client_id,)
+    ).fetchone()
+    pending_invite = db.execute(
+        "SELECT * FROM portal_invites WHERE client_id = ?"
+        " AND used_at IS NULL AND expires_at >= ?"
+        " ORDER BY id DESC LIMIT 1",
+        (client_id, datetime.now(timezone.utc).isoformat()),
+    ).fetchone()
+    requests_ = db.execute(
+        "SELECT r.*, c.case_number FROM portal_doc_requests r"
+        " LEFT JOIN cases c ON c.id = r.case_id"
+        " WHERE r.client_id = ? ORDER BY r.id DESC LIMIT 20",
+        (client_id,),
+    ).fetchall()
+    uploads = db.execute(
+        "SELECT * FROM portal_uploads WHERE client_id = ?"
+        " ORDER BY uploaded_at DESC LIMIT 10",
+        (client_id,),
+    ).fetchall()
+    activity = db.execute(
+        "SELECT * FROM portal_activity WHERE client_id = ?"
+        " ORDER BY id DESC LIMIT 8",
+        (client_id,),
+    ).fetchall()
+    unread_msgs = db.execute(
+        "SELECT COUNT(*) AS c FROM portal_messages"
+        " WHERE client_id = ? AND sender_type = 'client'"
+        " AND read_by_staff_at IS NULL",
+        (client_id,),
+    ).fetchone()["c"]
+    # Family-law warning: an opposing party on any of this client's
+    # cases is themselves a client WITH portal access. Neither side can
+    # see the other's data (accounts are per client record), but staff
+    # should know both doors are open.
+    opp_warning = []
+    opps = db.execute(
+        "SELECT DISTINCT op.first_name, op.last_name FROM opposing_parties op"
+        " JOIN cases c ON c.id = op.case_id WHERE c.client_id = ?",
+        (client_id,),
+    ).fetchall()
+    for op in opps:
+        hit = db.execute(
+            "SELECT cl.id FROM clients cl"
+            " JOIN portal_users pu ON pu.client_id = cl.id"
+            " WHERE lower(cl.first_name) = lower(?)"
+            " AND lower(cl.last_name) = lower(?) AND cl.id != ?",
+            (op["first_name"], op["last_name"], client_id),
+        ).fetchone()
+        if hit:
+            opp_warning.append(f"{op['first_name']} {op['last_name']}")
+    client_row = db.execute(
+        "SELECT email FROM clients WHERE id = ?", (client_id,)
+    ).fetchone()
+    return {
+        "user": puser,
+        "pending_invite": pending_invite,
+        "invite_link": session.pop("portal_invite_link", None),
+        "requests": requests_,
+        "uploads": uploads,
+        "activity": activity,
+        "unread_msgs": unread_msgs,
+        "opp_warning": opp_warning,
+        "has_email": bool(client_row and client_row["email"]),
+        "doc_types": PORTAL_DOC_TYPES,
+    }
+
+
+@app.route("/clients/<int:client_id>/portal/invite", methods=["POST"])
+@permission_required("manage_clients")
+def portal_invite_create(client_id):
+    check_csrf()
+    db = get_db()
+    client = db.execute(
+        "SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    if not client:
+        abort(404)
+    email = (client["email"] or "").strip()
+    if not email:
+        flash("Add an email address to this client first — the invite "
+              "and the portal login both use it.", "error")
+        return redirect(url_for("client_detail", client_id=client_id))
+    now = datetime.now(timezone.utc)
+    # A fresh invite invalidates every older unused one.
+    db.execute(
+        "DELETE FROM portal_invites WHERE client_id = ? AND used_at IS NULL",
+        (client_id,),
+    )
+    raw = secrets.token_urlsafe(32)
+    db.execute(
+        "INSERT INTO portal_invites (client_id, email, token_hash,"
+        " expires_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (client_id, email, hashlib.sha256(raw.encode()).hexdigest(),
+         (now + timedelta(hours=PORTAL_INVITE_TTL_HOURS)).isoformat(),
+         session.get("user_id"), now.isoformat()),
+    )
+    db.commit()
+    session["portal_invite_link"] = url_for(
+        "portal_accept_invite", token=raw, _external=True)
+    audit("portal_invite_created",
+          f"Created portal invite for client (id={client_id})")
+    flash("Invite created. Copy the link below and send it to the "
+          "client — it works once, for 72 hours.", "success")
+    return redirect(url_for("client_detail", client_id=client_id))
+
+
+@app.route("/clients/<int:client_id>/portal/revoke", methods=["POST"])
+@permission_required("manage_clients")
+def portal_revoke(client_id):
+    check_csrf()
+    db = get_db()
+    if not db.execute("SELECT id FROM clients WHERE id = ?",
+                      (client_id,)).fetchone():
+        abort(404)
+    db.execute(
+        "UPDATE portal_users SET is_active = 0, updated_at = ?"
+        " WHERE client_id = ?",
+        (datetime.now(timezone.utc).isoformat(), client_id),
+    )
+    db.execute(
+        "DELETE FROM portal_invites WHERE client_id = ? AND used_at IS NULL",
+        (client_id,),
+    )
+    db.commit()
+    audit("portal_access_revoked",
+          f"Revoked portal access for client (id={client_id})")
+    flash("Portal access revoked. The client can no longer log in.",
+          "success")
+    return redirect(url_for("client_detail", client_id=client_id))
+
+
+@app.route("/clients/<int:client_id>/portal/request", methods=["POST"])
+@permission_required("manage_clients")
+def portal_request_create(client_id):
+    check_csrf()
+    db = get_db()
+    if not db.execute("SELECT id FROM clients WHERE id = ?",
+                      (client_id,)).fetchone():
+        abort(404)
+    title = request.form.get("title", "").strip()
+    note = request.form.get("note", "").strip()
+    case_id = request.form.get("case_id", type=int)
+    if case_id and not db.execute(
+            "SELECT id FROM cases WHERE id = ? AND client_id = ?",
+            (case_id, client_id)).fetchone():
+        case_id = None
+    if not title:
+        flash("Give the request a title (e.g. '2024 tax return').",
+              "error")
+        return redirect(url_for("client_detail", client_id=client_id))
+    now = datetime.now(timezone.utc).isoformat()
+    cur = db.execute(
+        "INSERT INTO portal_doc_requests (client_id, case_id, title, note,"
+        " status, created_by, created_at) VALUES (?, ?, ?, ?, 'open', ?, ?)",
+        (client_id, case_id, title, note, session.get("user_id"), now),
+    )
+    db.commit()
+    _portal_activity(db, client_id, "request",
+                     f"Office requested: {title}",
+                     "portal_doc_requests", cur.lastrowid)
+    db.commit()
+    audit("portal_request_created",
+          f"Requested document '{title}' from client (id={client_id})")
+    flash(f"Request sent — '{title}' is now on the client's checklist.",
+          "success")
+    return redirect(url_for("client_detail", client_id=client_id))
+
+
+@app.route("/clients/<int:client_id>/portal/request/<int:request_id>/cancel",
+           methods=["POST"])
+@permission_required("manage_clients")
+def portal_request_cancel(client_id, request_id):
+    check_csrf()
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM portal_doc_requests WHERE id = ? AND client_id = ?",
+        (request_id, client_id),
+    ).fetchone()
+    if not row:
+        abort(404)
+    db.execute(
+        "UPDATE portal_doc_requests SET status = 'cancelled' WHERE id = ?",
+        (request_id,),
+    )
+    db.commit()
+    audit("portal_request_cancelled",
+          f"Cancelled document request '{row['title']}' for client"
+          f" (id={client_id})")
+    flash("Request cancelled.", "success")
+    return redirect(url_for("client_detail", client_id=client_id))
+
+
+# ----------------------------------------------------------------------------
+# Review queue
+# ----------------------------------------------------------------------------
+@app.route("/portal-review")
+@permission_required("view_clients")
+def portal_review():
+    db = get_db()
+    pending_uploads = db.execute(
+        "SELECT u.*, cl.first_name, cl.last_name, r.title AS request_title,"
+        " c.case_number AS case_number FROM portal_uploads u"
+        " JOIN clients cl ON cl.id = u.client_id"
+        " LEFT JOIN portal_doc_requests r ON r.id = u.request_id"
+        " LEFT JOIN cases c ON c.id = u.case_id"
+        " WHERE u.status = 'pending' ORDER BY u.uploaded_at",
+    ).fetchall()
+    submitted_forms = db.execute(
+        "SELECT s.*, cl.first_name, cl.last_name, c.case_number"
+        " FROM portal_form_submissions s"
+        " JOIN clients cl ON cl.id = s.client_id"
+        " LEFT JOIN cases c ON c.id = s.case_id"
+        " WHERE s.status = 'submitted' ORDER BY s.submitted_at",
+    ).fetchall()
+    threads = db.execute(
+        "SELECT cl.id AS client_id, cl.first_name, cl.last_name,"
+        " COUNT(CASE WHEN m.sender_type = 'client'"
+        " AND m.read_by_staff_at IS NULL THEN 1 END) AS unread,"
+        " MAX(m.created_at) AS last_at FROM portal_messages m"
+        " JOIN clients cl ON cl.id = m.client_id"
+        " GROUP BY cl.id ORDER BY last_at DESC",
+    ).fetchall()
+    activity = db.execute(
+        "SELECT a.*, cl.first_name, cl.last_name FROM portal_activity a"
+        " JOIN clients cl ON cl.id = a.client_id"
+        " ORDER BY a.id DESC LIMIT 20",
+    ).fetchall()
+    client_cases = {}
+    for up in pending_uploads:
+        if up["client_id"] not in client_cases:
+            client_cases[up["client_id"]] = _portal_client_cases(
+                db, up["client_id"])
+    # Opening the queue counts as seeing the feed.
+    db.execute("UPDATE portal_activity SET seen_by_staff = 1"
+               " WHERE seen_by_staff = 0")
+    db.commit()
+    return render_template(
+        "portal_review.html", pending_uploads=pending_uploads,
+        submitted_forms=submitted_forms, threads=threads,
+        activity=activity, client_cases=client_cases,
+        doc_types=PORTAL_DOC_TYPES, categories=DOC_CATEGORIES,
+        form_defs=PORTAL_FORM_DEFS)
+
+
+@app.route("/portal-review/uploads/<int:upload_id>/accept",
+           methods=["POST"])
+@permission_required("manage_documents")
+def portal_upload_accept(upload_id):
+    check_csrf()
+    db = get_db()
+    up = db.execute(
+        "SELECT u.*, cl.first_name, cl.last_name FROM portal_uploads u"
+        " JOIN clients cl ON cl.id = u.client_id WHERE u.id = ?",
+        (upload_id,),
+    ).fetchone()
+    if not up:
+        abort(404)
+    if up["status"] != "pending":
+        flash("That upload was already reviewed.", "warning")
+        return redirect(url_for("portal_review"))
+    case_id = request.form.get("case_id", type=int) or up["case_id"]
+    if case_id and not db.execute(
+            "SELECT id FROM cases WHERE id = ? AND client_id = ?",
+            (case_id, up["client_id"])).fetchone():
+        flash("That case doesn't belong to this client.", "error")
+        return redirect(url_for("portal_review"))
+    category = request.form.get("category", "")
+    if category not in DOC_CATEGORIES:
+        category = PORTAL_DOC_TYPES.get(
+            up["doc_type"], {}).get("category", "other")
+    now = datetime.now(timezone.utc).isoformat()
+    document_id = None
+    if case_id:
+        src = _portal_upload_path(up)
+        if not os.path.exists(src):
+            flash("The uploaded file is missing from disk — it can't be "
+                  "filed. Ask the client to send it again.", "error")
+            return redirect(url_for("portal_review"))
+        # Versioning matches staff uploads: same name + category bumps.
+        row = db.execute(
+            "SELECT MAX(version) AS v FROM documents"
+            " WHERE case_id = ? AND original_name = ? AND category = ?",
+            (case_id, up["original_name"], category),
+        ).fetchone()
+        version = (row["v"] or 0) + 1
+        stored = f"{uuid.uuid4().hex}_{up['original_name']}"
+        dest = os.path.join(_case_doc_dir(case_id), stored)
+        shutil.move(src, dest)
+        cur = db.execute(
+            "INSERT INTO documents (case_id, original_name, stored_name,"
+            " category, file_size, version, uploaded_by, notes,"
+            " uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (case_id, up["original_name"], stored, category,
+             up["file_size"], version,
+             f"portal:{up['first_name']} {up['last_name']}",
+             f"Client portal upload"
+             f" ({PORTAL_DOC_TYPES.get(up['doc_type'], {}).get('label', up['doc_type'])})",
+             now),
+        )
+        document_id = cur.lastrowid
+    db.execute(
+        "UPDATE portal_uploads SET status = 'accepted', document_id = ?,"
+        " case_id = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+        (document_id, case_id, session.get("user_id"), now, upload_id),
+    )
+    if up["request_id"]:
+        db.execute(
+            "UPDATE portal_doc_requests SET status = 'fulfilled',"
+            " fulfilled_at = ?, fulfilled_upload_id = ?"
+            " WHERE id = ? AND status = 'open'",
+            (now, upload_id, up["request_id"]),
+        )
+    db.commit()
+    dest_label = (f"case (id={case_id})" if document_id
+                  else "the client's portal file")
+    audit("portal_upload_accepted",
+          f"Accepted portal upload '{up['original_name']}' from"
+          f" {up['first_name']} {up['last_name']} into {dest_label}")
+    flash(f"Filed '{up['original_name']}'"
+          + (f" as a case document (version {version})."
+             if document_id else " as a client-level file."), "success")
+    return redirect(url_for("portal_review"))
+
+
+@app.route("/portal-review/uploads/<int:upload_id>/reject",
+           methods=["POST"])
+@permission_required("manage_documents")
+def portal_upload_reject(upload_id):
+    check_csrf()
+    db = get_db()
+    up = db.execute(
+        "SELECT u.*, cl.first_name, cl.last_name FROM portal_uploads u"
+        " JOIN clients cl ON cl.id = u.client_id WHERE u.id = ?",
+        (upload_id,),
+    ).fetchone()
+    if not up:
+        abort(404)
+    if up["status"] != "pending":
+        flash("That upload was already reviewed.", "warning")
+        return redirect(url_for("portal_review"))
+    note = request.form.get("staff_note", "").strip()
+    db.execute(
+        "UPDATE portal_uploads SET status = 'rejected', staff_note = ?,"
+        " reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+        (note, session.get("user_id"),
+         datetime.now(timezone.utc).isoformat(), upload_id),
+    )
+    db.commit()
+    audit("portal_upload_rejected",
+          f"Rejected portal upload '{up['original_name']}' from"
+          f" {up['first_name']} {up['last_name']}"
+          + (f" — note: {note}" if note else ""))
+    flash("Upload rejected — the client will see your note.", "success")
+    return redirect(url_for("portal_review"))
+
+
+@app.route("/portal-review/uploads/<int:upload_id>/download")
+@permission_required("view_documents")
+def portal_upload_download(upload_id):
+    db = get_db()
+    up = db.execute(
+        "SELECT * FROM portal_uploads WHERE id = ?", (upload_id,)
+    ).fetchone()
+    if not up:
+        abort(404)
+    if up["document_id"]:
+        doc = db.execute("SELECT * FROM documents WHERE id = ?",
+                         (up["document_id"],)).fetchone()
+        path = (os.path.join(_case_doc_dir(doc["case_id"]),
+                             doc["stored_name"]) if doc else None)
+    else:
+        path = _portal_upload_path(up)
+    if not path or not os.path.exists(path):
+        flash("File is missing from disk. Check backups.", "error")
+        return redirect(url_for("portal_review"))
+    audit("portal_upload_download",
+          f"Downloaded portal upload '{up['original_name']}'"
+          f" (id={upload_id})")
+    return send_file(path, as_attachment=True,
+                     download_name=up["original_name"])
+
+
+# ----------------------------------------------------------------------------
+# Form review: submitted vs current, import, dismiss, generate
+# ----------------------------------------------------------------------------
+def _portal_form_current_values(db, sub, fdef):
+    """Current record values for a submission's fields (for the
+    side-by-side review screen)."""
+    client = db.execute(
+        "SELECT * FROM clients WHERE id = ?", (sub["client_id"],)
+    ).fetchone()
+    client_d = _decrypt_client(client) if client else {}
+    kids = [
+        _decrypt_child(k) for k in db.execute(
+            "SELECT * FROM children WHERE client_id = ? ORDER BY id",
+            (sub["client_id"],)).fetchall()
+    ]
+    fin = _portal_financials(db, sub["case_id"])
+    out = {}
+    for f in _portal_form_fields(fdef):
+        t = f.get("target")
+        val = ""
+        if not t:
+            val = "(kept with the submission)"
+        elif t[0] == "client":
+            val = client_d.get(t[1]) or ""
+        elif t[0] == "child":
+            slot, kind = t[1], t[2]
+            if slot - 1 < len(kids):
+                val = kids[slot - 1].get(
+                    "name" if kind == "name" else "date_of_birth") or ""
+        elif t[0] == "financial":
+            val = fin.get(t[1], "")
+        out[f["name"]] = val
+    return out
+
+
+@app.route("/portal-review/forms/<int:sub_id>")
+@permission_required("view_clients")
+def portal_form_review(sub_id):
+    db = get_db()
+    sub = db.execute(
+        "SELECT s.*, cl.first_name, cl.last_name, c.case_number, c.title"
+        " AS case_title FROM portal_form_submissions s"
+        " JOIN clients cl ON cl.id = s.client_id"
+        " LEFT JOIN cases c ON c.id = s.case_id WHERE s.id = ?",
+        (sub_id,),
+    ).fetchone()
+    if not sub:
+        abort(404)
+    fdef = PORTAL_FORM_DEFS.get(sub["form_key"])
+    if not fdef:
+        abort(404)
+    try:
+        submitted = json.loads(sub["snapshot_json"] or "{}")
+    except (ValueError, TypeError):
+        submitted = {}
+    current = _portal_form_current_values(db, sub, fdef)
+    return render_template(
+        "portal_form_review.html", sub=sub, fdef=fdef,
+        submitted=submitted, current=current)
+
+
+@app.route("/portal-review/forms/<int:sub_id>/import", methods=["POST"])
+@permission_required("manage_clients")
+def portal_form_import(sub_id):
+    check_csrf()
+    db = get_db()
+    sub = db.execute(
+        "SELECT * FROM portal_form_submissions WHERE id = ?", (sub_id,)
+    ).fetchone()
+    if not sub:
+        abort(404)
+    if sub["status"] != "submitted":
+        flash("Only a submitted form can be imported.", "error")
+        return redirect(url_for("portal_form_review", sub_id=sub_id))
+    fdef = PORTAL_FORM_DEFS[sub["form_key"]]
+    try:
+        data = json.loads(sub["snapshot_json"] or "{}")
+    except (ValueError, TypeError):
+        data = {}
+    now = datetime.now(timezone.utc).isoformat()
+    changed = []
+    # Client-record fields (DOBs are encrypted at rest — encrypt here too).
+    for f in _portal_form_fields(fdef):
+        t = f.get("target")
+        if not t or t[0] != "client":
+            continue
+        col = t[1]
+        if col not in ("email", "phone", "address", "date_of_birth",
+                       "spouse_name", "spouse_dob"):
+            continue
+        val = str(data.get(f["name"], "") or "").strip()
+        if not val:
+            continue
+        store = (encrypt_value(val)
+                 if col in ("date_of_birth", "spouse_dob") else val)
+        db.execute(
+            f"UPDATE clients SET {col} = ?, updated_at = ? WHERE id = ?",
+            (store, now, sub["client_id"]),
+        )
+        changed.append(f["label"])
+    # Children, grouped by slot: match by name, else add.
+    slots = {}
+    for f in _portal_form_fields(fdef):
+        t = f.get("target")
+        if t and t[0] == "child":
+            slots.setdefault(t[1], {})[t[2]] = str(
+                data.get(f["name"], "") or "").strip()
+    for slot, vals in sorted(slots.items()):
+        name = vals.get("name", "")
+        if not name:
+            continue
+        existing = db.execute(
+            "SELECT id FROM children WHERE client_id = ?"
+            " AND lower(name) = lower(?)",
+            (sub["client_id"], name),
+        ).fetchone()
+        dob = vals.get("dob", "")
+        if existing:
+            if dob:
+                db.execute(
+                    "UPDATE children SET date_of_birth = ? WHERE id = ?",
+                    (encrypt_value(dob), existing["id"]),
+                )
+                changed.append(f"Child '{name}' birth date")
+        else:
+            db.execute(
+                "INSERT INTO children (client_id, name, date_of_birth)"
+                " VALUES (?, ?, ?)",
+                (sub["client_id"], name, encrypt_value(dob)),
+            )
+            changed.append(f"Child '{name}' added")
+    # Financial values into case_financials.
+    if sub["case_id"]:
+        for f in _portal_form_fields(fdef):
+            t = f.get("target")
+            if not t or t[0] != "financial":
+                continue
+            val = str(data.get(f["name"], "") or "").strip()
+            if not val:
+                continue
+            _portal_set_financial(db, sub["case_id"], t[1], val)
+            changed.append(f["label"])
+    db.execute(
+        "UPDATE portal_form_submissions SET status = 'imported',"
+        " reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+        (session.get("user_id"), now, sub_id),
+    )
+    db.commit()
+    audit("portal_form_imported",
+          f"Imported {fdef['title']} from client (id={sub['client_id']})"
+          f" — updated: {', '.join(changed) if changed else 'nothing'}")
+    flash("Imported. The client's record now reflects what they sent.",
+          "success")
+    return redirect(url_for("portal_form_review", sub_id=sub_id))
+
+
+@app.route("/portal-review/forms/<int:sub_id>/dismiss", methods=["POST"])
+@permission_required("manage_clients")
+def portal_form_dismiss(sub_id):
+    check_csrf()
+    db = get_db()
+    sub = db.execute(
+        "SELECT * FROM portal_form_submissions WHERE id = ?", (sub_id,)
+    ).fetchone()
+    if not sub:
+        abort(404)
+    if sub["status"] != "submitted":
+        flash("Only a submitted form can be dismissed.", "error")
+        return redirect(url_for("portal_form_review", sub_id=sub_id))
+    db.execute(
+        "UPDATE portal_form_submissions SET status = 'dismissed',"
+        " reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+        (session.get("user_id"),
+         datetime.now(timezone.utc).isoformat(), sub_id),
+    )
+    db.commit()
+    audit("portal_form_dismissed",
+          f"Dismissed {PORTAL_FORM_DEFS[sub['form_key']]['title']} from"
+          f" client (id={sub['client_id']}) without importing")
+    flash("Dismissed — the submission stays on record but nothing was "
+          "imported.", "success")
+    return redirect(url_for("portal_review"))
+
+
+@app.route("/portal-review/forms/<int:sub_id>/generate-support",
+           methods=["POST"])
+@permission_required("use_templates")
+def portal_form_generate_support(sub_id):
+    """One-click Child Support Worksheet PDF from an imported Financial
+    Worksheet, saved into the case's documents. Guarded: anything
+    missing (template, case, values) degrades to a flash, never a 500."""
+    check_csrf()
+    db = get_db()
+    sub = db.execute(
+        "SELECT * FROM portal_form_submissions WHERE id = ?", (sub_id,)
+    ).fetchone()
+    if not sub:
+        abort(404)
+    if sub["form_key"] != "financial_worksheet" or not sub["case_id"]:
+        flash("The support worksheet can only be generated from a "
+              "Financial Worksheet tied to a case.", "error")
+        return redirect(url_for("portal_form_review", sub_id=sub_id))
+    try:
+        tmpl = get_template("support_worksheet")
+        if tmpl is None:
+            raise ValueError("support worksheet template is unavailable")
+        client, children, case = _template_party_context(
+            sub["client_id"], sub["case_id"])
+        fin = _portal_financials(db, sub["case_id"])
+
+        def _money(key):
+            # Portal currency fields are free text ("3,100", "$450") —
+            # the worksheet math needs a plain number string.
+            return re.sub(r"[^0-9.\-]", "", fin.get(key, "") or "")
+        values = {
+            "parent_a": (f"{client.get('first_name', '')}"
+                         f" {client.get('last_name', '')}".strip()
+                         if client else ""),
+            "parent_a_income": _money("client_net_income"),
+            "parent_b": (client.get("spouse_name", "") if client else ""),
+            "parent_b_income": _money("other_parent_net_income"),
+            "daycare": _money("daycare"),
+            "health_insurance": _money("health_insurance"),
+            "notes": "Generated from the client's portal Financial "
+                     "Worksheet.",
+        }
+        data = dict(values)
+        data["ai_disclosure"] = False
+        data["children"] = [
+            {"name": c.get("name", ""),
+             "date_of_birth": c.get("date_of_birth", "")}
+            for c in children]
+        data["case_number"] = case["case_number"] if case else ""
+        logo_path = os.path.join(BASE_DIR, "static", "dgm-logo.png")
+        pdf_bytes = build_template_pdf(tmpl["layout"], data,
+                                       logo_path=logo_path)
+        version = _save_generated_doc(
+            sub["case_id"], f"{tmpl['file_stem']}.pdf", pdf_bytes,
+            tmpl["doc_category"],
+            "Generated from portal Financial Worksheet"
+            f" (submission id={sub_id})")
+        audit("portal_support_generated",
+              f"Generated Child Support Worksheet v{version} for case"
+              f" (id={sub['case_id']}) from portal submission {sub_id}")
+        flash(f"Child Support Worksheet generated and saved to the "
+              f"case's documents (version {version}). Verify the "
+              f"figures against the official schedule before filing.",
+              "success")
+    except Exception as e:
+        flash(f"Could not generate the worksheet: {e}", "error")
+    return redirect(url_for("portal_form_review", sub_id=sub_id))
+
+
+# ----------------------------------------------------------------------------
+# Staff messaging: inbox + per-client thread
+# ----------------------------------------------------------------------------
+@app.route("/portal-messages")
+@permission_required("view_clients")
+def portal_staff_messages():
+    db = get_db()
+    threads = db.execute(
+        "SELECT cl.id AS client_id, cl.first_name, cl.last_name,"
+        " COUNT(CASE WHEN m.sender_type = 'client'"
+        " AND m.read_by_staff_at IS NULL THEN 1 END) AS unread,"
+        " MAX(m.created_at) AS last_at,"
+        " (SELECT body FROM portal_messages WHERE client_id = cl.id"
+        "  ORDER BY id DESC LIMIT 1) AS last_body"
+        " FROM portal_messages m"
+        " JOIN clients cl ON cl.id = m.client_id"
+        " GROUP BY cl.id ORDER BY last_at DESC",
+    ).fetchall()
+    return render_template("portal_messages_inbox.html", threads=threads)
+
+
+@app.route("/portal-messages/<int:client_id>", methods=["GET", "POST"])
+@permission_required("view_clients")
+def portal_staff_thread(client_id):
+    db = get_db()
+    client = db.execute(
+        "SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    if not client:
+        abort(404)
+    if request.method == "POST":
+        if not user_has_perm(session.get("permissions", {}),
+                             "manage_clients"):
+            abort(403, description="You do not have permission to reply.")
+        check_csrf()
+        body = request.form.get("body", "").strip()
+        if not body:
+            flash("Write a reply first.", "error")
+            return redirect(url_for("portal_staff_thread",
+                                    client_id=client_id))
+        me = db.execute(
+            "SELECT full_name, username FROM users WHERE id = ?",
+            (session.get("user_id"),),
+        ).fetchone()
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "INSERT INTO portal_messages (client_id, sender_type,"
+            " sender_id, sender_name, body, read_by_staff_at, created_at)"
+            " VALUES (?, 'staff', ?, ?, ?, ?, ?)",
+            (client_id, session.get("user_id"),
+             (me["full_name"] or me["username"]) if me else "The office",
+             body, now, now),
+        )
+        db.commit()
+        audit("portal_message_staff_reply",
+              f"Staff replied to client (id={client_id}) in the portal")
+        return redirect(url_for("portal_staff_thread",
+                                client_id=client_id))
+    msgs = db.execute(
+        "SELECT m.*, u.original_name AS att_name, u.status AS att_status,"
+        " u.id AS att_id FROM portal_messages m"
+        " LEFT JOIN portal_uploads u ON u.id = m.attachment_upload_id"
+        " WHERE m.client_id = ? ORDER BY m.created_at, m.id",
+        (client_id,),
+    ).fetchall()
+    db.execute(
+        "UPDATE portal_messages SET read_by_staff_at = ?"
+        " WHERE client_id = ? AND sender_type = 'client'"
+        " AND read_by_staff_at IS NULL",
+        (datetime.now(timezone.utc).isoformat(), client_id),
+    )
+    db.commit()
+    return render_template(
+        "portal_thread.html", client=client, messages=msgs,
+        disclaimer=PORTAL_MESSAGE_DISCLAIMER)
 
 
 @app.errorhandler(404)

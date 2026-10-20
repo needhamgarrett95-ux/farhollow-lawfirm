@@ -1,0 +1,24 @@
+{% extends "portal_base.html" %}
+{% block title %}Forms — Client Portal{% endblock %}
+{% block content %}
+<h1 class="p-h1">Forms</h1>
+<p class="p-muted">Fill these out at your own pace — your answers save automatically as a draft, and nothing goes to the office until you press Submit on the last step.</p>
+
+{% for key, fd in form_defs.items() %}
+<div class="p-card">
+  <div class="p-card-head">
+    <h2>{{ fd.title }}</h2>
+    {% set s = subs[key] %}
+    {% if s %}<span class="p-status p-status-{{ s.status }}">{{ {'draft': 'draft saved', 'submitted': 'sent — being reviewed', 'imported': 'added to your file', 'dismissed': 'reviewed'}[s.status] }}</span>{% endif %}
+  </div>
+  <p class="p-muted">{{ fd.description }}</p>
+  {% if s and s.status == 'draft' %}
+  <a class="btn btn-primary" href="{{ url_for('portal_form_fill', key=key) }}">Continue where you left off</a>
+  {% elif s and s.status in ('submitted', 'imported') %}
+  <p class="p-muted p-small">The office has this one. If something changes, call or message the office and they'll help you update it.</p>
+  {% else %}
+  <a class="btn btn-primary" href="{{ url_for('portal_form_fill', key=key) }}">Start this form</a>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

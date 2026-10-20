@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Portal Messages — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('mail', 22) }} Portal Messages</h1>
+  <a class="btn" href="{{ url_for('portal_review') }}">Portal Review</a>
+</div>
+<p class="muted">One thread per client. Clients see replies in their portal; everything here is also in the audit log.</p>
+
+<div class="detail-card">
+  {% if threads %}
+  <table class="table">
+    <thead><tr><th>Client</th><th>Unread</th><th>Latest message</th><th>Last activity</th><th></th></tr></thead>
+    <tbody>
+    {% for t in threads %}
+      <tr>
+        <td><a href="{{ url_for('client_detail', client_id=t.client_id) }}"><strong>{{ t.first_name }} {{ t.last_name }}</strong></a></td>
+        <td>{% if t.unread %}<span class="bdg">{{ t.unread }}</span>{% else %}—{% endif %}</td>
+        <td class="muted">{{ (t.last_body or '')[:80] }}</td>
+        <td>{{ (t.last_at or '')[:16].replace('T', ' ') }}</td>
+        <td><a class="btn btn-small btn-primary" href="{{ url_for('portal_staff_thread', client_id=t.client_id) }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No client has messaged yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

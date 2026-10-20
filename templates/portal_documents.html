@@ -1,0 +1,89 @@
+{% extends "portal_base.html" %}
+{% block title %}Documents — Client Portal{% endblock %}
+{% block content %}
+<h1 class="p-h1">Documents</h1>
+<p class="p-muted">Send documents to the office securely. Everything you send is reviewed by the office before it goes into your file — you'll see it below while it's waiting.</p>
+
+<div class="p-card">
+  <h2>Send a document</h2>
+  <form method="post" action="{{ url_for('portal_document_upload') }}" enctype="multipart/form-data" class="p-form">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <label for="doc_type">What kind of document is it?</label>
+    <select id="doc_type" name="doc_type">
+      {% for key, dt in doc_types.items() %}
+      <option value="{{ key }}" {% if preselect_type == key %}selected{% endif %}>{{ dt.label }}</option>
+      {% endfor %}
+    </select>
+    <p class="p-muted p-small" id="docTypeHint"></p>
+    {% if open_requests %}
+    <label for="request_id">Is this for something the office asked for?</label>
+    <select id="request_id" name="request_id">
+      <option value="">No — it's a new document</option>
+      {% for r in open_requests %}
+      <option value="{{ r.id }}" {% if preselect_request == r.id %}selected{% endif %}>{{ r.title }}{% if r.case_number %} (case {{ r.case_number }}){% endif %}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    {% if cases | length > 1 %}
+    <label for="case_id">Which case is it for?</label>
+    <select id="case_id" name="case_id">
+      <option value="">Not sure — the office will file it</option>
+      {% for c in cases %}
+      <option value="{{ c.id }}">{{ c.case_number }} — {{ c.title or c.case_type }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <label for="file">Choose the file</label>
+    <input type="file" id="file" name="file" required>
+    <p class="p-muted p-small">PDF, photo (JPG, PNG, HEIC), or Word/Excel — up to 25 MB. A clear photo of a paper document works great.</p>
+    <button type="submit" class="btn btn-primary btn-lg p-block">Upload</button>
+  </form>
+</div>
+
+{% if open_requests %}
+<div class="p-card">
+  <h2>Still needed</h2>
+  <ul class="p-checklist">
+    {% for r in open_requests %}
+    <li>
+      <span class="p-check p-check-open"></span>
+      <span class="p-check-text"><strong>{{ r.title }}</strong>{% if r.note %}<br><span class="p-muted">{{ r.note }}</span>{% endif %}</span>
+      <a class="btn btn-small" href="{{ url_for('portal_documents', request=r.id) }}">Upload</a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="p-card">
+  <h2>Documents you've sent</h2>
+  {% if uploads %}
+  <ul class="p-upload-list">
+    {% for u in uploads %}
+    <li>
+      <div class="p-upload-main">
+        <strong>{{ u.original_name }}</strong><br>
+        <span class="p-muted">{{ doc_types[u.doc_type].label if u.doc_type in doc_types else u.doc_type }}{% if u.request_title %} · for “{{ u.request_title }}”{% endif %}{% if u.case_number %} · case {{ u.case_number }}{% endif %} · {{ u.uploaded_at[:10] }}</span>
+        {% if u.status == 'rejected' and u.staff_note %}<br><span class="p-note">From the office: {{ u.staff_note }}</span>{% endif %}
+      </div>
+      <span class="p-status p-status-{{ u.status }}">{{ {'pending': 'waiting for review', 'accepted': 'filed', 'rejected': 'needs attention'}[u.status] }}</span>
+      <a class="btn btn-small" href="{{ url_for('portal_document_download', upload_id=u.id) }}">View</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="p-muted">Nothing yet. When you send a document, it will show up here.</p>
+  {% endif %}
+</div>
+
+<script>
+  var hints = {};
+  {% for k, dt in doc_types.items() %}hints[{{ k | tojson }}] = {{ dt.hint | tojson }};
+  {% endfor %}
+  var sel = document.getElementById('doc_type');
+  var hint = document.getElementById('docTypeHint');
+  function showHint() { hint.textContent = hints[sel.value] || ''; }
+  sel.addEventListener('change', showHint);
+  showHint();
+</script>
+{% endblock %}

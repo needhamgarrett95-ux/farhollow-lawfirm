@@ -210,3 +210,35 @@ The software cannot do these things. They are operational and legal duties:
 > not field-encrypted in v1. If the firm's risk assessment requires it,
 > field encryption can be extended to additional columns following the
 > existing `crypto.py` pattern.
+
+## 4. Addendum (v2.6.0) — client portal
+
+The client portal gives each client a login that shows only their own
+case status, document requests, uploads, forms, and messages. Notes for
+counsel's review:
+
+- **Confidentiality (RPC 1.6).** Portal accounts are bound one-to-one
+  to a single client record and are invite-only; every portal query is
+  scoped server-side to the authenticated client's own record, and the
+  boundary is covered by automated tests (one client cannot retrieve
+  another's documents, forms, messages, or requests by any URL).
+  Client uploads are quarantined and never enter the case file until a
+  staff member accepts them; file contents are verified by type
+  inspection, not file name. All portal activity — including logins —
+  is written to the same append-only audit log as staff activity.
+  Portal authentication is a separate realm from staff authentication;
+  neither credential opens the other side. Reasonable efforts against
+  unauthorized disclosure still depend on deployment: the portal must
+  be served over an encrypted connection (the firm's private network /
+  secure remote access) and never exposed directly to the open
+  internet, and invite links should be delivered to the client through
+  a channel the firm trusts.
+- **Communication (RPC 1.4).** The portal shows case status and the
+  next court date only; it is not a substitute for attorney advice.
+  The messaging composer carries a standing notice that messages are
+  reviewed during office hours and that emergencies go to 911.
+- **Opposing parties.** Where both parties to a matter are firm
+  clients with portal access, accounts remain fully segregated; the
+  software additionally warns staff on the client record. Whether to
+  invite an opposing party at all remains the attorney's judgment
+  under RPC 1.7.

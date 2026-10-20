@@ -1,0 +1,82 @@
+{% extends "portal_base.html" %}
+{% block title %}Your Portal — Law Office of Derek G. Medina{% endblock %}
+{% block content %}
+<h1 class="p-h1">Hello, {{ pu.client_first_name }}</h1>
+<p class="p-muted">This is your private portal. Only you and the office can see what's here.</p>
+
+{% if req_total %}
+<div class="p-card">
+  <div class="p-card-head">
+    <h2>Documents the office needs</h2>
+    <span class="p-progress">{{ req_done }} of {{ req_total }} received</span>
+  </div>
+  <div class="p-progressbar"><span style="width: {{ (req_done * 100 // req_total) if req_total else 0 }}%"></span></div>
+  {% if open_requests %}
+  <ul class="p-checklist">
+    {% for r in open_requests %}
+    <li>
+      <span class="p-check p-check-open"></span>
+      <span class="p-check-text"><strong>{{ r.title }}</strong>{% if r.note %}<br><span class="p-muted">{{ r.note }}</span>{% endif %}{% if r.case_number %}<br><span class="p-muted">For case {{ r.case_number }}</span>{% endif %}</span>
+      <a class="btn btn-primary btn-small" href="{{ url_for('portal_documents', request=r.id) }}">Upload</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="p-muted">Everything the office asked for has been received. Thank you!</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="p-card">
+  <h2>Your cases</h2>
+  {% if cases %}
+  <ul class="p-case-list">
+    {% for item in cases %}
+    <li>
+      <div>
+        <strong>{{ item.case.title or item.case.case_number }}</strong><br>
+        <span class="p-muted">Case {{ item.case.case_number }} · {{ item.case.status | replace('_', ' ') | title }}</span>
+      </div>
+      <div class="p-case-next">
+        {% if item.next_hearing %}
+        <span class="p-muted">Next court date</span><br>
+        <strong>{{ item.next_hearing.event_date }}{% if item.next_hearing.event_time %} at {{ item.next_hearing.event_time }}{% endif %}</strong>
+        {% else %}
+        <span class="p-muted">No court date scheduled</span>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="p-muted">No cases are on file yet. The office will add yours here as things get started.</p>
+  {% endif %}
+</div>
+
+<div class="p-grid">
+  <a class="p-card p-link-card" href="{{ url_for('portal_documents') }}">
+    <h2>Documents</h2>
+    <p class="p-muted">Send the office a document, or check on ones you've sent.</p>
+    {% if recent_uploads %}
+    <ul class="p-mini-list">
+      {% for u in recent_uploads[:3] %}
+      <li>{{ u.original_name }} — <span class="p-status p-status-{{ u.status }}">{{ u.status }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </a>
+  <a class="p-card p-link-card" href="{{ url_for('portal_forms') }}">
+    <h2>Forms</h2>
+    <p class="p-muted">Fill out the office's forms right here — your answers save as you go.</p>
+    <ul class="p-mini-list">
+      {% for key, fd in form_defs.items() %}
+      <li>{{ fd.title }}{% if form_states[key] %} — <span class="p-status p-status-{{ form_states[key] }}">{{ form_states[key] }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </a>
+  <a class="p-card p-link-card" href="{{ url_for('portal_messages') }}">
+    <h2>Messages{% if unread %} <span class="bdg">{{ unread }} new</span>{% endif %}</h2>
+    <p class="p-muted">Message the office any time. They reply during office hours.</p>
+  </a>
+</div>
+{% endblock %}

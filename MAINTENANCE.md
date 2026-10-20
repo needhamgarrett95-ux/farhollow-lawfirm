@@ -1414,3 +1414,120 @@ active section's icon is solid white on its gold-tinted pill (solid gold
 was tried on paper — about 4:1 contrast against that pill, versus
 roughly 9.7:1 for white — so white won). Panel icons sit in their chips
 in navy (light mode) or pale blue (dark mode), as before.
+
+## 48. The client portal (v2.6.0)
+
+The portal is a second, client-shaped door into this same program — not
+a separate product. Everything a client sends lands in the firm's real
+places: the case's documents, the client's record, the case page, the
+nav badges, the dashboard, and the same audit log as everything else.
+There is no "portal copy" of anything to reconcile later.
+
+**How a client gets in (invites).** Portal accounts are invite-only —
+a client can never sign themselves up.
+
+1. Open the client's record. In the **Client Portal** section, check the
+   client has an email address on file (the invite and the login both
+   use it; the button stays disabled until one is there).
+2. Click **Send invite**. The page shows a one-time link — copy it and
+   send it to the client however you normally reach them (text, email,
+   printed at the office). The link works **once** and **expires in 72
+   hours**. Clicking Send invite again (it becomes **Resend invite**)
+   kills the previous link and makes a fresh one.
+3. The client opens the link, chooses a password (at least 10
+   characters), and from then on logs in at `/portal/login` with their
+   email and that password.
+4. **Revoke access** (same section) turns the account off in one click
+   and kills any outstanding invite link. To restore access later, send
+   a new invite — the client sets a fresh password and is back in. Old
+   documents, forms, and messages are never deleted by revoking.
+
+**What clients see.** Their own information only — the program checks
+every single page and file against the logged-in client's record, so
+one client can never see another's anything. The portal home shows a
+checklist of documents the office still needs (with progress),
+their cases with status and next court date, and three doors:
+**Documents**, **Forms**, **Messages**. On a phone it has its own
+capsule bar along the bottom, same as the staff side.
+
+**Documents and the review queue (the important daily habit).**
+Anything a client uploads is **quarantined** — it sits in the **Portal
+Review** queue (Portal → Portal Review in the menu; the menu badge and
+the phone More button count what's waiting, and the dashboard has a
+**Client Portal** card) and is *not* in any case file yet.
+
+- **Review file** downloads/uploads a look at it.
+- **Accept & file** moves it into the chosen case's documents as
+  version 1, filed under the document category you pick. If the upload
+  was a photo ID or doesn't belong to a case, choose "Client-level
+  file" — it's kept on the client's portal record instead. Accepting
+  the upload that answers a document request marks that request
+  fulfilled and ticks the client's checklist.
+- **Reject** sends it back with the note you type — write it the way
+  you'd say it ("too blurry — please retake in daylight"), because the
+  client sees exactly that.
+- Uploads are checked by what the file *is*, not what it's named: the
+  program reads the file's actual contents, so a program renamed to
+  ".pdf" is refused. Accepted types: PDF, JPG, PNG, HEIC phone photos
+  (marked HEIC — they open on phones and modern computers), and
+  Word/Excel documents. The limit is 25 MB per file.
+- Some uploads arrive without a case (the client wasn't sure, or they
+  have several open cases). They wait in the same queue — pick the case
+  when you accept. Nothing is ever filed by guessing.
+
+**Document requests.** On any client record, type what you need ("2024
+tax return") with an optional note and case, and click **Request
+document**. It becomes a checklist item on the client's portal home;
+when they upload against it and you accept the upload, it ticks
+itself off. Cancel a request from the same section if it's no longer
+needed.
+
+**Quick-fill forms.** Two forms live in the portal: the **Client
+Intake Form** (contact info, spouse, children, work basics) and the
+**Financial Worksheet** (income, the other parent's income, daycare,
+health insurance, expenses/assets/debts). Clients fill them in steps;
+progress saves as a **draft** — drafts are invisible to you until the
+client presses **Submit**. Submitting freezes exactly what they sent
+(the snapshot never changes afterwards). Submitted forms wait in
+Portal Review; open one to see **what they submitted** beside **what's
+in the record now**, differences highlighted. **Import** copies the
+submitted values into the real client record (dates of birth are
+encrypted, same as if you'd typed them) or, for the Financial
+Worksheet, into the case's stored financial figures. **Dismiss** keeps
+the submission on record but imports nothing. After importing a
+Financial Worksheet, one click — **Generate Child Support Worksheet
+from these figures** — builds the worksheet PDF into the case's
+documents from those numbers. It's the same estimate template as
+always: verify against the official schedule before filing.
+
+**Messaging.** Clients can message the office from the portal; the
+thread lives at **Portal → Portal Review → Message threads** (or the
+**Portal Messages** tab on the case page, or the client's record).
+One thread per client. Replies go out under the office's name; the
+client is told, above their message box: *"Messages are reviewed
+during office hours. For emergencies call 911; for urgent court
+matters call the office."* A file attached to a message is just an
+upload — it waits in the review queue like any other, and the thread
+flags it "pending review" until you accept it. Unread client messages
+count into the same Portal badge as uploads and forms.
+
+**A warning the program gives you.** If a client is the *opposing
+party* in another client's case and both have portal access, the
+client record shows a heads-up banner. Their accounts are still fully
+separate — neither can see anything of the other's — but you should
+know both doors are open before you invite the second side.
+
+**Security rules worth knowing.**
+
+- Portal logins and staff logins are different realms on purpose: a
+  client's sign-in can never open a staff page, and a staff sign-in
+  never opens the portal. Five wrong passwords lock a portal account
+  for 15 minutes, and the error message never says which part was
+  wrong (so it can't be used to guess).
+- Every portal action — logins (good and bad), views, uploads,
+  downloads, submissions, messages, accepts, rejects, imports,
+  invites, revocations — is written to the same tamper-evident audit
+  log, under the name `portal:<client email>`.
+- The portal must only ever be reachable through the firm's private
+  network or its secure remote-access setup — never publish the
+  server's port directly on the open internet.

@@ -19,6 +19,10 @@
     {{ icon('mail', 15) }} Emails
     {% if emails %}<span class="tab-badge">{{ emails|length }}</span>{% endif %}
   </a>
+  <a href="{{ url_for('portal_staff_thread', client_id=case.client_id) }}" class="tab">
+    {{ icon('mail', 15) }} Portal Messages
+    {% if portal_msg_unread %}<span class="tab-badge">{{ portal_msg_unread }}</span>{% endif %}
+  </a>
 </div>
 
 {% if active_tab == 'emails' %}

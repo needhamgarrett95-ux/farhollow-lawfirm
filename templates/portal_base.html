@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1a365d">
+<title>{% block title %}Client Portal — Law Office of Derek G. Medina{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ app_version }}">
+<script>
+  // Portal theme: the client's own choice, kept on their device.
+  (function () {
+    try {
+      var t = localStorage.getItem('portal-theme');
+      if (t === 'dark' || t === 'light') {
+        document.documentElement.setAttribute('data-theme', t);
+      }
+    } catch (e) { /* private mode — default light */ }
+  })();
+</script>
+</head>
+<body class="portal-body">
+{% from "_icons.html" import icon, icon_filled %}
+<header class="p-topbar">
+  <div class="p-brand">
+    <div class="monogram">DGM</div>
+    <div class="firm-name">Law Office of Derek G. Medina<small>Client Portal</small></div>
+  </div>
+  {% if pu %}
+  <nav class="p-topnav">
+    <a href="{{ url_for('portal_home') }}" class="{% if request.endpoint == 'portal_home' %}active{% endif %}">Home</a>
+    <a href="{{ url_for('portal_documents') }}" class="{% if request.endpoint == 'portal_documents' %}active{% endif %}">Documents</a>
+    <a href="{{ url_for('portal_forms') }}" class="{% if request.endpoint in ('portal_forms', 'portal_form_fill') %}active{% endif %}">Forms</a>
+    <a href="{{ url_for('portal_messages') }}" class="{% if request.endpoint == 'portal_messages' %}active{% endif %}">Messages{% if portal_unread %} <span class="bdg">{{ portal_unread }}</span>{% endif %}</a>
+  </nav>
+  <div class="p-user">
+    <button type="button" class="p-theme-btn" id="pThemeToggle" title="Switch light / dark">{{ icon('moon', 18) }}</button>
+    <span class="p-username">{{ pu.client_first_name }} {{ pu.client_last_name }}</span>
+    <a class="btn btn-small" href="{{ url_for('portal_logout') }}">Log out</a>
+  </div>
+  {% endif %}
+</header>
+
+<main class="p-main">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+
+{% if pu %}
+<nav class="ptab-bar" aria-label="Portal navigation">
+  <a class="ptab {% if request.endpoint == 'portal_home' %}on{% endif %}" href="{{ url_for('portal_home') }}">
+    <span class="ptab-ic">{{ icon_filled('dashboard', 24) }}</span>
+    <span class="ptab-label">Home</span>
+  </a>
+  <a class="ptab {% if request.endpoint in ('portal_documents', 'portal_document_upload') %}on{% endif %}" href="{{ url_for('portal_documents') }}">
+    <span class="ptab-ic">{{ icon_filled('documents', 24) }}</span>
+    <span class="ptab-label">Documents</span>
+  </a>
+  <a class="ptab {% if request.endpoint in ('portal_forms', 'portal_form_fill') %}on{% endif %}" href="{{ url_for('portal_forms') }}">
+    <span class="ptab-ic">{{ icon_filled('templates', 24) }}</span>
+    <span class="ptab-label">Forms</span>
+  </a>
+  <a class="ptab {% if request.endpoint == 'portal_messages' %}on{% endif %}" href="{{ url_for('portal_messages') }}">
+    <span class="ptab-ic">{{ icon_filled('mail', 24) }}{% if portal_unread %}<span class="mtab-bdg">{{ portal_unread }}</span>{% endif %}</span>
+    <span class="ptab-label">Messages</span>
+  </a>
+</nav>
+{% endif %}
+
+<footer class="p-footer">
+  <span>Confidential. This portal is for clients of the Law Office of Derek G. Medina.</span>
+</footer>
+<script>
+  (function () {
+    var btn = document.getElementById('pThemeToggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var root = document.documentElement;
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('portal-theme', next); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>

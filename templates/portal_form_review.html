@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Review {{ fdef.title }} — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('templates', 22) }} {{ fdef.title }}</h1>
+  <a class="btn" href="{{ url_for('portal_review') }}">← Portal Review</a>
+</div>
+<p class="muted">From <a href="{{ url_for('client_detail', client_id=sub.client_id) }}"><strong>{{ sub.first_name }} {{ sub.last_name }}</strong></a>{% if sub.case_number %} · case <a href="{{ url_for('case_detail', case_id=sub.case_id) }}">{{ sub.case_number }}{% if sub.case_title %} — {{ sub.case_title }}{% endif %}</a>{% endif %}
+· status: <strong>{{ sub.status }}</strong>{% if sub.submitted_at %} · submitted {{ sub.submitted_at[:16].replace('T', ' ') }}{% endif %}</p>
+<p class="muted">The left column is exactly what the client submitted (frozen at submit time). The right column is what's in the record now. <strong>Import</strong> copies the submitted values into the record — anything highlighted differs.</p>
+
+<div class="detail-card">
+  <table class="table portal-compare">
+    <thead><tr><th>Field</th><th>Client submitted</th><th>In the record now</th></tr></thead>
+    <tbody>
+    {% for step in fdef.steps %}
+      <tr class="portal-compare-step"><td colspan="3">{{ step.title }}</td></tr>
+      {% for f in step.fields %}
+      {% set sv = submitted.get(f.name, '') %}
+      {% set cv = current.get(f.name, '') %}
+      <tr{% if sv and sv != cv %} class="row-diff"{% endif %}>
+        <td><strong>{{ f.label }}</strong>{% if not f.target %}<br><span class="muted">reference only</span>{% endif %}</td>
+        <td>{{ sv or '—' }}</td>
+        <td>{{ cv or '—' }}</td>
+      </tr>
+      {% endfor %}
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if sub.status == 'submitted' %}
+  <div class="actions-row">
+    <form method="post" action="{{ url_for('portal_form_import', sub_id=sub.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <button type="submit" class="btn btn-primary">Import into the record</button>
+    </form>
+    <form method="post" action="{{ url_for('portal_form_dismiss', sub_id=sub.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <button type="submit" class="btn">Dismiss (import nothing)</button>
+    </form>
+  </div>
+  {% elif sub.status == 'imported' %}
+  <p class="muted">This submission was imported{% if sub.reviewed_at %} on {{ sub.reviewed_at[:16].replace('T', ' ') }}{% endif %}. Its submitted values above are kept as the permanent record of what the client sent.</p>
+  {% if sub.form_key == 'financial_worksheet' and sub.case_id %}
+  <form method="post" action="{{ url_for('portal_form_generate_support', sub_id=sub.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <button type="submit" class="btn btn-primary">Generate Child Support Worksheet from these figures</button>
+  </form>
+  <p class="muted">Creates the worksheet PDF in the case's documents, using the imported net incomes, daycare, and health insurance. Verify against the official RCW 26.19 schedule before filing — the template is an estimate.</p>
+  {% endif %}
+  {% elif sub.status == 'dismissed' %}
+  <p class="muted">This submission was dismissed without importing. The submitted values stay on record above.</p>
+  {% endif %}
+</div>
+{% endblock %}

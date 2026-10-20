@@ -1,0 +1,26 @@
+{% extends "portal_base.html" %}
+{% block title %}Set up your account — Client Portal{% endblock %}
+{% block content %}
+<div class="p-auth">
+  <div class="p-card">
+    {% if valid %}
+    <h1>Welcome — set your password</h1>
+    <p class="p-muted">You've been invited to the client portal for the Law Office of Derek G. Medina. Choose a password to finish setting up your account. You'll use your email address and this password to log in.</p>
+    <form method="post" class="p-form">
+      <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+      <label>Email address</label>
+      <input type="email" value="{{ invite.email }}" disabled>
+      <label for="password">New password (at least 10 characters)</label>
+      <input type="password" id="password" name="password" required minlength="10" autocomplete="new-password">
+      <label for="confirm_password">Type it again</label>
+      <input type="password" id="confirm_password" name="confirm_password" required minlength="10" autocomplete="new-password">
+      <button type="submit" class="btn btn-primary btn-lg p-block">Set password &amp; finish</button>
+    </form>
+    {% else %}
+    <h1>That link doesn't work anymore</h1>
+    <p class="p-muted">Invite links work only once and expire after 72 hours. Call the office and they'll send you a fresh one — it only takes a moment.</p>
+    <a class="btn btn-primary btn-lg p-block" href="{{ url_for('portal_login') }}">Go to the login page</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
