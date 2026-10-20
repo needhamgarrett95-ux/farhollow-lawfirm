@@ -1307,3 +1307,27 @@ with **reversing entries** (the Reverse link on each transaction), never by
 deleting.
 
 Non-admins do not see the danger zone at all.
+
+## 46. User management is admin-only (v2.4.7)
+
+Managing users and permissions — the Users tab, adding/editing users,
+resetting passwords, deactivating accounts — is restricted to the **admin
+role** and nothing else. It is deliberately NOT a permission you can hand
+out with the checkboxes on the user edit page.
+
+Why: the "Manage users" checkbox still exists in the permission list, and
+old accounts may still have it switched on in their saved settings, but the
+program no longer honors it for administration. If those checkboxes were
+trusted, anyone who got the box ticked by mistake would control every
+account in the firm. Only an account whose role is **Admin** can open the
+Users tab or the Integrations tab — which also covers connecting email and
+calendar accounts, checking for software updates, and installing updates.
+
+Practical notes:
+
+- To let someone else administer the firm, change their **role** to Admin
+  on their user page. There is no other way, on purpose.
+- An admin still can't deactivate their own account or strip their own
+  user-management access — those safety checks still apply.
+- Ordinary permissions (billing, trust, cases, etc.) work exactly as
+  before; only user/permission administration moved to the admin role.

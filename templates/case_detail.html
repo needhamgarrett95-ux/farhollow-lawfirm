@@ -28,7 +28,7 @@
   <div class="notice">
     <p><strong>No email account connected.</strong></p>
     <p class="muted">Connect Gmail or Outlook on the
-      {% if perms.get('manage_users') %}<a href="{{ url_for('integration_list') }}">Integrations page</a>{% else %}Integrations page (admin){% endif %}
+      {% if is_admin %}<a href="{{ url_for('integration_list') }}">Integrations page</a>{% else %}Integrations page (admin){% endif %}
       to sync email into cases.</p>
   </div>
   {% endif %}

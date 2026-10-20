@@ -1747,13 +1747,15 @@ NAV_GROUPS = [
          "permission": "use_timeclock", "active_prefixes": ["timeclock"],
          "badge": "nav_correction_count"},
         {"label": "Users", "icon": "users", "endpoint": "user_list",
-         "permission": "manage_users", "active_prefixes": ["user"]},
+         "permission": "manage_users", "admin_only": True,
+         "active_prefixes": ["user"]},
     ]},
     {"label": "System", "icon": "documents", "items": [
         {"label": "Audit Log", "icon": "documents", "endpoint": "audit_view",
          "permission": "view_audit_log", "active_prefixes": ["audit"]},
         {"label": "Integrations", "icon": "plug", "endpoint": "integration_list",
-         "permission": "manage_users", "active_prefixes": ["integration"]},
+         "permission": "manage_users", "admin_only": True,
+         "active_prefixes": ["integration"]},
     ]},
 ]
 
@@ -1761,9 +1763,11 @@ NAV_GROUPS = [
 NAV_ITEMS = [item for group in NAV_GROUPS for item in group["items"]]
 
 
-def first_allowed_endpoint(user_perms):
+def first_allowed_endpoint(user_perms, admin=False):
     """First nav tab the user can access (for post-login redirect)."""
     for item in NAV_ITEMS:
+        if item.get("admin_only") and not admin:
+            continue
         if user_has_perm(user_perms, item["permission"]):
             return item["endpoint"]
     return "dashboard"  # fallback; will 403 only if admin revoked everything
@@ -1809,6 +1813,22 @@ def permission_required(*perms):
         return decorated
 
     return decorator
+
+
+def admin_required(f):
+    """Route requires the admin ROLE. Hard role check — NOT a grantable
+    permission. Includes login check. login_required refreshes the role
+    from the database on every request, so role changes take effect
+    immediately and a polluted/stale manage_users permission in stored
+    permission data can never open an administration route."""
+    @wraps(f)
+    @login_required
+    def decorated(*args, **kwargs):
+        if not is_admin():
+            abort(403, description="This page is restricted to the admin role.")
+        return f(*args, **kwargs)
+
+    return decorated
 
 
 def count_manage_users_holders(db, exclude_user_id=None):
@@ -1870,6 +1890,10 @@ def inject_update_info():
     for group in NAV_GROUPS:
         items = []
         for item in group["items"]:
+            # Admin-only items (Users, Integrations) ignore the grantable
+            # manage_users permission: only the admin ROLE sees them.
+            if item.get("admin_only") and not is_admin():
+                continue
             if not user_has_perm(user_perms, item["permission"]):
                 continue
             active = any(endpoint.startswith(p) for p in item["active_prefixes"])
@@ -1970,7 +1994,7 @@ def login():
                 flash("Please change your password before continuing.", "warning")
                 return redirect(url_for("change_password"))
             session["permissions"] = get_user_permissions(db, user["id"])
-            return redirect(url_for(first_allowed_endpoint(session["permissions"])))
+            return redirect(url_for(first_allowed_endpoint(session["permissions"], is_admin())))
         flash("Invalid username or password.", "error")
     return render_template("login.html")
 
@@ -2038,7 +2062,7 @@ def _gen_temp_password():
 
 
 @app.route("/users")
-@permission_required("manage_users")
+@admin_required
 def user_list():
     db = get_db()
     users = db.execute(
@@ -2051,7 +2075,7 @@ def user_list():
 
 
 @app.route("/users/new", methods=["GET", "POST"])
-@permission_required("manage_users")
+@admin_required
 def user_new():
     if request.method == "POST":
         check_csrf()
@@ -2110,7 +2134,7 @@ def _permissions_from_form(default_role):
 
 
 @app.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
-@permission_required("manage_users")
+@admin_required
 def user_edit(user_id):
     db = get_db()
     user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -2168,7 +2192,7 @@ def user_edit(user_id):
 
 
 @app.route("/users/<int:user_id>/reset-password", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def user_reset_password(user_id):
     check_csrf()
     db = get_db()
@@ -2191,7 +2215,7 @@ def user_reset_password(user_id):
 
 
 @app.route("/users/<int:user_id>/deactivate", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def user_deactivate(user_id):
     check_csrf()
     db = get_db()
@@ -2212,7 +2236,7 @@ def user_deactivate(user_id):
 
 
 @app.route("/users/<int:user_id>/reactivate", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def user_reactivate(user_id):
     check_csrf()
     db = get_db()
@@ -6505,7 +6529,7 @@ def backup_history():
 # Software update (admin only)
 # ----------------------------------------------------------------------------
 @app.route("/admin/update")
-@permission_required("manage_users")
+@admin_required
 def update_page():
     with _update_lock:
         info = dict(UPDATE_INFO)
@@ -6517,7 +6541,7 @@ def update_page():
 
 
 @app.route("/admin/update/check", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def update_check_now():
     check_csrf()
     check_for_updates()
@@ -6526,7 +6550,7 @@ def update_check_now():
 
 
 @app.route("/admin/update/apply", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def apply_update():
     check_csrf()
     if not getattr(sys, "frozen", False):
@@ -6644,7 +6668,7 @@ def _mark_integration_error(db, provider, message, auth_broken=False):
 
 
 @app.route("/integrations")
-@permission_required("manage_users")
+@admin_required
 def integration_list():
     db = get_db()
     cards = []
@@ -6669,7 +6693,7 @@ def integration_list():
 
 
 @app.route("/integrations/<provider>/credentials", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def integration_credentials(provider):
     if provider not in integ.PROVIDERS:
         abort(404)
@@ -6689,7 +6713,7 @@ def integration_credentials(provider):
 
 
 @app.route("/integrations/<provider>/connect")
-@permission_required("manage_users")
+@admin_required
 def integration_connect(provider):
     if provider not in integ.PROVIDERS:
         abort(404)
@@ -6716,7 +6740,7 @@ def integration_callback():
                     " on that machine)."), 400
     if not session.get("user_id"):
         return redirect(url_for("login"))
-    if not user_has_perm(session.get("permissions", {}), "manage_users"):
+    if not is_admin():
         abort(403)
     state_raw = request.args.get("state", "")
     if not state_raw or state_raw != session.pop("oauth_state", None):
@@ -6762,7 +6786,7 @@ def integration_callback():
 
 
 @app.route("/integrations/<provider>/disconnect", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def integration_disconnect(provider):
     if provider not in integ.PROVIDERS:
         abort(404)
@@ -6787,7 +6811,7 @@ def integration_disconnect(provider):
 
 
 @app.route("/integrations/<provider>/sync", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def integration_sync_now(provider):
     if provider not in integ.PROVIDERS:
         abort(404)
@@ -6805,7 +6829,7 @@ def integration_sync_now(provider):
 
 
 @app.route("/integrations/<provider>/settings", methods=["POST"])
-@permission_required("manage_users")
+@admin_required
 def integration_settings(provider):
     if provider not in integ.PROVIDERS:
         abort(404)

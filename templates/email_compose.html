@@ -10,7 +10,7 @@
 {% if not email_providers %}
 <div class="notice notice-warning">
   <p><strong>No email account connected.</strong> Connect Gmail or Outlook on the
-    {% if perms.get('manage_users') %}<a href="{{ url_for('integration_list') }}">Integrations page</a>{% else %}Integrations page (admin){% endif %} first.</p>
+    {% if is_admin %}<a href="{{ url_for('integration_list') }}">Integrations page</a>{% else %}Integrations page (admin){% endif %} first.</p>
 </div>
 {% else %}
 <div class="detail-card compose-card">
