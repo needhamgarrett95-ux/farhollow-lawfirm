@@ -4333,10 +4333,89 @@ def trust_account_detail(account_id):
         " ORDER BY statement_date DESC LIMIT 1",
         (account_id,),
     ).fetchone()
+    # Usage counts for the admin danger zone (unused-account deletion).
+    txn_count = db.execute(
+        "SELECT COUNT(*) AS c FROM trust_transactions WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()["c"]
+    recon_count = db.execute(
+        "SELECT COUNT(*) AS c FROM trust_reconciliations WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()["c"]
     return render_template(
         "trust_account.html", account=d, client_balances=client_bals,
         transactions=recent, last_recon=last_recon,
+        txn_count=txn_count, recon_count=recon_count,
     )
+
+
+@app.route("/trust/accounts/<int:account_id>/delete", methods=["POST"])
+@login_required
+def trust_account_delete(account_id):
+    """Delete an UNUSED trust account. Admin only (hard role check).
+
+    IOLTA: trust transactions are immutable — this route deletes the
+    account row itself, and ONLY when it has zero transactions, zero
+    balance, and zero reconciliations. Any activity refuses the delete
+    (fail closed) and points the admin to reversing entries instead.
+    """
+    if not is_admin():
+        abort(403, description="Deleting trust accounts is restricted to admins.")
+    check_csrf()
+    db = get_db()
+    acct = db.execute(
+        "SELECT * FROM trust_accounts WHERE id = ?", (account_id,)
+    ).fetchone()
+    if not acct:
+        abort(404)
+    txn_count = db.execute(
+        "SELECT COUNT(*) AS c FROM trust_transactions WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()["c"]
+    recon_count = db.execute(
+        "SELECT COUNT(*) AS c FROM trust_reconciliations WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()["c"]
+    balance = account_trust_balance(db, account_id)
+    if txn_count or recon_count or balance:
+        blockers = []
+        if txn_count:
+            blockers.append(f"{txn_count} transaction{'s' if txn_count != 1 else ''}")
+        if recon_count:
+            blockers.append(
+                f"{recon_count} reconciliation{'s' if recon_count != 1 else ''}")
+        if balance:
+            blockers.append(f"a ${abs(balance) / 100:,.2f} balance")
+        msg = (f"Cannot delete '{acct['name']}': it has "
+               + ", ".join(blockers) + ". Trust records are corrected with "
+               "reversing entries, not deletion.")
+        flash(msg, "error")
+        audit("trust_account_delete_refused",
+              f"Refused deletion of trust account '{acct['name']}' (#{account_id}): "
+              + ", ".join(blockers))
+        return redirect(url_for("trust_account_detail", account_id=account_id))
+    # Heavy audit snapshot first — same spirit as the retention override.
+    # The account number stays Fernet-encrypted in the log (ciphertext
+    # verbatim); the decrypted value is never written to the audit trail.
+    snapshot = dict(acct)
+    if snapshot.get("account_number"):
+        snapshot["account_number"] = (
+            f"{snapshot['account_number']} (Fernet-encrypted)")
+    try:
+        snapshot_json = json.dumps(snapshot, default=str, sort_keys=True)
+    except Exception:
+        snapshot_json = repr(snapshot)
+    audit(
+        "trust_account_delete",
+        f"ADMIN deleted unused trust account '{acct['name']}' (#{account_id}) — "
+        f"0 transactions, 0 reconciliations, $0.00 balance. "
+        f"Deleted by {session.get('username')} (admin). "
+        f"Account snapshot: {snapshot_json}",
+    )
+    db.execute("DELETE FROM trust_accounts WHERE id = ?", (account_id,))
+    db.commit()
+    flash(f"Trust account '{acct['name']}' deleted.", "success")
+    return redirect(url_for("trust_overview"))
 
 
 @app.route("/trust/transactions/new", methods=["GET", "POST"])

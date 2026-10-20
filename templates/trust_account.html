@@ -86,4 +86,20 @@
 {% endif %}
 
 <p class="muted small">Transactions are permanent and cannot be edited or deleted. To correct an error, use the <strong>Reverse</strong> link to create an offsetting entry.</p>
+
+{# Admin danger zone: delete the account only if it was never used. #}
+{% if is_admin %}
+<div class="danger-zone">
+  <p class="muted small"><strong>Admin — danger zone</strong></p>
+  {% if txn_count == 0 and recon_count == 0 and account.balance_cents == 0 %}
+  <p class="muted small">This account has no transactions, no reconciliations, and a $0.00 balance — it was never used, so it can be deleted. A full snapshot is written to the audit log before deletion.</p>
+  <form method="post" action="{{ url_for('trust_account_delete', account_id=account.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete trust account {{ account.name }}? It has no transactions, no reconciliations, and a $0.00 balance, so it is safe to delete. A snapshot is saved to the audit log.', {title: 'Delete trust account', confirmText: 'Delete account', danger: true});">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+    <button type="submit" class="btn btn-danger">Delete this account</button>
+  </form>
+  {% else %}
+  <p class="muted small">This account cannot be deleted — it has {{ txn_count }} transaction{% if txn_count != 1 %}s{% endif %}, {{ recon_count }} reconciliation{% if recon_count != 1 %}s{% endif %}, and a balance of ${{ account.balance_cents|cents }}. Trust records are corrected with <strong>reversing entries</strong>, not deletion.</p>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}

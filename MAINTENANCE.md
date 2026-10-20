@@ -1289,3 +1289,21 @@ that's too large now shows the app's designed error page. Success and
 danger banners in light and dark mode are properly themed; light-mode text
 contrast improved; the "Saved" pill in dark mode is themed; the download
 icon renders everywhere; empty states added for the trust reports.
+
+## 45. Deleting an unused trust account (v2.4.6)
+
+If you create a trust account and never use it (for example, while testing),
+an admin can now delete it. Open the account and look at the bottom of the
+page: admins see a "danger zone" section with a **Delete this account**
+button when the account has no transactions, no reconciliations, and a
+$0.00 balance. You will be asked to confirm, and the software writes a full
+snapshot of the account to the audit log before deleting it, so there is a
+permanent record of what was removed.
+
+If the account has ANY activity — even one transaction or reconciliation —
+it cannot be deleted by anyone, not even an admin. This is deliberate: trust
+money must keep a complete paper trail. Mistakes in trust records are fixed
+with **reversing entries** (the Reverse link on each transaction), never by
+deleting.
+
+Non-admins do not see the danger zone at all.
