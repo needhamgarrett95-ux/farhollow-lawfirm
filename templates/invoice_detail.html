@@ -66,6 +66,16 @@
 {% endif %}
 
 {% if perms.get('manage_billing') %}
+{% if retention_locked %}
+{# Inside the 7-year retention lock (RPC 1.15A/B): non-admins see no
+   delete option at all; admins get the serious override form. #}
+{% if is_admin %}
+{% from "_retention_override.html" import retention_override_form %}
+{{ retention_override_form(url_for('invoice_delete', invoice_id=invoice.id), 'invoice') }}
+{% else %}
+<p class="muted small" style="margin-top:20px;">This invoice is a financial record (RPC 1.15B) and is under the 7-year retention lock — it cannot be deleted until 7 years after its issue date.</p>
+{% endif %}
+{% else %}
 <div class="danger-zone">
   <form method="post" action="{{ url_for('invoice_delete', invoice_id=invoice.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this invoice? Financial records are normally retained 7 years.', {title: 'Delete invoice', confirmText: 'Delete', danger: true});">
     <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
@@ -73,6 +83,7 @@
   </form>
   <p class="muted small">Invoices are financial records (RPC 1.15B): deletion is blocked until 7 years after the issue date.</p>
 </div>
+{% endif %}
 {% endif %}
 
 {# Quick notes (v2.4.1) #}

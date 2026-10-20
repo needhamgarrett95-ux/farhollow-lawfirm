@@ -1,0 +1,53 @@
+{# Admin retention override (v2.4.1) — HARD admin-role-only escape hatch
+   for deleting financial records inside the 7-year retention lock
+   (RPC 1.15A/B). Requires a written reason + typing DELETE. The server
+   re-validates everything; this form is never rendered for non-admins.
+
+   Usage: {% from "_retention_override.html" import retention_override_form %}
+          {{ retention_override_form(action_url, 'invoice') }} #}
+{% from "_icons.html" import icon %}
+{% macro retention_override_form(action, label) %}
+<div class="retention-override" data-override-form>
+  <div class="ro-head">
+    {{ icon('alert', 17) }}
+    <span>Admin retention override</span>
+  </div>
+  <p class="ro-warn">
+    This record is inside the <strong>7-year retention period (RPC 1.15A/B)</strong> and
+    normally cannot be deleted. As an <strong>admin</strong>, you may override the lock for
+    error correction only. This action is <strong>permanent</strong> and is recorded in the
+    audit log with a full snapshot of the record, your name, and your stated reason.
+  </p>
+  <form method="post" action="{{ action }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <input type="hidden" name="retention_override" value="1">
+    <label>Reason for deleting this {{ label }} before the retention date *
+      <textarea name="override_reason" rows="2" required maxlength="1000"
+                placeholder="e.g. Duplicate entry created in error — no client funds involved"
+                oninput="validateOverrideForm(this.form)"></textarea>
+    </label>
+    <label>Type <strong>DELETE</strong> to confirm *
+      <input type="text" name="override_confirm" autocomplete="off" required
+             placeholder="DELETE" oninput="validateOverrideForm(this.form)">
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-danger" data-override-submit disabled>
+        {{ icon('trash', 15) }} Permanently delete {{ label }}
+      </button>
+    </div>
+  </form>
+</div>
+<script>
+(function () {
+  if (window.__ovInit) return; window.__ovInit = true;
+  /* Server re-validates everything; this just keeps the button honest. */
+  window.validateOverrideForm = function (form) {
+    if (!form) return;
+    var reason = (form.override_reason.value || '').trim();
+    var confirm = (form.override_confirm.value || '').trim();
+    var btn = form.querySelector('[data-override-submit]');
+    if (btn) btn.disabled = !(reason.length > 0 && confirm === 'DELETE');
+  };
+})();
+</script>
+{% endmacro %}

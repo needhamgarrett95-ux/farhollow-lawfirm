@@ -1237,3 +1237,26 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
   input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=submit]):not([type=file]),
   select, textarea { font-size: 16px; } /* stops iOS auto-zoom */
 }
+
+/* ============================================================
+   Retention override (v2.4.1) — admin-only escape hatch.
+   Deliberately heavy/danger-styled: this must NOT feel routine.
+   ============================================================ */
+.retention-override {
+  border: 2px solid var(--error); border-radius: var(--radius, 12px);
+  background: color-mix(in srgb, var(--error) 8%, var(--surface));
+  padding: 18px 20px; margin-top: 16px;
+}
+.retention-override .ro-head {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 700; color: var(--error); font-size: 15px;
+  text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px;
+}
+.retention-override .ro-warn { font-size: 14px; line-height: 1.5; margin: 0 0 14px; }
+.retention-override label { display: block; margin-bottom: 12px; font-size: 14px; }
+.retention-override textarea, .retention-override input[type="text"] { width: 100%; margin-top: 4px; }
+.retention-override .form-actions { margin-top: 4px; }
+.retention-override button[data-override-submit]:disabled { opacity: .45; cursor: not-allowed; }
+.ro-table-wrap { margin: 10px 0 18px; }
+.ro-table-note { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); margin: 0 0 6px; }
+.ro-override-toggle { color: var(--error) !important; border-color: var(--error) !important; }

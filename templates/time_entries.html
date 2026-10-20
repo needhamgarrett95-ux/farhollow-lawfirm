@@ -56,13 +56,27 @@ function setHours(h) {
       <td>{{ 'Invoiced' if e.invoiced else 'Unbilled' }}</td>
       <td>
         {% if not e.invoiced %}
-        <form method="post" action="{{ url_for('time_delete', entry_id=e.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this time entry? Financial records are normally retained 7 years.', {title: 'Delete time entry', confirmText: 'Delete', danger: true});">
-          <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
-          <button type="submit" class="btn btn-small btn-danger">Delete</button>
-        </form>
+          {% if e.id not in locked_ids %}
+          <form method="post" action="{{ url_for('time_delete', entry_id=e.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Delete this time entry? Financial records are normally retained 7 years.', {title: 'Delete time entry', confirmText: 'Delete', danger: true});">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+            <button type="submit" class="btn btn-small btn-danger">Delete</button>
+          </form>
+          {% elif is_admin %}
+          {# Inside the 7-year retention lock: admin-only override toggle. #}
+          <button type="button" class="btn btn-small ro-override-toggle" onclick="var r=document.getElementById('ov-{{ e.id }}'); r.style.display = (r.style.display === 'none') ? '' : 'none';">Override</button>
+          {% endif %}
+          {# Non-admins: no delete option at all on locked records. #}
         {% endif %}
       </td>
     </tr>
+    {% if not e.invoiced and e.id in locked_ids and is_admin %}
+    <tr id="ov-{{ e.id }}" style="display:none;">
+      <td colspan="7">
+        {% from "_retention_override.html" import retention_override_form %}
+        {{ retention_override_form(url_for('time_delete', entry_id=e.id), 'time entry') }}
+      </td>
+    </tr>
+    {% endif %}
   {% endfor %}
   </tbody>
 </table>

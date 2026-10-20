@@ -124,8 +124,56 @@ def retention_ok(record_date_iso):
         record_date = datetime.fromisoformat(str(record_date_iso)[:10])
     except ValueError:
         return False
+    if record_date.tzinfo is None:
+        # Date-only strings parse naive; treat as UTC day start so the
+        # subtraction below is always aware-vs-aware.
+        record_date = record_date.replace(tzinfo=timezone.utc)
     age = datetime.now(timezone.utc) - record_date
     return age >= timedelta(days=365 * RETENTION_YEARS_FINANCIAL)
+
+
+def retention_override_ok():
+    """Whether the session user may invoke the 7-year retention override.
+
+    HARD role check (not a permission checkbox): admin role only, so it can
+    never be granted accidentally through the granular permissions UI.
+    """
+    return is_admin()
+
+
+def _check_retention_override():
+    """Validate an admin retention-override submission.
+
+    Returns (ok, reason, error_message). The real gate: callers must only
+    act when ok is True.
+    """
+    if not retention_override_ok():
+        return False, "", "Retention override is restricted to the admin role."
+    reason = (request.form.get("override_reason") or "").strip()
+    confirm = (request.form.get("override_confirm") or "").strip()
+    if not reason:
+        return False, "", "A written reason is required for a retention override."
+    if confirm != "DELETE":
+        return False, "", "Type the word DELETE exactly to confirm the override."
+    return True, reason, ""
+
+
+def audit_retention_override(label, record_id, record_snapshot, reason):
+    """Heavy audit entry for a retention-override deletion: full snapshot,
+    who, when, and the stated reason. The audit log itself is append-only."""
+    import json as _json
+    try:
+        snapshot = _json.dumps(record_snapshot, default=str, sort_keys=True)
+    except Exception:
+        snapshot = repr(record_snapshot)
+    audit(
+        "retention_override_delete",
+        f"ADMIN RETENTION OVERRIDE — deleted {label} #{record_id} BEFORE the "
+        f"{RETENTION_YEARS_FINANCIAL}-year retention period (RPC 1.15A/B). "
+        f"Deleted by {session.get('username')} (admin). "
+        f"Stated reason: {reason}. "
+        f"Full record snapshot: {snapshot}",
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -3490,6 +3538,7 @@ def time_list(case_id):
         total_hours=total_hours, total_amount=total_amount,
         uninvoiced=uninvoiced, today=date.today().isoformat(),
         last_rate=(last_rate["rate"] if last_rate else ""),
+        locked_ids={e["id"] for e in entries if not retention_ok(e["entry_date"])},
     )
 
 
@@ -3502,23 +3551,41 @@ def time_delete(entry_id):
     if not e:
         abort(404)
     # RPC 1.15B: financial records cannot be destroyed before 7 years.
-    # Fail closed: if the date is missing or too recent, refuse.
+    # Fail closed: if the date is missing or too recent, refuse — UNLESS the
+    # admin retention override is invoked with a written reason + typed
+    # DELETE confirmation (heavily audit-logged with a full snapshot).
+    # The override bypasses ONLY the retention lock, not other business
+    # rules (e.g. invoiced entries are still protected below).
+    override_used = False
     if not retention_ok(e["entry_date"]):
-        flash(
-            "Cannot delete this time entry: financial records must be retained"
-            f" for {RETENTION_YEARS_FINANCIAL} years (RPC 1.15B).",
-            "error",
-        )
-        audit("time_delete_blocked",
-              f"Blocked deletion of time entry (id={entry_id}) — retention")
-        return redirect(url_for("time_list", case_id=e["case_id"]))
+        if request.form.get("retention_override") == "1":
+            ok, reason, err = _check_retention_override()
+            if not ok:
+                flash(f"Retention override refused: {err}", "error")
+                audit("retention_override_refused",
+                      f"Refused override deletion of time entry (id={entry_id}): {err}")
+                return redirect(url_for("time_list", case_id=e["case_id"]))
+            override_used = True
+        else:
+            flash(
+                "Cannot delete this time entry: financial records must be retained"
+                f" for {RETENTION_YEARS_FINANCIAL} years (RPC 1.15B).",
+                "error",
+            )
+            audit("time_delete_blocked",
+                  f"Blocked deletion of time entry (id={entry_id}) — retention")
+            return redirect(url_for("time_list", case_id=e["case_id"]))
     if e["invoiced"]:
         flash("Cannot delete a time entry that is on an invoice.", "error")
         return redirect(url_for("time_list", case_id=e["case_id"]))
+    if override_used:
+        audit_retention_override("time entry", entry_id, dict(e), reason)
+        flash("Time entry deleted via admin retention override.", "success")
+    else:
+        audit("time_delete", f"Deleted time entry (id={entry_id})")
+        flash("Time entry deleted.", "success")
     db.execute("DELETE FROM time_entries WHERE id = ?", (entry_id,))
     db.commit()
-    audit("time_delete", f"Deleted time entry (id={entry_id})")
-    flash("Time entry deleted.", "success")
     return redirect(url_for("time_list", case_id=e["case_id"]))
 
 
@@ -3663,6 +3730,7 @@ def invoice_detail(invoice_id):
         "invoice_detail.html", invoice=inv, items=items, total=total,
         statuses=INVOICE_STATUSES,
         notes=get_notes(db, "invoice", invoice_id),
+        retention_locked=not retention_ok(inv["issue_date"]),
     )
 
 
@@ -3719,15 +3787,32 @@ def invoice_delete(invoice_id):
     if not inv:
         abort(404)
     # RPC 1.15B: invoices are financial records — 7-year retention, fail closed.
+    # The admin retention override (written reason + typed DELETE) bypasses
+    # ONLY this lock; the full invoice + line items are snapshot-audited.
+    override_used = False
+    override_reason = ""
     if not retention_ok(inv["issue_date"]):
-        flash(
-            "Cannot delete this invoice: financial records must be retained"
-            f" for {RETENTION_YEARS_FINANCIAL} years (RPC 1.15B).",
-            "error",
-        )
-        audit("invoice_delete_blocked",
-              f"Blocked deletion of invoice {inv['invoice_number']} — retention")
-        return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+        if request.form.get("retention_override") == "1":
+            ok, reason, err = _check_retention_override()
+            if not ok:
+                flash(f"Retention override refused: {err}", "error")
+                audit("retention_override_refused",
+                      f"Refused override deletion of invoice {inv['invoice_number']}: {err}")
+                return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+            override_used = True
+            override_reason = reason
+        else:
+            flash(
+                "Cannot delete this invoice: financial records must be retained"
+                f" for {RETENTION_YEARS_FINANCIAL} years (RPC 1.15B).",
+                "error",
+            )
+            audit("invoice_delete_blocked",
+                  f"Blocked deletion of invoice {inv['invoice_number']} — retention")
+            return redirect(url_for("invoice_detail", invoice_id=invoice_id))
+    # Snapshot line items before deletion for the override audit.
+    items = [dict(r) for r in db.execute(
+        "SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,)).fetchall()]
     # Unlink time entries first
     db.execute(
         "UPDATE time_entries SET invoiced = 0, invoice_id = NULL"
@@ -3736,8 +3821,14 @@ def invoice_delete(invoice_id):
     db.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
     db.execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
     db.commit()
-    audit("invoice_delete", f"Deleted invoice {inv['invoice_number']}")
-    flash("Invoice deleted.", "success")
+    if override_used:
+        audit_retention_override(
+            "invoice", invoice_id,
+            {"invoice": dict(inv), "line_items": items}, override_reason)
+        flash("Invoice deleted via admin retention override.", "success")
+    else:
+        audit("invoice_delete", f"Deleted invoice {inv['invoice_number']}")
+        flash("Invoice deleted.", "success")
     return redirect(url_for("invoice_list"))
 
 
