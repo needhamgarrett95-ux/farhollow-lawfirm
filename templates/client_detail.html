@@ -84,7 +84,7 @@
       <td>{{ c.title }}</td>
       <td>{{ c.case_type|capitalize }}</td>
       <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
-      <td><a href="{{ url_for('case_detail', case_id=c.id) }}">Open</a></td>
+      <td>{% if perms.get('view_cases') %}<a href="{{ url_for('case_detail', case_id=c.id) }}">Open</a>{% else %}<span class="muted">—</span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

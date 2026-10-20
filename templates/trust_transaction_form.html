@@ -27,32 +27,39 @@
     {% endif %}
     <div class="form-grid">
       <label>Trust account *
-        <select name="account_id" required>
+        <select name="account_id" required {% if reverse_of %}disabled{% endif %}>
           <option value="">— choose —</option>
           {% for a in accounts %}
-          <option value="{{ a.id }}" {% if preset_account and preset_account|string == a.id|string %}selected{% endif %}>{{ a.name }}</option>
+          <option value="{{ a.id }}" {% if (preset_account or (reverse_of and reverse_of.account_id))|string == a.id|string %}selected{% endif %}>{{ a.name }}</option>
           {% endfor %}
         </select>
+        {% if reverse_of %}<input type="hidden" name="account_id" value="{{ reverse_of.account_id }}">{% endif %}
       </label>
       <label>Client *
-        <select name="client_id" id="clientSelect" required>
+        <select name="client_id" id="clientSelect" required {% if reverse_of %}disabled{% endif %}>
           <option value="">— choose —</option>
           {% for c in clients %}
           <option value="{{ c.id }}" {% if (preset_client or (reverse_of and reverse_of.client_id))|string == c.id|string %}selected{% endif %}>{{ c.last_name }}, {{ c.first_name }}</option>
           {% endfor %}
         </select>
+        {% if reverse_of %}<input type="hidden" name="client_id" value="{{ reverse_of.client_id }}">{% endif %}
       </label>
       <label>Transaction type *
+        {% if reverse_of %}
+        <input type="hidden" name="txn_type" value="reversal">
+        <span class="badge">Reversal (offsets the original entry)</span>
+        {% else %}
         <select name="txn_type" id="txnType" required>
           <option value="">— choose —</option>
-          <option value="deposit" {% if reverse_of %}disabled{% endif %}>Deposit (money in)</option>
-          <option value="disbursement" {% if reverse_of %}disabled{% endif %}>Disbursement (money out)</option>
-          <option value="transfer" {% if reverse_of %}disabled{% endif %}>Transfer to another client</option>
+          <option value="deposit">Deposit (money in)</option>
+          <option value="disbursement">Disbursement (money out)</option>
+          <option value="transfer">Transfer to another client</option>
         </select>
+        {% endif %}
       </label>
       <label>Amount ($) *
         <input type="number" name="amount" required placeholder="0.00" step="0.01" min="0.01" inputmode="decimal"
-               {% if reverse_of %}value="{{ reverse_of.amount_cents|cents }}"{% endif %}>
+               {% if reverse_of %}value="{{ reverse_of.amount_cents|cents }}" readonly{% endif %}>
       </label>
       <label>Date *
         <input type="date" name="txn_date" value="{{ reverse_of.txn_date if reverse_of else today }}" required>
@@ -100,6 +107,7 @@
 (function () {
   var typeSel = document.getElementById('txnType');
   var transferFields = document.getElementById('transferFields');
+  if (!typeSel) return;  // reversal mode has no type picker
   function toggle() {
     transferFields.style.display = (typeSel.value === 'transfer') ? 'block' : 'none';
   }

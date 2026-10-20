@@ -1231,3 +1231,61 @@ because that link blocked the deletion. Fixed: deleting an invoice now
 first unlinks the income record — the income record itself is kept (it
 represents money that was actually received), only the link to the deleted
 invoice is removed. The audit log still records the deletion as before.
+
+## 44. Full audit sweep — many small fixes (v2.4.5)
+
+A full system-by-system audit was done in this version and every bug found
+was fixed. The most important items:
+
+**Trust corrections (reversals) are now safe.** Reversing a trust entry
+used to let you pick a different account, client, or amount — a typo could
+move money between clients. Now the reversal form is locked to the original
+entry: same account, same client, exact same amount. Reversing the same
+entry twice is refused, and a reversal can't overdraw a client.
+
+**Deleting operating transactions from paid invoices.** An income record
+that was created automatically from a paid invoice previously could never be
+deleted on its own. Admins now get an "Override" toggle on those rows: with
+a written reason and typing DELETE, the admin-only override (with the usual
+full audit snapshot) removes it. Non-admins still can't touch it.
+
+**Payroll fixes.** Three real math/process bugs: (1) Social Security tax on
+a half-cent amount was rounding down one cent — it now rounds properly;
+(2) running payroll twice for the same period created duplicate paychecks —
+the second run is now refused; (3) the employer's share of WA PFML was never
+added to employer costs even when the tax setting said the firm pays it —
+now it is. Salaried employees' L&I now uses their actual timeclock hours
+(40 hours/week assumed only when no hours exist).
+
+**Blocked deletes no longer show error pages.** Deleting a client or case
+that still has invoices, trust entries, or accounting transactions now shows
+a clear message listing what must be cleared first. Deleting a case also
+removes its document files and notes; deleting a client or case that doesn't
+exist is now a proper "not found" page instead of a fake success.
+
+**Form validation.** Empty client names are refused; creating a case, event,
+trust transaction, accounting transaction, employee, or timeclock entry with
+a deleted/nonexistent client, case, account, or employee is now refused with
+a message instead of an error page. Time entries reject zero, negative, or
+nonsense hours and negative rates. Invoice line amounts must be positive
+numbers. A one-cent rounding error on tiny time entries (a 0.02-hour line at
+$275.25 came out as 550 cents instead of 551) is fixed — line amounts are
+stored exactly. Tax-rate settings reject nonsense (typing a word where a
+number goes). Case creation now saves the closing date.
+
+**Filters that didn't filter.** The date filter on the P&L, General ledger,
+and CSV export, and the account filter on the operating transactions list,
+looked like they worked but were ignored — the wrong parameter names were
+sent. They filter correctly now.
+
+**Links that led to "access denied."** The "Open" link next to cases on the
+client page no longer shows for roles that can't open cases; the
+"Integrations page" link on the email compose page no longer shows for
+roles that can't open integrations.
+
+**Smaller items.** Reconnection warnings on the Integrations page now
+actually display when a Google/Microsoft login expires. Uploading a file
+that's too large now shows the app's designed error page. Success and
+danger banners in light and dark mode are properly themed; light-mode text
+contrast improved; the "Saved" pill in dark mode is themed; the download
+icon renders everywhere; empty states added for the trust reports.

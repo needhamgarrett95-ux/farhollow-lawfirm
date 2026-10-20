@@ -9,6 +9,7 @@ import os
 import re
 import io
 import json
+import math
 import sqlite3
 import secrets
 import shutil
@@ -573,6 +574,29 @@ def get_db():
         g.db.execute("PRAGMA journal_mode = WAL")
         g.db.execute("PRAGMA synchronous = NORMAL")
     return g.db
+
+
+def _row_exists(db, table, row_id):
+    """True if the row exists (row_id may be any user-supplied value).
+
+    Used to fail closed on bad FK references from tampered/edited forms
+    instead of letting the INSERT hit the FK constraint (500).
+    """
+    try:
+        rid = int(str(row_id).strip())
+    except (TypeError, ValueError):
+        return False
+    return db.execute(
+        f"SELECT 1 FROM {table} WHERE id = ?", (rid,)).fetchone() is not None
+
+
+def _valid_iso_date(value):
+    """True when value is a real calendar date in YYYY-MM-DD form."""
+    try:
+        date.fromisoformat(str(value).strip())
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 @app.teardown_appcontext
@@ -1561,6 +1585,9 @@ def new_csrf_token():
 
 def check_csrf():
     form_token = request.form.get("csrf_token", "")
+    if not form_token and request.is_json:
+        # JSON endpoints (dashboard layout/theme) send the token in the body.
+        form_token = (request.get_json(silent=True) or {}).get("csrf_token", "")
     session_token = session.get("csrf_token", "")
     if not form_token or not session_token or form_token != session_token:
         abort(400, description="Invalid form submission. Please try again.")
@@ -2488,6 +2515,7 @@ def dashboard_customize():
     Accepts JSON {"widgets": [{"id": ..., "visible": bool}, ...]}.
     Returns {"ok": true} on success, {"ok": false, "error": ...} on 400.
     """
+    check_csrf()
     data = request.get_json(silent=True) or {}
     widgets = data.get("widgets")
     try:
@@ -2501,6 +2529,7 @@ def dashboard_customize():
 @login_required
 def dashboard_customize_reset():
     """Revert the user's dashboard layout to the default (theme untouched)."""
+    check_csrf()
     db = get_db()
     db.execute(
         "INSERT INTO user_preferences (user_id, dashboard_layout)"
@@ -2520,6 +2549,7 @@ def dashboard_theme():
     {"ok": false, "error": ...} on 400. Does not touch the saved
     dashboard layout.
     """
+    check_csrf()
     data = request.get_json(silent=True) or {}
     try:
         set_user_theme(session["user_id"], data.get("theme"))
@@ -2592,6 +2622,9 @@ def client_new():
         check_csrf()
         first_name = request.form.get("first_name", "").strip()
         last_name = request.form.get("last_name", "").strip()
+        if not first_name or not last_name:
+            flash("A first and last name are required.", "error")
+            return render_template("client_form.html", client=None)
         # RPC 1.7 conflict check: hard stop if the name matches an existing
         # client or an opposing party in any case. The user must explicitly
         # confirm before the record is created.
@@ -2693,6 +2726,11 @@ def client_edit(client_id):
         abort(404)
     if request.method == "POST":
         check_csrf()
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        if not first_name or not last_name:
+            flash("A first and last name are required.", "error")
+            return render_template("client_form.html", client=client)
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "UPDATE clients SET first_name=?, last_name=?, email=?, phone=?,"
@@ -2726,18 +2764,33 @@ def client_edit(client_id):
 def client_delete(client_id):
     check_csrf()
     db = get_db()
-    # Don't delete a client that still has cases
-    n = db.execute(
-        "SELECT COUNT(*) AS c FROM cases WHERE client_id = ?", (client_id,)
-    ).fetchone()["c"]
-    if n > 0:
+    if not db.execute(
+            "SELECT id FROM clients WHERE id = ?", (client_id,)).fetchone():
+        abort(404)
+    # Don't delete a client that still has records elsewhere. FKs on
+    # invoices / trust / operating transactions are restrictive on purpose
+    # (financial records must never be silently orphaned).
+    blocks = []
+    for table, label in (
+            ("cases", "cases"), ("invoices", "invoices"),
+            ("trust_transactions", "trust transactions"),
+            ("op_transactions", "operating transactions")):
+        n = db.execute(
+            f"SELECT COUNT(*) AS c FROM {table} WHERE client_id = ?",
+            (client_id,)).fetchone()["c"]
+        if n:
+            blocks.append(f"{n} {label}")
+    if blocks:
         flash(
-            "Cannot delete this client — they still have cases on file. "
-            "Close or reassign the cases first.",
+            "Cannot delete this client — they still have "
+            f"{', '.join(blocks)} on file. Close or reassign those first.",
             "error",
         )
         return redirect(url_for("client_detail", client_id=client_id))
     db.execute("DELETE FROM children WHERE client_id = ?", (client_id,))
+    db.execute(
+        "DELETE FROM notes WHERE entity_type = 'client' AND entity_id = ?",
+        (client_id,))
     db.execute("DELETE FROM clients WHERE id = ?", (client_id,))
     db.commit()
     audit("client_delete", f"Deleted client record (id={client_id})")
@@ -2749,6 +2802,10 @@ def client_delete(client_id):
 @permission_required("manage_clients")
 def child_add(client_id):
     check_csrf()
+    db = get_db()
+    if not db.execute(
+            "SELECT id FROM clients WHERE id = ?", (client_id,)).fetchone():
+        abort(404)
     name = request.form.get("name", "").strip()
     dob = request.form.get("date_of_birth", "").strip()
     if not name:
@@ -2858,6 +2915,19 @@ def case_new():
             )
         client_id = request.form.get("client_id", "").strip() or None
         case_type = request.form.get("case_type", "other")
+        if case_type not in CASE_TYPES:
+            case_type = "other"
+        status = request.form.get("status", "active")
+        if status not in CASE_STATUSES:
+            status = "active"
+        if client_id and not _row_exists(db, "clients", client_id):
+            flash("Selected client not found — please choose a client from the list.", "error")
+            return render_template(
+                "case_form.html", case=None, clients=clients,
+                case_types=CASE_TYPES, statuses=CASE_STATUSES,
+                preset_client=preset_client,
+                suggested_number=suggested_number, today=today,
+            )
         # Auto-generate a title if left blank: "Smith — Divorce"
         title = request.form.get("title", "").strip()
         if not title:
@@ -2872,15 +2942,16 @@ def case_new():
             title = f"{cname} — {case_type.capitalize()}"
         cur = db.execute(
             "INSERT INTO cases (case_number, title, client_id, case_type, status,"
-            " date_opened, notes, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " date_opened, date_closed, notes, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 case_number,
                 title,
                 client_id,
                 case_type,
-                request.form.get("status", "active"),
+                status,
                 request.form.get("date_opened", "").strip() or today,
+                request.form.get("date_closed", "").strip() or None,
                 request.form.get("notes", "").strip(),
                 now,
                 now,
@@ -2968,14 +3039,26 @@ def case_edit(case_id):
         check_csrf()
         now = datetime.now(timezone.utc).isoformat()
         client_id = request.form.get("client_id", "").strip() or None
+        if client_id and not _row_exists(db, "clients", client_id):
+            flash("Selected client not found — please choose a client from the list.", "error")
+            return render_template(
+                "case_form.html", case=case, clients=clients,
+                case_types=CASE_TYPES, statuses=CASE_STATUSES,
+            )
+        case_type = request.form.get("case_type", "other")
+        if case_type not in CASE_TYPES:
+            case_type = "other"
+        status = request.form.get("status", "active")
+        if status not in CASE_STATUSES:
+            status = "active"
         db.execute(
             "UPDATE cases SET title=?, client_id=?, case_type=?, status=?,"
             " date_opened=?, date_closed=?, notes=?, updated_at=? WHERE id=?",
             (
                 request.form.get("title", "").strip(),
                 client_id,
-                request.form.get("case_type", "other"),
-                request.form.get("status", "active"),
+                case_type,
+                status,
                 request.form.get("date_opened", "").strip(),
                 request.form.get("date_closed", "").strip(),
                 request.form.get("notes", "").strip(),
@@ -3027,8 +3110,33 @@ def case_delete(case_id):
     case = db.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
     if not case:
         abort(404)
+    # FK-restrictive financial records block the delete (never orphan them).
+    blocks = []
+    for table, label in (
+            ("trust_transactions", "trust transactions"),
+            ("op_transactions", "operating transactions")):
+        n = db.execute(
+            f"SELECT COUNT(*) AS c FROM {table} WHERE case_id = ?",
+            (case_id,)).fetchone()["c"]
+        if n:
+            blocks.append(f"{n} {label}")
+    if blocks:
+        flash(
+            "Cannot delete this case — it is referenced by "
+            f"{', '.join(blocks)}. Those financial records must be kept; "
+            "close the case instead.",
+            "error",
+        )
+        return redirect(url_for("case_detail", case_id=case_id))
+    db.execute(
+        "DELETE FROM notes WHERE entity_type = 'case' AND entity_id = ?",
+        (case_id,))
     db.execute("DELETE FROM cases WHERE id = ?", (case_id,))
     db.commit()
+    # Remove the case's uploaded documents from disk (the rows cascade).
+    import shutil
+    shutil.rmtree(os.path.join(DOCUMENTS_DIR, str(case_id)),
+                  ignore_errors=True)
     audit("case_delete", f"Deleted case {case['case_number']} (id={case_id})")
     flash("Case deleted.", "success")
     return redirect(url_for("case_list"))
@@ -3279,6 +3387,12 @@ def event_new():
         if event_type not in EVENT_TYPES:
             event_type = "reminder"
         case_id = request.form.get("case_id", "").strip() or None
+        if case_id and not _row_exists(db, "cases", case_id):
+            flash("Selected case not found — please choose a case from the list.", "error")
+            return render_template(
+                "event_form.html", cases=cases, event=None,
+                event_types=EVENT_TYPES, preset_case=preset_case,
+            )
         db.execute(
             "INSERT INTO calendar_events (case_id, title, event_type,"
             " event_date, event_time, description, created_at)"
@@ -3505,6 +3619,12 @@ def time_list(case_id):
         if hours <= 0 or not description:
             flash("Hours (greater than 0) and a description are required.",
                   "error")
+        elif not math.isfinite(hours) or hours > 24:
+            flash("Hours must be a number no greater than 24 per entry.", "error")
+        elif not math.isfinite(rate) or rate < 0:
+            flash("Rate must be a valid amount ($0 or more).", "error")
+        elif not _valid_iso_date(entry_date):
+            flash("Enter a valid date for the entry.", "error")
         else:
             db.execute(
                 "INSERT INTO time_entries (case_id, entry_date, hours,"
@@ -3641,6 +3761,34 @@ def invoice_new():
                 "invoice_form.html", clients=clients,
                 preset_client=preset_client, uninvoiced=uninvoiced,
             )
+        if not _row_exists(db, "clients", client_id):
+            flash("Selected client not found — please choose a client from the list.", "error")
+            return render_template(
+                "invoice_form.html", clients=clients,
+                preset_client=preset_client, uninvoiced=uninvoiced,
+            )
+        # Pre-validate manual line items so a bad amount can't slip in
+        # silently (or push the invoice total negative).
+        manual_items = []
+        for idx, (desc, amt) in enumerate(zip(
+                request.form.getlist("item_desc"),
+                request.form.getlist("item_amount"))):
+            desc, amt = desc.strip(), amt.strip()
+            if not (desc and amt):
+                continue
+            try:
+                amount = float(amt)
+            except ValueError:
+                amount = None
+            if amount is None or not math.isfinite(amount) or amount <= 0:
+                flash(f"Line item '{desc}' needs a valid amount above $0.", "error")
+                return render_template(
+                    "invoice_form.html", clients=clients,
+                    preset_client=preset_client, uninvoiced=uninvoiced,
+                )
+            item_dates = request.form.getlist("item_date")
+            entry_date = item_dates[idx].strip() if idx < len(item_dates) else ""
+            manual_items.append((desc, _round_money(amount), entry_date or None))
         now = datetime.now(timezone.utc).isoformat()
         inv_no = f"INV-{datetime.now().strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
         cur = db.execute(
@@ -3665,7 +3813,7 @@ def invoice_new():
                 (eid,),
             ).fetchone()
             if e and str(e["client_id"]) == str(client_id) and not e["invoiced"]:
-                amount = e["hours"] * e["rate"]
+                amount = _round_money(e["hours"] * e["rate"])
                 db.execute(
                     "INSERT INTO invoice_items (invoice_id, entry_date, description,"
                     " hours, rate, amount) VALUES (?, ?, ?, ?, ?, ?)",
@@ -3680,23 +3828,13 @@ def invoice_new():
                     "UPDATE time_entries SET invoiced = 1, invoice_id = ?"
                     " WHERE id = ?", (invoice_id, eid),
                 )
-        # Manual line items
-        descs = request.form.getlist("item_desc")
-        amounts = request.form.getlist("item_amount")
-        item_dates = request.form.getlist("item_date")
-        for idx, (desc, amt) in enumerate(zip(descs, amounts)):
-            desc, amt = desc.strip(), amt.strip()
-            if desc and amt:
-                try:
-                    amount = float(amt)
-                except ValueError:
-                    continue
-                entry_date = item_dates[idx].strip() if idx < len(item_dates) else ""
-                db.execute(
-                    "INSERT INTO invoice_items (invoice_id, entry_date, description,"
-                    " hours, rate, amount) VALUES (?, ?, ?, 0, 0, ?)",
-                    (invoice_id, entry_date or None, desc, amount),
-                )
+        # Manual line items (validated above; amounts already exact cents)
+        for desc, amount, entry_date in manual_items:
+            db.execute(
+                "INSERT INTO invoice_items (invoice_id, entry_date, description,"
+                " hours, rate, amount) VALUES (?, ?, ?, 0, 0, ?)",
+                (invoice_id, entry_date, desc, amount),
+            )
         db.commit()
         audit("invoice_create", f"Created invoice {inv_no} (id={invoice_id})")
         flash(f"Invoice {inv_no} created.", "success")
@@ -3824,6 +3962,9 @@ def invoice_delete(invoice_id):
         "UPDATE op_transactions SET invoice_id = NULL"
         " WHERE invoice_id = ?", (invoice_id,),
     )
+    db.execute(
+        "DELETE FROM notes WHERE entity_type = 'invoice' AND entity_id = ?",
+        (invoice_id,))
     db.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
     db.execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
     db.commit()
@@ -4234,16 +4375,62 @@ def trust_transaction_new():
         reference = request.form.get("reference", "").strip()
         case_id = request.form.get("case_id", "").strip() or None
         errors = []
-        if not account_id:
-            errors.append("Choose a trust account.")
-        if not client_id:
-            errors.append("Choose a client.")
-        if txn_type not in ("deposit", "disbursement", "transfer"):
-            errors.append("Choose a transaction type.")
-        if amount is None or amount <= 0:
-            errors.append("Enter a valid amount greater than $0.00.")
-        if not description:
-            errors.append("A description is required (RPC 1.15A record-keeping).")
+        if reverse_of:
+            # --- Reversal mode: identity comes from the ORIGINAL entry,
+            # never from the form. A reversal must exactly offset the
+            # original (same account, same client, same amount) — anything
+            # else is a new transaction, not a reversal. ---
+            if txn_type == "transfer":
+                errors.append("A reversal cannot be a transfer.")
+            if account_id and int(account_id) != int(reverse_of["account_id"]):
+                errors.append("A reversal must post to the original transaction's account.")
+            if client_id and int(client_id) != int(reverse_of["client_id"]):
+                errors.append("A reversal must post to the original transaction's client.")
+            if amount is not None and amount != reverse_of["amount_cents"]:
+                errors.append(
+                    "A reversal must be for the exact original amount"
+                    f" (${cents_to_str(reverse_of['amount_cents'])}). For a partial"
+                    " correction, record a new transaction instead.")
+            if reverse_of["reverses_id"] or reverse_of["txn_type"] in (
+                    "reversal_credit", "reversal_debit"):
+                errors.append("A reversing entry cannot itself be reversed.")
+            already = db.execute(
+                "SELECT id FROM trust_transactions WHERE reverses_id = ?",
+                (reverse_of["id"],),
+            ).fetchone()
+            if already:
+                errors.append(
+                    f"Transaction #{reverse_of['id']} has already been reversed"
+                    f" by entry #{already['id']}.")
+            if not description:
+                errors.append("A description is required (RPC 1.15A record-keeping).")
+            # Pin identity fields to the original whatever the form sent.
+            account_id = str(reverse_of["account_id"])
+            client_id = str(reverse_of["client_id"])
+            amount = reverse_of["amount_cents"]
+            if not case_id:
+                case_id = reverse_of["case_id"]
+            # Reversing a credit takes money OUT of the client's ledger:
+            # same hard overdraft block as a disbursement.
+            if not errors and reverse_of["txn_type"] in TRUST_CREDIT_TYPES:
+                bal = client_trust_balance(
+                    db, int(account_id), int(client_id))
+                if amount > bal:
+                    errors.append(
+                        f"Insufficient trust funds: reversing this entry would"
+                        f" overdraw the client (balance ${cents_to_str(bal)},"
+                        f" reversal ${cents_to_str(amount)}).")
+        else:
+            if not account_id:
+                errors.append("Choose a trust account.")
+            if not client_id:
+                errors.append("Choose a client.")
+            if txn_type not in ("deposit", "disbursement", "transfer"):
+                errors.append("Choose a transaction type.")
+            if amount is None or amount <= 0:
+                errors.append("Enter a valid amount greater than $0.00.")
+            if not description:
+                errors.append("A description is required (RPC 1.15A record-keeping).")
 
         # Validate the account and client exist
         acct = db.execute(
@@ -4259,18 +4446,15 @@ def trust_transaction_new():
 
         target_client_id = request.form.get("target_client_id", "").strip()
         confirmed = request.form.get("confirm_transfer", "") == "yes"
-
-        if not errors and txn_type == "disbursement":
-            # HARD BLOCK: cannot disburse more than the client's balance.
-            bal = client_trust_balance(db, int(account_id), int(client_id))
-            if amount > bal:
-                errors.append(
-                    f"Insufficient trust funds: this client has ${cents_to_str(bal)}"
-                    f" available in this account. Cannot disburse ${cents_to_str(amount)}."
-                )
         if not errors and txn_type == "transfer":
-            if not target_client_id or target_client_id == client_id:
+            if not target_client_id:
                 errors.append("Choose a different client to transfer to.")
+            elif target_client_id == client_id:
+                errors.append("Choose a different client to transfer to.")
+            elif not db.execute(
+                    "SELECT id FROM clients WHERE id = ?",
+                    (target_client_id,)).fetchone():
+                errors.append("Transfer target client not found.")
             elif not confirmed:
                 errors.append(
                     "Transfers between clients require the confirmation checkbox."
@@ -4282,6 +4466,19 @@ def trust_transaction_new():
                         f"Insufficient trust funds: source client has ${cents_to_str(bal)}"
                         f" available. Cannot transfer ${cents_to_str(amount)}."
                     )
+        if not errors and case_id:
+            if not db.execute(
+                    "SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone():
+                errors.append("Selected case not found.")
+
+        if not errors and txn_type == "disbursement":
+            # HARD BLOCK: cannot disburse more than the client's balance.
+            bal = client_trust_balance(db, int(account_id), int(client_id))
+            if amount > bal:
+                errors.append(
+                    f"Insufficient trust funds: this client has ${cents_to_str(bal)}"
+                    f" available in this account. Cannot disburse ${cents_to_str(amount)}."
+                )
 
         cases = []
         if not errors and client_id:
@@ -4301,23 +4498,8 @@ def trust_transaction_new():
             )
 
         # --- All validations passed: write the immutable transaction(s) ---
-        if txn_type == "transfer":
-            # Two linked entries: money out of the source client, in to the target.
-            desc_out = f"Transfer to client #{target_client_id}: {description}"
-            desc_in = f"Transfer from client #{client_id}: {description}"
-            out_id = log_trust_txn(
-                db, int(account_id), int(client_id), case_id, txn_date,
-                "transfer_out", amount, desc_out, reference)
-            in_id = log_trust_txn(
-                db, int(account_id), int(target_client_id), None, txn_date,
-                "transfer_in", amount, desc_in, reference)
-            db.commit()
-            audit("trust_transfer",
-                  f"Trust transfer ${cents_to_str(amount)} client {client_id} ->"
-                  f" client {target_client_id} (account {account_id}, txns {out_id}/{in_id})")
-            flash(f"Transfer of ${cents_to_str(amount)} recorded.", "success")
-        elif reverse_of:
-            # Reversal: create an offsetting entry linked to the original.
+        if reverse_of:
+            # Reversal first: identity is pinned to the original entry.
             orig_type = reverse_of["txn_type"]
             if orig_type in ("deposit", "transfer_in", "reversal_credit"):
                 rev_type = "reversal_debit"
@@ -4333,6 +4515,21 @@ def trust_transaction_new():
                   f"Reversed trust txn #{reverse_of['id']} with txn #{rev_id}"
                   f" (${cents_to_str(amount)}, account {account_id})")
             flash("Reversing entry recorded. The original transaction is unchanged.", "success")
+        elif txn_type == "transfer":
+            # Two linked entries: money out of the source client, in to the target.
+            desc_out = f"Transfer to client #{target_client_id}: {description}"
+            desc_in = f"Transfer from client #{client_id}: {description}"
+            out_id = log_trust_txn(
+                db, int(account_id), int(client_id), case_id, txn_date,
+                "transfer_out", amount, desc_out, reference)
+            in_id = log_trust_txn(
+                db, int(account_id), int(target_client_id), None, txn_date,
+                "transfer_in", amount, desc_in, reference)
+            db.commit()
+            audit("trust_transfer",
+                  f"Trust transfer ${cents_to_str(amount)} client {client_id} ->"
+                  f" client {target_client_id} (account {account_id}, txns {out_id}/{in_id})")
+            flash(f"Transfer of ${cents_to_str(amount)} recorded.", "success")
         else:
             txn_id = log_trust_txn(
                 db, int(account_id), int(client_id), case_id, txn_date,
@@ -4553,12 +4750,25 @@ def _employee_dict(row):
     return d
 
 
+def _round_money(value):
+    """Round a dollar amount to exact cents, half-up (Decimal).
+
+    Keeps stored invoice amounts identical to their displayed values;
+    raw float multiplication can land a half-cent low (0.02h x $275.25).
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    return float(Decimal(str(value)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
 def _invoice_total_cents(db, invoice_id):
-    row = db.execute(
-        "SELECT COALESCE(SUM(amount), 0) AS t FROM invoice_items WHERE invoice_id = ?",
+    rows = db.execute(
+        "SELECT amount FROM invoice_items WHERE invoice_id = ?",
         (invoice_id,),
-    ).fetchone()
-    return int(round((row["t"] or 0) * 100))
+    ).fetchall()
+    # Sum per-line cents (each line rounded half-up) instead of rounding
+    # the float total, so the booked total always matches the line items.
+    return sum(int(round(_round_money(r["amount"]) * 100)) for r in rows)
 
 
 @app.route("/accounting")
@@ -4617,9 +4827,9 @@ def accounting_overview():
 @permission_required("view_accounting")
 def op_txn_list():
     db = get_db()
-    f_account = request.args.get("account", "")
-    f_from = request.args.get("from", "")
-    f_to = request.args.get("to", "")
+    f_account = request.args.get("account_id", "") or request.args.get("account", "")
+    f_from = request.args.get("from_date", "") or request.args.get("from", "")
+    f_to = request.args.get("to_date", "") or request.args.get("to", "")
     q = """SELECT t.*, a.name AS account_name, a.type AS account_type,
                   c.first_name, c.last_name
            FROM op_transactions t
@@ -4663,6 +4873,14 @@ def op_txn_new():
         reference = request.form.get("reference", "").strip() or None
         if not account_id or amount is None or not description:
             flash("Account, amount, and description are required.", "error")
+        elif amount == 0:
+            flash("Amount must not be $0.00.", "error")
+        elif kind not in ("expense", "income"):
+            flash("Choose a valid transaction kind.", "error")
+        elif not _row_exists(db, "coa_accounts", account_id):
+            flash("Selected account not found — please choose one from the list.", "error")
+        elif client_id and not _row_exists(db, "clients", client_id):
+            flash("Selected client not found — please choose one from the list.", "error")
         else:
             if kind == "expense" and amount > 0:
                 amount = -amount
@@ -4701,6 +4919,22 @@ def op_txn_delete(txn_id):
     if not txn:
         abort(404)
     if txn["invoice_id"]:
+        # Transaction was auto-created from a paid invoice. Admins may
+        # override this block for error correction only (written reason +
+        # typed DELETE); the full transaction is snapshot-audited. This
+        # overrides ONLY the invoice-link block.
+        if request.form.get("retention_override") == "1":
+            ok, reason, err = _check_retention_override()
+            if not ok:
+                flash(f"Retention override refused: {err}", "error")
+                audit("retention_override_refused",
+                      f"Refused override deletion of operating transaction #{txn_id}: {err}")
+                return redirect(url_for("op_txn_list"))
+            db.execute("DELETE FROM op_transactions WHERE id = ?", (txn_id,))
+            db.commit()
+            audit_retention_override("operating transaction", txn_id, dict(txn), reason)
+            flash("Transaction deleted via admin retention override.", "success")
+            return redirect(url_for("op_txn_list"))
         flash("This transaction was auto-created from a paid invoice and cannot be deleted.", "error")
         return redirect(url_for("op_txn_list"))
     db.execute("DELETE FROM op_transactions WHERE id = ?", (txn_id,))
@@ -4764,8 +4998,8 @@ def coa_toggle(account_id):
 @permission_required("view_accounting")
 def report_pl():
     db = get_db()
-    f_from = request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
-    f_to = request.args.get("to", date.today().isoformat())
+    f_from = request.args.get("from_date", "") or request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
+    f_to = request.args.get("to_date", "") or request.args.get("to", date.today().isoformat())
     income_rows = db.execute(
         """SELECT a.name, COALESCE(SUM(t.amount_cents), 0) AS total
            FROM coa_accounts a LEFT JOIN op_transactions t
@@ -4836,8 +5070,8 @@ def report_balance_sheet():
 @permission_required("view_accounting")
 def report_ledger():
     db = get_db()
-    f_from = request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
-    f_to = request.args.get("to", date.today().isoformat())
+    f_from = request.args.get("from_date", "") or request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
+    f_to = request.args.get("to_date", "") or request.args.get("to", date.today().isoformat())
     accounts = []
     for a in db.execute(
         "SELECT * FROM coa_accounts WHERE is_active = 1 ORDER BY type, code"
@@ -4865,8 +5099,8 @@ def report_export_csv():
     import csv
     db = get_db()
     report = request.args.get("report", "pl")
-    f_from = request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
-    f_to = request.args.get("to", date.today().isoformat())
+    f_from = request.args.get("from_date", "") or request.args.get("from", f"{date.today().strftime('%Y')}-01-01")
+    f_to = request.args.get("to_date", "") or request.args.get("to", date.today().isoformat())
     buf = io.StringIO()
     w = csv.writer(buf)
     if report == "pl":
@@ -4992,6 +5226,8 @@ def employee_new():
                 or pay_frequency not in PAY_PERIODS_PER_YEAR
                 or filing_status not in ("single", "married")):
             flash("Enter a name, valid pay rate, pay type, frequency, and filing status.", "error")
+        elif user_id and not _row_exists(db, "users", user_id):
+            flash("Linked user not found — please choose one from the list.", "error")
         else:
             db.execute(
                 """INSERT INTO employees (user_id, full_name, pay_type, pay_rate_cents,
@@ -5043,6 +5279,8 @@ def employee_edit(employee_id):
                 or pay_type not in ("hourly", "salary")
                 or pay_frequency not in PAY_PERIODS_PER_YEAR):
             flash("Enter a name, valid pay rate, pay type, and frequency.", "error")
+        elif user_id and not _row_exists(db, "users", user_id):
+            flash("Linked user not found — please choose one from the list.", "error")
         else:
             db.execute(
                 """UPDATE employees SET user_id = ?, full_name = ?, pay_type = ?,
@@ -5256,8 +5494,11 @@ def timeclock():
         except ValueError:
             hours = 0
         notes = request.form.get("notes", "").strip()
-        if not employee_id or hours <= 0 or hours > 168:
+        if (not employee_id or not math.isfinite(hours)
+                or hours <= 0 or hours > 168):
             flash("Select an employee and enter valid hours (0–168).", "error")
+        elif not _row_exists(db, "employees", employee_id):
+            flash("Selected employee not found — please choose one from the list.", "error")
         else:
             now = datetime.now(timezone.utc).isoformat()
             db.execute(
@@ -5646,7 +5887,7 @@ def timeclock_correction_approve(correction_id):
                   "error")
             return redirect(url_for("timeclock"))
         new_out = _dt(corr["correct_clock_out"])
-        if new_out <= entry["clock_in"]:
+        if _parse_tc_dt(new_out) <= _parse_tc_dt(entry["clock_in"]):
             flash("That clock-out time isn't after the recorded clock-in — "
                   "check the request before approving.", "error")
             return redirect(url_for("timeclock"))
@@ -5656,7 +5897,7 @@ def timeclock_correction_approve(correction_id):
     elif corr["correction_type"] == "missed_clock_in":
         new_in = _dt(corr["correct_clock_in"])
         new_out = _dt(corr["correct_clock_out"]) if corr["correct_clock_out"] else None
-        if new_out and new_out <= new_in:
+        if new_out and _parse_tc_dt(new_out) <= _parse_tc_dt(new_in):
             flash("That clock-out time isn't after the clock-in — "
                   "check the request before approving.", "error")
             return redirect(url_for("timeclock"))
@@ -5695,7 +5936,7 @@ def timeclock_correction_approve(correction_id):
             return redirect(url_for("timeclock"))
         new_in = _dt(corr["correct_clock_in"]) if corr["correct_clock_in"] else entry["clock_in"]
         new_out = _dt(corr["correct_clock_out"]) if corr["correct_clock_out"] else entry["clock_out"]
-        if new_out and new_out <= new_in:
+        if new_out and _parse_tc_dt(new_out) <= _parse_tc_dt(new_in):
             flash("That would make clock-out come before clock-in — "
                   "check the request before approving.", "error")
             return redirect(url_for("timeclock"))
@@ -5889,7 +6130,7 @@ def payroll_run():
     action = request.values.get("action", "")
 
     if period_start and period_end and action in ("preview", "generate"):
-        if action == "generate":
+        if request.method == "POST":
             check_csrf()
         preview = []
         for emp in employees:
@@ -5899,13 +6140,23 @@ def payroll_run():
                    WHERE employee_id = ? AND entry_date >= ? AND entry_date <= ?""",
                 (emp["id"], period_start, period_end),
             ).fetchall()
+            open_days = [e["entry_date"] for e in entries
+                         if e["clock_out"] is None and e["manual_hours"] is None]
             if emp["pay_type"] == "hourly":
                 hours_list = [{"entry_date": e["entry_date"],
                                "hours": entry_hours(e)} for e in entries]
                 reg_h, ot_h = weekly_hours(hours_list)
+                li_h = reg_h + ot_h
             else:
                 reg_h, ot_h = 0.0, 0.0
-            calc = calculate_paycheck(db, emp, reg_h, ot_h)
+                # L&I is charged per hour worked: use the employee's real
+                # timeclock hours; fall back to standard full-time hours
+                # for the period when they didn't clock any.
+                tc_h = sum(entry_hours(e) for e in entries)
+                li_h = tc_h if tc_h > 0 else round(2080 / PAY_PERIODS_PER_YEAR.get(
+                    emp["pay_frequency"], 26), 2)
+            calc = calculate_paycheck(db, emp, reg_h, ot_h, li_hours=li_h)
+            calc["open_entries"] = open_days
             # Integer cents for template display and DB storage
             for _k in ("gross", "federal", "ss", "medicare", "pfml", "wacares", "net"):
                 calc[_k + "_cents"] = int(round(calc[_k] * 100))
@@ -5914,6 +6165,23 @@ def payroll_run():
             calc["full_name"] = emp["full_name"]
             preview.append(calc)
         if action == "generate":
+            # Idempotency guard: never generate twice for the same period.
+            # A re-post (double-click, refresh, back button) would otherwise
+            # double-pay every employee and double-book the ledger entries.
+            already = db.execute(
+                """SELECT DISTINCT e.full_name FROM paychecks p
+                   JOIN employees e ON p.employee_id = e.id
+                   WHERE p.pay_period_start = ? AND p.pay_period_end = ?""",
+                (period_start, period_end),
+            ).fetchall()
+            if already:
+                names = ", ".join(r["full_name"] for r in already)
+                flash(
+                    f"Payroll was already generated for {period_start} to "
+                    f"{period_end} ({names}). Refusing to generate it twice — "
+                    "delete the existing paycheck(s) first if this period was "
+                    "run in error.", "error")
+                return redirect(url_for("payroll_run"))
             now = datetime.now(timezone.utc).isoformat()
             for calc in preview:
                 emp_id = calc["employee_id"]
@@ -6087,14 +6355,36 @@ def tax_settings():
     if request.method == "POST":
         check_csrf()
         now = datetime.now(timezone.utc).isoformat()
+        bad = []
         for key, label, value, help_text in DEFAULT_TAX_RATES:
             new_val = request.form.get(f"rate_{key}")
-            if new_val is not None and new_val.strip() != "":
-                db.execute(
-                    "UPDATE tax_rates SET value = ?, updated_at = ? WHERE key = ?",
-                    (new_val.strip(), now, key),
-                )
+            if new_val is None or new_val.strip() == "":
+                continue
+            candidate = new_val.strip()
+            # Bracket settings are "upper:rate,upper:rate" lists; every
+            # other setting must be a plain number. Reject garbage instead
+            # of storing it (payroll would silently fall back to defaults).
+            if "brackets" in key:
+                ok = bool(candidate) and all(
+                    re.fullmatch(r"\s*\d+(\.\d+)?\s*:\s*\d+(\.\d+)?\s*", part)
+                    for part in candidate.split(","))
+            else:
+                try:
+                    float(candidate)
+                    ok = True
+                except ValueError:
+                    ok = False
+            if not ok:
+                bad.append(label)
+                continue
+            db.execute(
+                "UPDATE tax_rates SET value = ?, updated_at = ? WHERE key = ?",
+                (candidate, now, key),
+            )
         db.commit()
+        if bad:
+            flash("Not saved (invalid number): " + "; ".join(bad), "error")
+            return redirect(url_for("tax_settings"))
         audit("tax_settings", "Updated payroll tax rates")
         flash("Tax rates updated. Verify them against current IRS/WA publications before running payroll.",
               "warning")
@@ -6765,6 +7055,12 @@ def forbidden(e):
 def bad_request(e):
     return render_template("error.html", code=400,
                            message=str(e.description or "Bad request.")), 400
+
+
+@app.errorhandler(413)
+def too_large(e):
+    return render_template("error.html", code=413,
+                           message="That file is too large to upload."), 413
 
 
 @app.errorhandler(500)

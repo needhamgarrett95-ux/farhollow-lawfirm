@@ -38,6 +38,11 @@
 
 {% if preview %}
 <h2>Preview <span class="muted small">{{ period_start }} to {{ period_end }} · pay date {{ pay_date }}</span></h2>
+{% set ns = namespace(open=[]) %}
+{% for p in preview %}{% if p.open_entries %}{% set ns.open = ns.open + [p.full_name] %}{% endif %}{% endfor %}
+{% if ns.open %}
+<div class="alert alert-warning"><strong>Still clocked in:</strong> {{ ns.open|join(', ') }} has an open shift in this period. Open shifts count as <strong>0 hours</strong> — close them before generating, or this payroll will underpay that shift.</div>
+{% endif %}
 <table class="table">
   <thead><tr><th>Employee</th><th>Reg hrs</th><th>OT hrs</th><th>Gross</th><th>Federal</th><th>SS</th><th>Medicare</th><th>PFML</th><th>WA Cares</th><th>Net</th></tr></thead>
   <tbody>

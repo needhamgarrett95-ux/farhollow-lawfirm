@@ -21,10 +21,10 @@
         </select>
       </label>
       <label>From
-        <input type="date" name="from" value="{{ f_from or '' }}">
+        <input type="date" name="from_date" value="{{ f_from or '' }}">
       </label>
       <label>To
-        <input type="date" name="to" value="{{ f_to or '' }}">
+        <input type="date" name="to_date" value="{{ f_to or '' }}">
       </label>
       <div class="form-actions" style="margin-top:0;align-self:end;">
         <button type="submit" class="btn btn-primary">{{ icon('search', 15) }} Filter</button>
@@ -48,14 +48,31 @@
       <td class="nowrap">{% if t.amount_cents >= 0 %}+{% endif %}${{ t.amount_cents|cents }}</td>
       <td class="nowrap">
         {% if perms.get('manage_accounting') %}
+        {% if t.invoice_id %}
+          {# Auto-created from a paid invoice: plain delete is blocked.
+             Admins get the retention-override toggle; non-admins get no
+             delete option at all on these rows. #}
+          {% if is_admin %}
+          <button type="button" class="btn btn-small ro-override-toggle" onclick="var r=document.getElementById('ov-txn-{{ t.id }}'); r.style.display = (r.style.display === 'none') ? '' : 'none';">Override</button>
+          {% endif %}
+        {% else %}
         <form method="post" action="{{ url_for('op_txn_delete', txn_id=t.id) }}" class="inline"
               onsubmit="return modalConfirmSubmit(this, 'Delete this transaction of ${{ t.amount_cents|cents }} on {{ t.txn_date }}? It will be permanently removed.', {title: 'Delete transaction', confirmText: 'Delete', danger: true});">
           <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
           <button type="submit" class="btn btn-small btn-danger">Delete</button>
         </form>
         {% endif %}
+        {% endif %}
       </td>
     </tr>
+    {% if t.invoice_id and is_admin and perms.get('manage_accounting') %}
+    <tr id="ov-txn-{{ t.id }}" style="display:none;">
+      <td colspan="7">
+        {% from "_retention_override.html" import retention_override_form %}
+        {{ retention_override_form(url_for('op_txn_delete', txn_id=t.id), 'transaction') }}
+      </td>
+    </tr>
+    {% endif %}
   {% endfor %}
   </tbody>
 </table>

@@ -28,8 +28,8 @@
     {% for k, v in form_data.items() %}
     <input type="hidden" name="{{ k }}" value="{{ v }}">
     {% endfor %}
-    <label style="display:flex; gap:8px; align-items:flex-start; font-weight:400;">
-      <input type="checkbox" name="conflict_confirmed" value="1" required style="width:auto; margin-top:6px;">
+    <label class="checkbox-row" style="align-items:flex-start; font-weight:400; text-align:left;">
+      <input type="checkbox" name="conflict_confirmed" value="1" required style="margin-top:4px;">
       <span>I have reviewed the potential conflict{{ 's' if conflicts|length != 1 }} above and confirm
       there is no conflict of interest, or I accept responsibility for proceeding.</span>
     </label>

@@ -93,7 +93,7 @@
           <td class="small">{{ r.basis }}</td>
           <td>
             {% if r.days_remaining < 0 %}
-            <span class="badge" style="background:#fee2e2;color:#b91c1c;">Passed {{ -r.days_remaining }}d ago</span>
+            <span class="badge badge-danger">Passed {{ -r.days_remaining }}d ago</span>
             {% elif r.days_remaining == 0 %}
             <span class="badge badge-pending">Due today</span>
             {% elif r.days_remaining <= 3 %}

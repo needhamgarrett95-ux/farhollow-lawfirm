@@ -144,7 +144,7 @@
   <ul class="plain-list">
     {% for p in parties %}
     <li>
-      <span><strong>{{ p.first_name }} {{ p.last_name }}</strong>{% if p.role %} <span class="muted">— {{ p.role }}</span>{% endif %}</span>
+      <span><strong>{{ p.first_name }} {{ p.last_name }}</strong>{% if p.role %} <span class="muted">— {{ p.role }}</span>{% endif %}{% if p.notes %} <span class="muted small">({{ p.notes }})</span>{% endif %}</span>
       {% if perms.get('delete_records') %}
       <form method="post" action="{{ url_for('party_delete', party_id=p.id) }}" class="inline" onsubmit="return modalConfirmSubmit(this, 'Remove this opposing party?', {title: 'Remove opposing party', confirmText: 'Remove', danger: true});">
         <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
@@ -162,6 +162,7 @@
     <input name="first_name" placeholder="First name" required>
     <input name="last_name" placeholder="Last name" required>
     <input name="role" placeholder="Role (e.g. respondent, co-parent)">
+    <input name="notes" placeholder="Notes (optional)">
     <button type="submit" class="btn btn-small btn-primary">Add party</button>
   </form>{% endif %}
 </div>

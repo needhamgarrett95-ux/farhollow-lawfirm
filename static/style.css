@@ -8,7 +8,7 @@
   --bg: #f7f8fb;
   --card: #ffffff;
   --text: #1e2a3a;
-  --muted: #6b7a90;
+  --muted: #5b6b82;   /* >= 4.5:1 on white and light surfaces */
   --border: #e8ecf3;
   --line: #e8ecf3;
   --error: #c0392b;
@@ -157,6 +157,7 @@ h3 { font-size: 15px; margin: 16px 0 8px; }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge-active { background: var(--success-bg); color: var(--success); }
 .badge-pending { background: var(--warning-bg); color: var(--warning-text); }
+.badge-danger { background: var(--error-bg); color: var(--error); }
 .badge-closed { background: var(--surface-soft); color: var(--muted); }
 .badge-role-admin { background: var(--brand); color: #fff; }
 .badge-role-attorney { background: var(--info-bg); color: var(--info-text); }
@@ -216,6 +217,7 @@ label input, label select, label textarea {
 .detail-card { background: var(--card); border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 16px; }
 .detail-card h2 { margin-top: 0; }
 dl { display: grid; grid-template-columns: 160px 1fr; gap: 6px 12px; margin: 0; }
+dl.dl-compact { grid-template-columns: 110px 1fr; }
 dt { font-weight: 600; color: var(--muted); font-size: 13px; }
 dd { margin: 0; }
 .plain-list { list-style: none; padding: 0; margin: 8px 0; }
@@ -237,6 +239,7 @@ dd { margin: 0; }
 .alert-danger { background: var(--error-bg); border: 2px solid var(--error); color: var(--error); }
 .alert-danger ul { margin: 8px 0 0; padding-left: 20px; }
 .alert-warning { background: var(--warning-bg); border: 2px solid var(--warning); color: var(--warning-text); }
+.alert-success { background: var(--success-bg); border: 2px solid var(--success); color: var(--success); }
 .row-urgent { background: var(--error-bg); }
 .row-urgent td { border-bottom-color: var(--error-border); }
 
@@ -608,6 +611,8 @@ dd { margin: 0; }
 }
 .layout-saved-pill.show { opacity: 1; }
 .layout-saved-pill.err { background: #fdecea; color: #b3261e; }
+html[data-theme="dark"] .layout-saved-pill { background: #173d26; color: #4ade80; }
+html[data-theme="dark"] .layout-saved-pill.err { background: #4a1d1d; color: #f87171; }
 
 /* Top nav — Card Flow style (light) */
 .topbar-cf {
@@ -1097,7 +1102,7 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 .day-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
 
 .day-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 16px; margin-bottom: 18px;
 }
 .day-card { padding: 20px; }
@@ -1247,7 +1252,7 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
    ============================================================ */
 .retention-override {
   border: 2px solid var(--error); border-radius: var(--radius, 12px);
-  background: color-mix(in srgb, var(--error) 8%, var(--surface));
+  background: color-mix(in srgb, var(--error) 8%, var(--card));
   padding: 18px 20px; margin-top: 16px;
 }
 .retention-override .ro-head {
@@ -1260,6 +1265,4 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 .retention-override textarea, .retention-override input[type="text"] { width: 100%; margin-top: 4px; }
 .retention-override .form-actions { margin-top: 4px; }
 .retention-override button[data-override-submit]:disabled { opacity: .45; cursor: not-allowed; }
-.ro-table-wrap { margin: 10px 0 18px; }
-.ro-table-note { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); margin: 0 0 6px; }
 .ro-override-toggle { color: var(--error) !important; border-color: var(--error) !important; }

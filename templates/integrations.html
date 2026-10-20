@@ -19,9 +19,9 @@
     </div>
     <p class="muted small">{{ c.description }}</p>
 
-    {% if c.status == 'connected' %}
-    <dl class="compact">
-      <dt>Last sync</dt><dd>{{ c.last_sync_at[:16].replace('T', ' ') if c.last_sync_at else '—' }}</dd>
+    {% if c.status in ('connected', 'needs_reauth') %}
+    <dl class="dl-compact">
+      {% if c.last_sync_at %}<dt>Last sync</dt><dd>{{ c.last_sync_at[:16].replace('T', ' ') }}</dd>{% endif %}
       {% if c.kind == 'email' %}<dt>Messages synced</dt><dd>{{ c.email_count }}</dd>{% endif %}
     </dl>
     {% if c.status == 'needs_reauth' %}

@@ -12,6 +12,7 @@
 <div class="detail-card">
   <h2>{{ r.account.name }}</h2>
   <table class="table">
+    <thead><tr><th>Figure</th><th>Amount</th><th>As of</th></tr></thead>
     <tbody>
       <tr>
         <td><strong>1. Bank balance</strong> <span class="muted small">(latest statement)</span></td>
@@ -43,6 +44,12 @@
     {% endif %}
   </p>
   {% if perms.get('manage_trust') %}<p><a href="{{ url_for('trust_reconcile', account_id=r.account.id) }}">Reconcile this account {{ icon("chevron-right", 16) }}</a></p>{% endif %}
+</div>
+{% else %}
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('trust', 22) }}</div>
+  <h3>No trust accounts yet</h3>
+  <p>Create a trust account first — the three-way report compares bank, book, and ledger balances for each account.</p>
 </div>
 {% endfor %}
 {% endblock %}

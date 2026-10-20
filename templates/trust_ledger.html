@@ -37,6 +37,10 @@
   </tbody>
 </table>
 {% else %}
-<p class="muted">No trust transactions for this client in the selected period.</p>
+<div class="empty-state mini">
+  <div class="empty-icon">{{ icon('trust', 22) }}</div>
+  <h3>No transactions here</h3>
+  <p>No trust transactions for this client in the selected period.</p>
+</div>
 {% endif %}
 {% endblock %}

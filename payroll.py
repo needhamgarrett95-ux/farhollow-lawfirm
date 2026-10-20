@@ -25,12 +25,24 @@ The DEFAULT_TAX_RATES in app.py are ESTIMATES. The owner MUST verify them
 against current IRS / WA ESD / WA L&I publications before running payroll.
 """
 
+from decimal import Decimal, ROUND_HALF_UP
+
 PAY_PERIODS_PER_YEAR = {
     "weekly": 52,
     "biweekly": 26,
     "semimonthly": 24,
     "monthly": 12,
 }
+
+
+def _r(value):
+    """Round a money amount to cents with ROUND_HALF_UP.
+
+    Python's built-in round() rounds exact half-cents to even, which
+    systematically under-withholds (e.g. $73.625 -> $73.62). Money
+    must round half-up.
+    """
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def get_rate(db, key, default):
@@ -88,15 +100,22 @@ def federal_withholding_per_period(annual_taxable, filing_status, db):
     return tax
 
 
-def calculate_paycheck(db, employee, reg_hours, ot_hours):
+def calculate_paycheck(db, employee, reg_hours, ot_hours, li_hours=None):
     """
     Calculate one paycheck. employee is a dict-like row from the employees
     table. reg_hours/ot_hours are floats for the pay period.
+
+    li_hours: hours WA workers' comp (L&I) is charged on. Defaults to
+    reg_hours + ot_hours (correct for hourly). For salaried employees the
+    caller passes their actual timeclock hours (or standard full-time
+    hours) since reg/ot are zeroed for exempt staff.
 
     Returns a dict with all line items in DOLLARS (floats); the route
     converts to integer cents for storage.
     """
     periods = PAY_PERIODS_PER_YEAR.get(employee["pay_frequency"], 26)
+    if li_hours is None:
+        li_hours = reg_hours + ot_hours
 
     if employee["pay_type"] == "salary":
         # pay_rate_cents holds ANNUAL salary in cents
@@ -108,7 +127,7 @@ def calculate_paycheck(db, employee, reg_hours, ot_hours):
         hourly = employee["pay_rate_cents"] / 100.0
         gross = reg_hours * hourly + ot_hours * hourly * 1.5
 
-    gross = round(gross, 2)
+    gross = _r(gross)
 
     # --- Federal income tax (percentage method on annualized wages) ---
     std_key = "fed_std_ded_married" if employee["filing_status"] == "married" else "fed_std_ded_single"
@@ -117,7 +136,7 @@ def calculate_paycheck(db, employee, reg_hours, ot_hours):
     allowance_amt = (employee["allowances"] or 0) * 4300
     annual_taxable = gross * periods - std_ded - allowance_amt
     annual_fed = federal_withholding_per_period(max(annual_taxable, 0), employee["filing_status"], db)
-    federal = round(annual_fed / periods, 2)
+    federal = _r(annual_fed / periods)
 
     # --- FICA ---
     ss_rate = get_rate(db, "ss_rate", 6.2) / 100.0
@@ -127,39 +146,43 @@ def calculate_paycheck(db, employee, reg_hours, ot_hours):
         (employee["id"],),
     ).fetchone()["g"] / 100.0
     ss_taxable = max(0.0, min(gross, ss_base - ytd))
-    ss = round(ss_taxable * ss_rate, 2)
+    ss = _r(ss_taxable * ss_rate)
 
     med_rate = get_rate(db, "medicare_rate", 1.45) / 100.0
     med_addl = get_rate(db, "medicare_addl_rate", 0.9) / 100.0
-    medicare = round(gross * med_rate, 2)
+    medicare = _r(gross * med_rate)
     if ytd + gross > 200000:
         addl_taxable = min(gross, ytd + gross - 200000)
-        medicare = round(medicare + addl_taxable * med_addl, 2)
+        medicare = _r(medicare + addl_taxable * med_addl)
 
     # --- WA PFML (employee share) ---
     pfml_total = get_rate(db, "pfml_total_rate", 0.92) / 100.0
     pfml_emp_share = get_rate(db, "pfml_employee_share", 71.43) / 100.0
-    pfml = round(gross * pfml_total * pfml_emp_share, 2)
+    pfml = _r(gross * pfml_total * pfml_emp_share)
 
     # --- WA Cares ---
-    wacares = round(gross * get_rate(db, "wacares_rate", 0.58) / 100.0, 2)
+    wacares = _r(gross * get_rate(db, "wacares_rate", 0.58) / 100.0)
 
-    total_deductions = round(federal + ss + medicare + pfml + wacares, 2)
-    net = round(gross - total_deductions, 2)
+    total_deductions = _r(federal + ss + medicare + pfml + wacares)
+    net = _r(gross - total_deductions)
 
     # --- Employer costs (not deducted) ---
-    ss_er = round(ss_taxable * get_rate(db, "ss_rate_employer", 6.2) / 100.0, 2)
-    med_er = round(gross * get_rate(db, "medicare_rate_employer", 1.45) / 100.0, 2)
+    ss_er = _r(ss_taxable * get_rate(db, "ss_rate_employer", 6.2) / 100.0)
+    med_er = _r(gross * get_rate(db, "medicare_rate_employer", 1.45) / 100.0)
     sui_rate = get_rate(db, "sui_rate", 1.5) / 100.0
     sui_base = get_rate(db, "sui_wage_base", 74000)
     sui_taxable = max(0.0, min(gross, sui_base - ytd))
-    sui = round(sui_taxable * sui_rate, 2)
+    sui = _r(sui_taxable * sui_rate)
     li_per_hour = get_rate(db, "li_rate_per_hour", 0.25)
-    li_cost = round((reg_hours + ot_hours) * li_per_hour, 2)
+    li_cost = _r(li_hours * li_per_hour)
+    # WA PFML employer share (only when the firm pays it — 50+ employees)
+    pfml_er = 0.0
+    if get_rate(db, "pfml_employer_pays", 0) == 1:
+        pfml_er = _r(gross * pfml_total * (1.0 - pfml_emp_share))
 
     return {
-        "reg_hours": round(reg_hours, 2),
-        "ot_hours": round(ot_hours, 2),
+        "reg_hours": _r(reg_hours),
+        "ot_hours": _r(ot_hours),
         "gross": gross,
         "federal": federal,
         "ss": ss,
@@ -172,7 +195,8 @@ def calculate_paycheck(db, employee, reg_hours, ot_hours):
         "employer_medicare": med_er,
         "employer_sui": sui,
         "employer_li": li_cost,
-        "employer_total": round(ss_er + med_er + sui + li_cost, 2),
+        "employer_pfml": pfml_er,
+        "employer_total": _r(ss_er + med_er + sui + li_cost + pfml_er),
     }
 
 
@@ -203,13 +227,27 @@ def weekly_hours(entries):
 
 
 def entry_hours(entry):
-    """Hours for a single timeclock entry (clock in/out or manual)."""
-    from datetime import datetime
+    """Hours for a single timeclock entry (clock in/out or manual).
+
+    Rows are a mix of timezone-aware UTC (live clock-ins) and naive
+    wall-clock (correction-approved rows). Both parse as UTC so mixed
+    rows can never raise on subtraction (used to 500 payroll previews).
+    Negative spans are clamped to 0.
+    """
+    from datetime import datetime, timezone
 
     if entry["manual_hours"] is not None:
         return float(entry["manual_hours"])
     if not entry["clock_out"]:
         return 0.0
-    start = datetime.fromisoformat(entry["clock_in"])
-    end = datetime.fromisoformat(entry["clock_out"])
-    return round((end - start).total_seconds() / 3600.0, 2)
+
+    def _norm(value):
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    start = _norm(entry["clock_in"])
+    end = _norm(entry["clock_out"])
+    hours = (end - start).total_seconds() / 3600.0
+    return round(max(0.0, hours), 2)

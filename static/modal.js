@@ -234,8 +234,16 @@
           return;
         } catch (err) { /* fall through to legacy submit */ }
       }
-      // Last resort (very old browsers): plain submit. Note the
-      // submitter's name/value is NOT sent on this path.
+      // Last resort (very old browsers): plain submit. The submitter's
+      // name/value is normally dropped by form.submit(), so inject it as
+      // a hidden field first to preserve the form's intent.
+      if (submitter && submitter.name) {
+        var hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = submitter.name;
+        hidden.value = submitter.value;
+        form.appendChild(hidden);
+      }
       HTMLFormElement.prototype.submit.call(form);
     });
     return false;
