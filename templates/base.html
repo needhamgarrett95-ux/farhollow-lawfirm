@@ -55,6 +55,97 @@
     </div>
   </div>
 </header>
+
+{# ===== Mobile layer (v2.5.0) — phone-only chrome. The markup below is
+   always in the page, but style.css only displays it at <=768px; the
+   desktop header above is untouched. Data source is the same nav_groups
+   the desktop nav renders: same groups, same permission filtering,
+   admin-only items stay admin-role-only. ===== #}
+{% set mns = namespace(home_group=none, practice_group=none, clock_item=none, billing_item=none, more_active=false) %}
+{% for group in nav_groups %}
+  {% if group.label == 'Dashboard' %}{% set mns.home_group = group %}{% endif %}
+  {% if group.label == 'Practice' %}{% set mns.practice_group = group %}{% endif %}
+  {% for item in group["items"] %}
+    {% if item.endpoint == 'timeclock' %}{% set mns.clock_item = item %}{% endif %}
+    {% if item.endpoint == 'invoice_list' %}{% set mns.billing_item = item %}{% endif %}
+    {% if item.active and group.label not in ('Dashboard', 'Practice') and item.endpoint not in ('timeclock', 'invoice_list') %}{% set mns.more_active = true %}{% endif %}
+  {% endfor %}
+{% endfor %}
+
+<div class="msheet-wrap" id="msheetWrap" aria-hidden="true">
+  <button type="button" class="msheet-scrim" data-msheet-close aria-label="Close menu"></button>
+  <div class="msheet" role="dialog" aria-modal="true" aria-label="All sections">
+    <div class="msheet-grab" data-msheet-close></div>
+    <div class="msheet-scroll">
+      <div class="msheet-profile">
+        <div class="avatar msheet-avatar">{{ (session.get('username') or 'U')[:2].upper() }}</div>
+        <div class="msheet-profile-txt">
+          <b>{{ session.get('username') }}</b>
+          <span>Law Office of Derek G. Medina</span>
+        </div>
+        <span class="msheet-role-pill">{{ user_role|upper }}</span>
+      </div>
+      {% for group in nav_groups %}
+      <div class="msheet-group" id="msheet-group-{{ group.label|lower }}" data-msheet-group="{{ group.label|lower }}">
+        <div class="msheet-group-label">{{ group.label }}</div>
+        <div class="msheet-rows">
+          {% for item in group["items"] %}
+          <a class="msheet-row {% if item.active %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
+            <span class="msheet-ric">{{ icon(item.icon, 20) }}</span>
+            <span class="msheet-rtxt">{{ item.label }}</span>
+            {% if item.badge_count %}<span class="bdg">{{ item.badge_count }}</span>{% endif %}
+            {{ icon('chevron-right', 17, 'msheet-chev') }}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+      <div class="msheet-rows msheet-account">
+        <a class="msheet-row" href="{{ url_for('change_password') }}">
+          <span class="msheet-ric">{{ icon('password', 20) }}</span>
+          <span class="msheet-rtxt">Change password</span>
+          {{ icon('chevron-right', 17, 'msheet-chev') }}
+        </a>
+        <a class="msheet-row msheet-signout" href="{{ url_for('logout') }}">
+          <span class="msheet-ric">{{ icon('logout', 20) }}</span>
+          <span class="msheet-rtxt">Log out</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<nav class="mtab-bar" aria-label="Mobile navigation">
+  {% if mns.home_group %}
+  {% set hitem = mns.home_group["items"][0] %}
+  <a class="mtab {% if hitem.active %}on{% endif %}" href="{{ url_for(hitem.endpoint) }}">
+    <span class="mtab-ic">{{ icon(hitem.icon, 22) }}</span>
+    <span class="mtab-label">Home</span>
+  </a>
+  {% endif %}
+  {% if mns.practice_group %}
+  <button type="button" class="mtab {% if mns.practice_group.active %}on{% endif %}" data-msheet-open="practice" aria-haspopup="true">
+    <span class="mtab-ic">{{ icon(mns.practice_group.icon, 22) }}{% if mns.practice_group.badge_count %}<span class="mtab-bdg">{{ mns.practice_group.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-label">Practice</span>
+  </button>
+  {% endif %}
+  {% if mns.clock_item %}
+  <a class="mtab {% if mns.clock_item.active %}on{% endif %}" href="{{ url_for('timeclock') }}">
+    <span class="mtab-ic">{{ icon('alarm', 22) }}{% if mns.clock_item.badge_count %}<span class="mtab-bdg">{{ mns.clock_item.badge_count }}</span>{% endif %}</span>
+    <span class="mtab-label">Timeclock</span>
+  </a>
+  {% endif %}
+  {% if mns.billing_item %}
+  <a class="mtab {% if mns.billing_item.active %}on{% endif %}" href="{{ url_for('invoice_list') }}">
+    <span class="mtab-ic">{{ icon('billing', 22) }}</span>
+    <span class="mtab-label">Billing</span>
+  </a>
+  {% endif %}
+  <button type="button" class="mtab {% if mns.more_active %}on{% endif %}" data-msheet-open="all" aria-haspopup="true">
+    <span class="mtab-ic">{{ icon('grip', 22) }}</span>
+    <span class="mtab-label">More</span>
+  </button>
+</nav>
 {% endif %}
 
 <main class="{% if session.get('user_id') and request.endpoint == 'dashboard' %}dash-main{% else %}container{% endif %}">
@@ -242,6 +333,62 @@ function toggleNoteForm(btn) {
     });
     sync();
   });
+})();
+</script>
+<script>
+// Mobile bottom sheet (v2.5.0) — opened by the Practice / More tabs.
+// Closes on scrim tap, grab-handle tap, item tap, Escape, or swipe-down.
+(function () {
+  var wrap = document.getElementById('msheetWrap');
+  if (!wrap) return;
+  var sheet = wrap.querySelector('.msheet');
+  var scroll = wrap.querySelector('.msheet-scroll');
+  function open(anchor) {
+    wrap.classList.add('open');
+    wrap.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('msheet-open');
+    if (anchor && anchor !== 'all') {
+      var g = document.getElementById('msheet-group-' + anchor);
+      if (g) {
+        g.classList.add('msheet-anchor');
+        setTimeout(function () { g.scrollIntoView({ block: 'start' }); }, 80);
+        return;
+      }
+    }
+    if (scroll) scroll.scrollTop = 0;
+  }
+  function close() {
+    wrap.classList.remove('open');
+    wrap.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('msheet-open');
+    wrap.querySelectorAll('.msheet-anchor').forEach(function (g) {
+      g.classList.remove('msheet-anchor');
+    });
+  }
+  document.querySelectorAll('[data-msheet-open]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      open(btn.getAttribute('data-msheet-open'));
+    });
+  });
+  wrap.querySelectorAll('[data-msheet-close]').forEach(function (el) {
+    el.addEventListener('click', close);
+  });
+  wrap.querySelectorAll('.msheet-row').forEach(function (a) {
+    a.addEventListener('click', close);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') close();
+  });
+  var startY = null;
+  sheet.addEventListener('touchstart', function (e) {
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+  sheet.addEventListener('touchend', function (e) {
+    if (startY === null) return;
+    var dy = e.changedTouches[0].clientY - startY;
+    if (dy > 70 && scroll && scroll.scrollTop <= 0) close();
+    startY = null;
+  }, { passive: true });
 })();
 </script>
 </body>

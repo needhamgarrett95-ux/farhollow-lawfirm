@@ -1266,3 +1266,188 @@ html[data-theme="dark"] .seg-btn.on { background: var(--brand); color: #fff; }
 .retention-override .form-actions { margin-top: 4px; }
 .retention-override button[data-override-submit]:disabled { opacity: .45; cursor: not-allowed; }
 .ro-override-toggle { color: var(--error) !important; border-color: var(--error) !important; }
+
+
+/* ============================================================
+   MOBILE LAYER (v2.5.0) — a second, phone-only presentation.
+   Rules for the new chrome are display:none by default (desktop
+   never renders them) or scoped inside the <=768px media query.
+   NO desktop rule above this section is modified: above 768px
+   the site is pixel-for-pixel the approved desktop design.
+   ============================================================ */
+.mtab-bar, .msheet-wrap { display: none; }
+.tc-m-hero { display: none; }
+
+@media print {
+  .mtab-bar, .msheet-wrap { display: none !important; }
+}
+
+/* Tables in the 701–768px band (below, the <=700px card layout
+   takes over): scroll horizontally inside their own box instead
+   of pushing the page wide. */
+@media (min-width: 701px) and (max-width: 768px) {
+  .table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
+@media (max-width: 768px) {
+  /* --- Slim mobile header: monogram + short name + avatar --- */
+  .nav-tabs { display: none; }
+  .topbar-cf .nav-inner { height: 56px; padding: 0 14px; }
+  .monogram { width: 34px; height: 34px; font-size: 12px; border-radius: 9px; }
+  .firm-name { display: block; font-size: 13.5px; white-space: normal; line-height: 1.25; }
+  .firm-name small { display: none; }
+  .avatar { width: 40px; height: 40px; font-size: 14px; }
+  .user-dropdown { top: 48px; }
+
+  /* --- Clearance so the fixed bottom bar never covers content --- */
+  body:has(.mtab-bar) main.container { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  body:has(.mtab-bar) .dash-wrap { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+  body:has(.mtab-bar) .footer { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  body.msheet-open { overflow: hidden; }
+
+  /* --- Bottom tab bar --- */
+  .mtab-bar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.06);
+    padding: 8px 6px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+  .mtab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: none; border: none; cursor: pointer; text-decoration: none;
+    color: var(--muted); font-family: inherit; font-size: 11.5px; font-weight: 600;
+    min-height: 52px; padding: 2px 0 0; justify-content: flex-start;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mtab-ic {
+    position: relative; width: 56px; height: 31px; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .22s ease;
+  }
+  .mtab-ic svg { width: 22px; height: 22px; }
+  .mtab.on { color: var(--navy); font-weight: 700; }
+  .mtab.on .mtab-ic { background: var(--brand); }
+  .mtab.on .mtab-ic svg { color: #fff; }
+  .mtab-bdg {
+    position: absolute; top: -5px; right: 2px;
+    background: #c0392b; color: #fff; font-size: 10px; font-weight: 800;
+    min-width: 17px; height: 17px; border-radius: 999px; padding: 0 4px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid var(--card);
+  }
+
+  /* --- Bottom sheet (Practice / More) --- */
+  .msheet-wrap { display: block; position: fixed; inset: 0; z-index: 200; visibility: hidden; }
+  .msheet-wrap.open { visibility: visible; }
+  .msheet-scrim {
+    position: absolute; inset: 0; width: 100%; border: 0; cursor: pointer; padding: 0;
+    background: rgba(13, 28, 46, 0.45); opacity: 0; transition: opacity .3s ease;
+  }
+  .msheet-wrap.open .msheet-scrim { opacity: 1; }
+  .msheet {
+    position: absolute; left: 0; right: 0; bottom: 0; max-height: 86%;
+    background: var(--bg); border-radius: 26px 26px 0 0;
+    box-shadow: 0 -12px 40px rgba(15, 23, 42, 0.25);
+    transform: translateY(103%); transition: transform .38s cubic-bezier(.32, .9, .3, 1);
+    display: flex; flex-direction: column;
+  }
+  .msheet-wrap.open .msheet { transform: translateY(0); }
+  .msheet-grab {
+    width: 40px; height: 5px; border-radius: 999px; background: var(--border);
+    margin: 10px auto 4px; flex: none; cursor: pointer;
+  }
+  .msheet-scroll { overflow-y: auto; padding: 6px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
+  .msheet-profile {
+    display: flex; align-items: center; gap: 13px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    box-shadow: var(--shadow-card); padding: 14px 16px; margin-top: 8px;
+  }
+  .msheet-avatar { width: 48px; height: 48px; font-size: 16px; flex: none; }
+  .msheet-profile-txt { flex: 1; min-width: 0; }
+  .msheet-profile-txt b { display: block; font-size: 16.5px; color: var(--navy); line-height: 1.2; }
+  .msheet-profile-txt span { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .msheet-role-pill {
+    margin-left: auto; flex: none;
+    background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--text);
+    font-size: 12px; font-weight: 800; letter-spacing: .05em;
+    padding: 5px 10px; border-radius: 999px;
+  }
+  .msheet-group-label {
+    font-size: 12.5px; font-weight: 700; letter-spacing: .11em;
+    text-transform: uppercase; color: var(--muted); margin: 20px 4px 9px;
+  }
+  .msheet-rows {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    box-shadow: var(--shadow-card); overflow: hidden;
+  }
+  .msheet-row {
+    display: flex; align-items: center; gap: 13px;
+    padding: 12px 16px; min-height: 52px;
+    font-size: 16px; font-weight: 600; color: var(--text); text-decoration: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .msheet-row:last-child { border-bottom: 0; }
+  .msheet-row:active { background: var(--surface-hover); }
+  .msheet-ric {
+    width: 38px; height: 38px; border-radius: 11px; flex: none;
+    background: var(--surface-soft); color: var(--navy);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .msheet-row.active .msheet-ric { background: var(--brand); color: #fff; }
+  .msheet-rtxt { flex: 1; min-width: 0; }
+  .msheet-chev { color: var(--muted); flex: none; }
+  .msheet-row .bdg {
+    background: #c0392b; color: #fff; font-size: 10.5px; font-weight: 700;
+    border-radius: 10px; padding: 1px 7px;
+  }
+  .msheet-account { margin-top: 20px; }
+  .msheet-signout { color: var(--error); }
+  .msheet-signout .msheet-ric { background: var(--error-bg); color: var(--error); }
+  /* Practice anchor: the group the user asked for is highlighted */
+  .msheet-group.msheet-anchor .msheet-group-label { color: var(--gold); }
+  .msheet-group.msheet-anchor .msheet-rows { box-shadow: 0 0 0 2px var(--gold); }
+  @media (prefers-reduced-motion: reduce) {
+    .msheet, .msheet-scrim, .mtab-ic { transition: none; }
+  }
+
+  /* --- Timeclock mobile hero (desktop .tc-hero hides) --- */
+  .tc-hero { display: none; }
+  .tc-m-hero {
+    display: block; background: var(--card); border: 1px solid var(--line);
+    border-radius: 18px; box-shadow: var(--shadow-card);
+    border-top: 4px solid var(--gold);
+    padding: 26px 20px 22px; text-align: center; margin-bottom: 22px;
+  }
+  .tc-m-date { color: var(--muted); font-size: 14px; font-weight: 600; letter-spacing: .4px; margin-bottom: 6px; }
+  .tc-m-live {
+    font-size: 54px; font-weight: 800; letter-spacing: -1.5px; color: var(--navy);
+    font-variant-numeric: tabular-nums; line-height: 1.05;
+  }
+  .tc-m-sec { font-size: 22px; color: var(--muted); font-weight: 600; }
+  .tc-m-status { margin-bottom: 18px; }
+  .tc-m-btn {
+    width: 100%; min-height: 60px; font-size: 19px; font-weight: 700;
+    border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 10px;
+  }
+  .tc-m-today { text-align: left; margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
+  .tc-m-today-head {
+    font-size: 12.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .9px; color: var(--muted); margin-bottom: 10px;
+  }
+  .tc-m-timeline { margin-bottom: 0; }
+  .tc-m-timeline .tc-entry:last-child { padding-bottom: 2px; }
+  .tc-m-totals { display: flex; gap: 14px; margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+  .tc-m-total { flex: 1; background: var(--surface-soft); border-radius: 12px; padding: 12px; }
+
+  /* --- Phone-width sanity: nothing pushes the page wide --- */
+  main img { max-width: 100%; height: auto; }
+  pre { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .view-tabs { display: flex; width: 100%; }
+  .view-tab { flex: 1; justify-content: center; min-height: 44px; }
+  .btn-row .btn, .report-links .btn { flex: 1 1 auto; }
+  .day-nav .btn { min-height: 44px; }
+  .tc-team-grid { grid-template-columns: 1fr; }
+}

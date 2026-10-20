@@ -5681,6 +5681,34 @@ def timeclock():
                WHERE c.status = 'pending'
                ORDER BY c.requested_at ASC""",
         ).fetchall()]
+    # --- Mobile hero data (v2.5.0): my punches today + my week total.
+    # Additive only — the desktop timeclock template ignores these.
+    tc_today = None
+    tc_week_hours = 0.0
+    if my_employee_id:
+        my_row = db.execute(
+            "SELECT * FROM employees WHERE id = ?", (my_employee_id,)
+        ).fetchone()
+        if my_row:
+            tc_today = _employee_day(
+                db, my_row, date.today(),
+                datetime.now(timezone.utc).replace(tzinfo=None))
+        week_start = date.today() - timedelta(days=date.today().weekday())
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        for r in db.execute(
+            """SELECT * FROM timeclock_entries
+               WHERE employee_id = ? AND entry_date >= ?""",
+            (my_employee_id, week_start.isoformat()),
+        ).fetchall():
+            if r["clock_out"] is None and r["manual_hours"] is None:
+                # Open punch: count live elapsed, like _employee_day does.
+                ci = _parse_tc_dt(r["clock_in"])
+                if ci:
+                    tc_week_hours += max(
+                        0.0, (now_naive - ci).total_seconds() / 3600.0)
+            else:
+                tc_week_hours += entry_hours(r)
+        tc_week_hours = round(tc_week_hours, 2)
     # --- Day view (v2.4.1): all punches for one calendar day ---
     view = request.args.get("view", "overview")
     if view not in ("overview", "day"):
@@ -5703,6 +5731,7 @@ def timeclock():
         day_prev=(day_date - timedelta(days=1)).isoformat(),
         day_next=(day_date + timedelta(days=1)).isoformat(),
         day_employees=day_employees, day_summary=day_summary,
+        tc_today=tc_today, tc_week_hours=tc_week_hours,
     )
 
 

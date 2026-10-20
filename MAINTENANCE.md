@@ -1331,3 +1331,49 @@ Practical notes:
   user-management access — those safety checks still apply.
 - Ordinary permissions (billing, trust, cases, etc.) work exactly as
   before; only user/permission administration moved to the admin role.
+
+## 47. The phone view (v2.5.0)
+
+On a phone (or any screen 768 pixels wide or narrower), the program wears
+a different outfit. Same pages, same information, same permissions —
+nothing about the desktop view changed at all. If the desktop ever looks
+different after this update, that's a bug; report it.
+
+What changes on a phone:
+
+- **The top menu row goes away.** In its place is a slim header: the gold
+  DGM badge, the firm name, and your picture circle (tap it for dark
+  mode, change password, and log out — same as on a computer).
+- **A navigation bar lives at the bottom of the screen**, where thumbs
+  can reach it. It has up to five buttons: **Home**, **Practice**,
+  **Timeclock**, **Billing**, and **More**. A button only appears if your
+  account is allowed to use that section — if you don't see Billing, you
+  don't have billing permission, exactly like the desktop menu.
+- **Practice and More open a panel that slides up from the bottom.**
+  It lists every section in the same groups as the desktop menu
+  (Practice, Documents, Financial, Team, System), with your name and
+  role at the top and Log out at the bottom. **More** shows the whole
+  list; **Practice** jumps straight to the Practice group and outlines
+  it in gold. Close the panel by tapping outside it, tapping the little
+  handle at its top, choosing a section, or pressing Escape.
+- **The Timeclock gets a big, thumb-friendly face**: a large live clock,
+  a pill that clearly says **On the clock** or **Clocked out**, and one
+  big Clock in / Clock out button. Underneath are today's punches and
+  two totals: hours today and hours this week. Everything else on the
+  Timeclock page (day view, manual entry, correction requests) is still
+  there, just stacked for a narrow screen.
+- **Tables stay readable.** On narrow screens they turn into stacked
+  cards or scroll sideways inside their own box — the page itself never
+  scrolls sideways.
+
+If the bottom bar or panel looks wrong after an update, the usual cause
+is an old copy of the design file in the browser's cache. The program
+already stamps the design file with the version number to prevent this;
+closing and reopening the browser, or restarting the server from the
+launcher, clears it.
+
+For whoever maintains the code later: the phone rules live at the very
+bottom of `static/style.css` (the "MOBILE LAYER" section), the bottom
+bar and panel markup live in `templates/base.html` right after the
+desktop header, and both are driven by the same `nav_groups` data as the
+desktop menu — change permissions in one place and both menus follow.

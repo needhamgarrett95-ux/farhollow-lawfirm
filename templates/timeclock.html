@@ -119,6 +119,59 @@
 </div>
 {% endif %}
 
+{# ---- Mobile hero (v2.5.0): phone-only presentation of the same clock.
+   style.css hides .tc-hero and shows this at <=768px (and vice versa on
+   desktop). Same forms, same endpoints — nothing removed. ---- #}
+{% if ns.me %}
+<div class="tc-m-hero">
+  <div class="tc-m-date" id="tcmDate">{{ today }}</div>
+  <div class="tc-m-live"><span id="tcmTime">--:--</span><span class="tc-m-sec" id="tcmSec"></span></div>
+  {% if ns.my_open %}
+  <div class="tc-status on tc-m-status"><span class="pulse-dot"></span> On the clock · since {{ ns.my_open.clock_in[11:16] }}</div>
+  <form method="post" action="{{ url_for('timeclock_clockout', entry_id=ns.my_open.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <button type="submit" class="btn btn-danger tc-m-btn">{{ icon('alarm', 22) }} Clock out</button>
+  </form>
+  {% else %}
+  <div class="tc-status tc-m-status">{{ icon('clock', 16) }} Clocked out</div>
+  <form method="post" action="{{ url_for('timeclock_clockin', employee_id=ns.me.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token') }}">
+    <button type="submit" class="btn btn-primary tc-m-btn">{{ icon('alarm', 22) }} Clock in</button>
+  </form>
+  {% endif %}
+  <div class="tc-m-today">
+    <div class="tc-m-today-head">Today's punches</div>
+    {% if tc_today and tc_today.entries %}
+    <div class="tc-timeline tc-m-timeline">
+      {% for e in tc_today.entries %}
+      <div class="tc-entry">
+        <div class="tc-when">
+          {{ e.clock_in[11:16] if e.clock_in else '—' }}
+          →
+          {{ e.clock_out[11:16] if e.clock_out else 'still out' }}
+          <span class="tc-hours">{{ e.elapsed_hours if e.is_open else e.hours }}h</span>
+        </div>
+        {% if e.notes %}<div class="tc-notes">{{ e.notes }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted small" style="margin:0">No punches yet today.</p>
+    {% endif %}
+  </div>
+  <div class="tc-m-totals">
+    <div class="tc-m-total">
+      <div class="ds-num">{{ tc_today.total_hours if tc_today else 0 }}h</div>
+      <div class="ds-label">Today</div>
+    </div>
+    <div class="tc-m-total">
+      <div class="ds-num">{{ tc_week_hours }}h</div>
+      <div class="ds-label">This week</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ---- Correction request (staff without manual-entry permission) ---- #}
 {% if not perms.get('run_payroll') %}
 <details class="collapse-card" id="corrRequestCard">
@@ -340,23 +393,30 @@
 {% endif %}
 
 <script>
-/* Live clock for the hero card */
+/* Live clock for the hero cards (desktop .tc-hero + mobile .tc-m-hero) */
 (function () {
   var t = document.getElementById('tcTime'),
       s = document.getElementById('tcSec'),
-      d = document.getElementById('tcDate');
-  if (!t) return;
+      d = document.getElementById('tcDate'),
+      mt = document.getElementById('tcmTime'),
+      ms = document.getElementById('tcmSec'),
+      md = document.getElementById('tcmDate');
+  if (!t && !mt) return;
   function tick() {
     var n = new Date();
     var h = n.getHours(), m = n.getMinutes(), ap = h >= 12 ? 'PM' : 'AM';
     h = h % 12; if (h === 0) h = 12;
-    t.textContent = h + ':' + String(m).padStart(2, '0') + ' ' + ap;
-    if (s) s.textContent = ':' + String(n.getSeconds()).padStart(2, '0');
-    if (d) {
-      var days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      d.textContent = days[n.getDay()] + ', ' + months[n.getMonth()] + ' ' + n.getDate() + ', ' + n.getFullYear();
-    }
+    var hm = h + ':' + String(m).padStart(2, '0') + ' ' + ap;
+    var sec = ':' + String(n.getSeconds()).padStart(2, '0');
+    var days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var dateStr = days[n.getDay()] + ', ' + months[n.getMonth()] + ' ' + n.getDate() + ', ' + n.getFullYear();
+    if (t) t.textContent = hm;
+    if (s) s.textContent = sec;
+    if (d) d.textContent = dateStr;
+    if (mt) mt.textContent = hm;
+    if (ms) ms.textContent = sec;
+    if (md) md.textContent = dateStr;
   }
   tick();
   setInterval(tick, 1000);
