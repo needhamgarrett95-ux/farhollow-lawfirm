@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{# Single-employee day view (v2.4.3). Privacy is enforced server-side:
+   this page only ever renders for view_all holders or the employee
+   themselves. #}
+{% block title %}{{ employee.full_name }} — Day view — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('alarm', 24) }} {{ employee.full_name }}</h1>
+</div>
+<p class="page-sub">
+  <a href="{{ url_for('timeclock', view='day', date=day_date.isoformat()) }}">← All employees</a>
+</p>
+
+{# Employee selector (admin/attorney only) #}
+{% if can_view_all and all_employees %}
+<div class="card" style="margin-bottom:16px;padding:12px 16px">
+  <label class="muted small">Employee
+    <select onchange="window.location='/timeclock/day/' + this.value + '?date={{ day_date.isoformat() }}'">
+      {% for e in all_employees %}
+      <option value="{{ e.id }}" {% if e.id == employee.id %}selected{% endif %}>{{ e.full_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+</div>
+{% endif %}
+
+<div class="day-nav card">
+  <a class="btn btn-small" href="{{ url_for('timeclock_employee_day', employee_id=employee.id, date=day_prev) }}"
+     aria-label="Previous day">{{ icon('chevron-left', 16) }}</a>
+  <form class="day-picker" method="get" action="{{ url_for('timeclock_employee_day', employee_id=employee.id) }}">
+    <input type="date" name="date" value="{{ day_date.isoformat() }}"
+           max="{{ today }}" onchange="this.form.submit()" aria-label="Pick a date">
+  </form>
+  <a class="btn btn-small" href="{{ url_for('timeclock_employee_day', employee_id=employee.id, date=day_next) }}"
+     aria-label="Next day">{{ icon('chevron-right', 16) }}</a>
+  {% if not day_is_today %}
+  <a class="btn btn-small" href="{{ url_for('timeclock_employee_day', employee_id=employee.id, date=today) }}">Today</a>
+  {% endif %}
+  <div class="day-title">
+    {{ day_date.strftime('%A, %B %d, %Y') }}
+    {% if day_is_today %}<span class="badge badge-active">Today</span>{% endif %}
+  </div>
+  <a class="btn btn-small" style="margin-left:auto"
+     href="{{ url_for('timeclock_day_print', date=day_date.isoformat(), employee_id=employee.id) }}" target="_blank" rel="noopener">
+    {{ icon('print', 15) }} Print
+  </a>
+</div>
+
+{% set d = emp_day %}
+{% set emp_url = None %}
+{% if d.entries %}
+  {% include "_timeclock_day_card.html" %}
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">{{ icon('calendar', 28) }}</div>
+  <h3>No punches on {{ day_date.strftime('%b %d, %Y') }}</h3>
+  <p>{{ employee.full_name }} didn't clock in on this day.</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -5153,6 +5153,56 @@ def _day_timeline_segments(entries, day_date, now_dt):
     return segments, manual
 
 
+def _parse_day_arg():
+    """Parse ?date=YYYY-MM-DD (defaults to today; bad values → today)."""
+    day_str = request.args.get("date", "").strip()
+    try:
+        return date.fromisoformat(day_str) if day_str else date.today()
+    except ValueError:
+        return date.today()
+
+
+def _employee_day(db, emp_row, day_date, now_dt):
+    """One employee's punches for one day (timeline segments, totals,
+    open-punch elapsed time, per-punch notes). Shared by the aggregate
+    day view and the single-employee day page (v2.4.3)."""
+    emp = _employee_dict(emp_row)
+    rows = db.execute(
+        """SELECT * FROM timeclock_entries
+           WHERE employee_id = ? AND entry_date = ?
+           ORDER BY clock_in ASC, id ASC""",
+        (emp["id"], day_date.isoformat()),
+    ).fetchall()
+    entries = []
+    emp_hours = 0.0
+    emp_open = False
+    for r in rows:
+        d = dict(r)
+        d["hours"] = entry_hours(r)
+        d["notes_list"] = get_notes(db, "timeclock_entry", r["id"])
+        d["is_open"] = r["clock_out"] is None and r["manual_hours"] is None
+        if d["is_open"]:
+            emp_open = True
+            # Live elapsed for an open punch.
+            ci = _parse_tc_dt(r["clock_in"])
+            d["elapsed_hours"] = round(
+                (now_dt - ci).total_seconds() / 3600.0, 2) if ci else 0.0
+            emp_hours += d["elapsed_hours"]
+        else:
+            emp_hours += d["hours"]
+        entries.append(d)
+    segments, manual = _day_timeline_segments(
+        [dict(r) for r in rows], day_date, now_dt)
+    return {
+        "employee": emp,
+        "entries": entries,
+        "manual_entries": manual,
+        "segments": segments,
+        "total_hours": round(emp_hours, 2),
+        "is_clocked_in": emp_open,
+    }
+
+
 def _build_day_view(db, day_date, can_view_all, my_employee_id):
     """Assemble per-employee punch data for one calendar day.
 
@@ -5171,52 +5221,12 @@ def _build_day_view(db, day_date, can_view_all, my_employee_id):
         ).fetchall()
     else:
         emp_rows = []
-    day_employees = []
-    total_hours = 0.0
-    clocked_in_count = 0
-    for emp_row in emp_rows:
-        emp = _employee_dict(emp_row)
-        rows = db.execute(
-            """SELECT * FROM timeclock_entries
-               WHERE employee_id = ? AND entry_date = ?
-               ORDER BY clock_in ASC, id ASC""",
-            (emp["id"], day_date.isoformat()),
-        ).fetchall()
-        entries = []
-        emp_hours = 0.0
-        emp_open = False
-        for r in rows:
-            d = dict(r)
-            d["hours"] = entry_hours(r)
-            d["notes_list"] = get_notes(db, "timeclock_entry", r["id"])
-            d["is_open"] = r["clock_out"] is None and r["manual_hours"] is None
-            if d["is_open"]:
-                emp_open = True
-                # Live elapsed for an open punch.
-                ci = _parse_tc_dt(r["clock_in"])
-                d["elapsed_hours"] = round(
-                    (now_dt - ci).total_seconds() / 3600.0, 2) if ci else 0.0
-                emp_hours += d["elapsed_hours"]
-            else:
-                emp_hours += d["hours"]
-            entries.append(d)
-        segments, manual = _day_timeline_segments(
-            [dict(r) for r in rows], day_date, now_dt)
-        emp_hours = round(emp_hours, 2)
-        total_hours += emp_hours
-        if emp_open:
-            clocked_in_count += 1
-        day_employees.append({
-            "employee": emp,
-            "entries": entries,
-            "manual_entries": manual,
-            "segments": segments,
-            "total_hours": emp_hours,
-            "is_clocked_in": emp_open,
-        })
+    day_employees = [
+        _employee_day(db, emp_row, day_date, now_dt) for emp_row in emp_rows
+    ]
     summary = {
-        "total_hours": round(total_hours, 2),
-        "clocked_in_count": clocked_in_count,
+        "total_hours": round(sum(d["total_hours"] for d in day_employees), 2),
+        "clocked_in_count": len([d for d in day_employees if d["is_clocked_in"]]),
         "employee_count": len([d for d in day_employees if d["entries"]]),
     }
     return day_employees, summary
@@ -5352,18 +5362,36 @@ def timeclock_day_print():
     """Printable one-day punch sheet (letterhead, clean table).
 
     Same privacy as the screen day view: without view_all_timeclocks the
-    sheet contains only the requester's own punches.
+    sheet contains only the requester's own punches. An employee_id param
+    (from the single-employee day page, v2.4.3) prints just that
+    employee's day — view_all holders only; anyone else asking for
+    another employee's sheet gets 403.
     """
     db = get_db()
     can_view_all = _can_view_all_timeclocks()
     my_employee_id = _my_employee_id(db)
-    day_str = request.args.get("date", "").strip()
-    try:
-        day_date = date.fromisoformat(day_str) if day_str else date.today()
-    except ValueError:
-        day_date = date.today()
+    day_date = _parse_day_arg()
+    only_employee_id = None
+    emp_param = request.args.get("employee_id", "").strip()
+    if emp_param:
+        try:
+            only_employee_id = int(emp_param)
+        except ValueError:
+            abort(400)
+        # Privacy (server-side): non-view_all users may only ever print
+        # their OWN day — a hand-edited URL must not leak anyone else's.
+        if not can_view_all and only_employee_id != my_employee_id:
+            abort(403)
     day_employees, day_summary = _build_day_view(
         db, day_date, can_view_all, my_employee_id)
+    if only_employee_id is not None:
+        day_employees = [d for d in day_employees
+                         if d["employee"]["id"] == only_employee_id]
+        day_summary = {
+            "total_hours": round(sum(d["total_hours"] for d in day_employees), 2),
+            "clocked_in_count": len([d for d in day_employees if d["is_clocked_in"]]),
+            "employee_count": len([d for d in day_employees if d["entries"]]),
+        }
     return render_template(
         "timeclock_day_print.html",
         day_date=day_date,
@@ -5372,6 +5400,49 @@ def timeclock_day_print():
         can_view_all=can_view_all,
         printed_by=session.get("username", ""),
         printed_at=datetime.now(timezone.utc).strftime("%b %d, %Y %I:%M %p UTC"),
+    )
+
+
+@app.route("/timeclock/day/<int:employee_id>")
+@permission_required("use_timeclock")
+def timeclock_employee_day(employee_id):
+    """Single-employee day view (v2.4.3).
+
+    Admins/attorneys (view_all_timeclocks) can drill into ANY employee's
+    day from the aggregate day view — and pick a different employee from
+    the selector on this page. Everyone else may only open their OWN day;
+    a hand-edited URL to another employee's id is a hard 403 server-side,
+    never just a hidden link.
+    """
+    db = get_db()
+    can_view_all = _can_view_all_timeclocks()
+    my_employee_id = _my_employee_id(db)
+    emp_row = db.execute(
+        "SELECT * FROM employees WHERE id = ? AND is_active = 1",
+        (employee_id,)).fetchone()
+    if not emp_row:
+        abort(404)
+    if not can_view_all and employee_id != my_employee_id:
+        abort(403)
+    day_date = _parse_day_arg()
+    now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
+    emp_day = _employee_day(db, emp_row, day_date, now_dt)
+    all_employees = []
+    if can_view_all:
+        all_employees = [_employee_dict(r) for r in db.execute(
+            "SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name"
+        ).fetchall()]
+    return render_template(
+        "timeclock_employee_day.html",
+        emp_day=emp_day,
+        employee=emp_day["employee"],
+        day_date=day_date,
+        day_is_today=day_date == date.today(),
+        today=date.today().isoformat(),
+        day_prev=(day_date - timedelta(days=1)).isoformat(),
+        day_next=(day_date + timedelta(days=1)).isoformat(),
+        can_view_all=can_view_all,
+        all_employees=all_employees,
     )
 
 
@@ -6678,10 +6749,43 @@ def not_found(e):
                            message="Page not found."), 404
 
 
+@app.errorhandler(403)
+def forbidden(e):
+    return render_template("error.html", code=403,
+                           message="Access denied."), 403
+
+
 @app.errorhandler(400)
 def bad_request(e):
     return render_template("error.html", code=400,
                            message=str(e.description or "Bad request.")), 400
+
+
+@app.errorhandler(500)
+def server_error(e):
+    """Designed 500 page (v2.4.3).
+
+    Before this handler existed, ANY unhandled exception fell through to
+    Werkzeug's raw default page — that bare "Internal Server Error" screen
+    is what an office user should never have to stare at. Render the same
+    Card Flow error page as 404/400, log the real traceback to the server
+    log for diagnosis, and fall back to a plain message if the template
+    itself cannot render (e.g. the DB is unreachable mid-request).
+    """
+    app.logger.exception("Unhandled 500 error: %s", e)
+    try:
+        return render_template(
+            "error.html", code=500,
+            message="Something went wrong on the server. Your data is safe — "
+                    "please try again, and if it keeps happening, note the "
+                    "time and let the admin know."
+        ), 500
+    except Exception:
+        app.logger.exception("Error page itself failed to render")
+        return (
+            "<h1>500 — Internal Server Error</h1>"
+            "<p>Something went wrong. Your data is safe; please try again.</p>"
+        ), 500
 
 
 if __name__ == "__main__":

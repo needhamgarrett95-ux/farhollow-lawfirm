@@ -48,58 +48,12 @@
 <div class="day-grid">
   {% for d in day_employees %}
   {% if d.entries %}
-  <div class="card day-card">
-    <div class="day-card-head">
-      <span class="tc-av">{{ d.employee.full_name[:2].upper() }}</span>
-      <div>
-        <div class="tc-name">{{ d.employee.full_name }}</div>
-        <div class="tc-sub">
-          {% if d.is_clocked_in %}
-          <span class="pulse-dot"></span> Currently clocked in
-          {% else %}
-          {{ d.entries|length }} punch{{ 'es' if d.entries|length != 1 }}
-          {% endif %}
-        </div>
-      </div>
-      <div class="day-total">{{ d.total_hours }}h</div>
-    </div>
-    {# Timeline bar: 6 AM – 8 PM #}
-    <div class="day-timeline" role="img"
-         aria-label="Shift timeline for {{ d.employee.full_name }} on {{ day_date.isoformat() }}">
-      <div class="day-ticks">
-        <span>6a</span><span>9a</span><span>12p</span><span>3p</span><span>6p</span><span>8p</span>
-      </div>
-      <div class="day-track">
-        {% for s in d.segments %}
-        <div class="day-seg {% if s.open %}open{% endif %}"
-             style="left:{{ s.left }}%;width:{{ s.width }}%" title="{{ s.title }}"></div>
-        {% endfor %}
-      </div>
-    </div>
-    {# Punch list #}
-    <div class="day-punches">
-      {% for e in d.entries %}
-      <div class="day-punch">
-        <span class="dp-times">
-          {% if e.manual_hours is not none %}
-          <span class="muted">Manual entry</span>
-          {% else %}
-          {{ e.clock_in[:16].replace('T', ' ')[11:] if e.clock_in else '—' }}
-          →
-          {% if e.is_open %}
-          <span class="dp-open">in now ({{ e.elapsed_hours }}h)</span>
-          {% elif e.clock_out %}
-          {{ e.clock_out[:16].replace('T', ' ')[11:] }}
-          {% endif %}
-          {% endif %}
-        </span>
-        <span class="tc-hours">{{ e.elapsed_hours if e.is_open else e.hours }}h</span>
-        {% if e.notes %}<div class="tc-notes">{{ e.notes }}</div>{% endif %}
-        {{ punch_notes(e) }}
-      </div>
-      {% endfor %}
-    </div>
-  </div>
+  {% if can_view_all %}
+    {% set emp_url = url_for('timeclock_employee_day', employee_id=d.employee.id, date=day_date.isoformat()) %}
+  {% else %}
+    {% set emp_url = None %}
+  {% endif %}
+  {% include "_timeclock_day_card.html" %}
   {% endif %}
   {% endfor %}
 </div>

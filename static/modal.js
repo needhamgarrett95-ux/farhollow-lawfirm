@@ -185,18 +185,58 @@
     return open(Object.assign({ kind: 'prompt' }, opts || {}));
   };
 
+  /* Track WHICH submit button started a form submission. Some forms put
+     routing data on the button itself (e.g. payroll's
+     <button name="action" value="generate">) and the server only acts
+     when that name/value arrives. programmatic form.submit() drops the
+     submitter entirely — that was the v2.4.2 "Generate paychecks confirms
+     then nothing happens" bug — so we remember the button and re-submit
+     WITH it via requestSubmit(). Captured on click, in the capture
+     phase, before the form's onsubmit runs. */
+  var lastSubmitter = {};
+  document.addEventListener('click', function (e) {
+    var btn = null;
+    var t = e.target;
+    if (t && t.closest) {
+      btn = t.closest('button, input[type="submit"]');
+      // A <button> without a type defaults to "submit" inside a form.
+      if (btn && btn.tagName === 'BUTTON' && (btn.type || 'submit') !== 'submit') btn = null;
+    } else if (t && (t.type === 'submit')) {
+      btn = t;
+    }
+    if (btn && btn.form) { lastSubmitter.form = btn.form; lastSubmitter.btn = btn; }
+  }, true);
+
   /* Drop-in helper for form onsubmit handlers:
      onsubmit="return modalConfirmSubmit(this, 'Delete this?')"
      options: {title, danger, confirmText} */
   window.modalConfirmSubmit = function (form, message, opts) {
+    // Second pass: requestSubmit() below re-fires onsubmit — don't reopen
+    // the modal, just let the submission proceed (with submitter data).
+    if (form._modalConfirmed) {
+      form._modalConfirmed = false;
+      return true;
+    }
     opts = opts || {};
+    var submitter = (lastSubmitter.form === form) ? lastSubmitter.btn : null;
     showConfirm({
       title: opts.title || 'Please confirm',
       message: message,
       confirmText: opts.confirmText || 'Delete',
       danger: opts.danger !== false
     }).then(function (ok) {
-      if (ok) form.submit(); // bypasses onsubmit — no loop
+      if (!ok) return;
+      form._modalConfirmed = true;
+      if (form.requestSubmit) {
+        try {
+          // Submitter's name/value IS included, exactly like a real click.
+          form.requestSubmit(submitter || undefined);
+          return;
+        } catch (err) { /* fall through to legacy submit */ }
+      }
+      // Last resort (very old browsers): plain submit. Note the
+      // submitter's name/value is NOT sent on this path.
+      HTMLFormElement.prototype.submit.call(form);
     });
     return false;
   };
