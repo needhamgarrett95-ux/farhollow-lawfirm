@@ -1601,3 +1601,97 @@ dropdown — it's a grid of **big tappable cards** (Photo ID, Pay
 stubs, Tax return, and so on), each with its own radio circle, made
 to be hit one-handed on a phone. It files the document exactly the
 same way the dropdown did.
+
+## 50. The Document Library, the profile vault, and wizards (v2.8.0)
+
+Until now, clients mostly *sent* the office things (uploads). This
+update flips the fillable paperwork around: the common Washington
+family-court documents live in a **library**, and the client completes
+them in the portal as step-by-step **wizards**, with most of the typing
+already done for them.
+
+**The catalog.** The full list of forms the library knows about —
+with the official form numbers (FL Divorce 201, FL All Family 131,
+and so on) — is verified against the Washington Courts forms list and
+kept in `docs/FORM_CATALOG.md` (the program's own copy is
+`form_library.py`). One correction from early drafts is worth
+knowing: the Certificate of Dissolution is **not** "FL Divorce 211"
+(211 is the Response to Petition) — it is Department of Health form
+**DOH 422-027**. A few rare entries could not be verified against the
+official list; the library screen labels those "number unverified"
+instead of pretending. Forms are grouped **Common / Uncommon /
+Rare**. This release implements the Common tier; the others show in
+the staff library as "in a later release" and clients never see them.
+
+**The profile vault.** Everything the office knows about a client —
+their record, their children, their case finances, plus facts that
+never had a home before (marriage date and place, separation date,
+spouse's employer, the address where the other party can be served) —
+is treated as one **vault** the wizards read and write. Sensitive
+facts (SSN, dates of birth, protected accounts) are stored encrypted,
+exactly like the client record already was. When a wizard needs a
+fact the vault already has, the client doesn't retype it: they get a
+**confirm card** — "We have X — still right?" — with a Change option.
+
+**The rule that matters most: nothing is silently overwritten.** If a
+client changes a fact the office already had confirmed, the new value
+does **not** replace the old one when they submit. It waits as a
+*pending update*. On the review screen (§48's portal review) you'll
+see a **"Changes to saved information"** table — was / changed-to —
+and your **Import** click is what confirms the changes (Dismiss
+rejects them). First-time facts (nothing on file to contradict) flow
+in on import the way form answers always have.
+
+**How a wizard runs, start to finish.** The client opens **Documents**
+(or Forms → Document library) and picks from "Forms to complete."
+Each document shows its official form number and about how many
+minutes it takes. One section per screen, a progress bar, big
+tappable choices, plain-language prompts ("A paragraph or two is
+plenty"), and **Save & finish later** on every step — drafts live on
+the server, so they can start on a phone and finish on a computer.
+The last screen is a friendly review of every answer; the
+**Declaration** also asks the client to type their name and check an
+attestation box ("I declare under penalty of perjury…") — that's a
+*draft* attestation; the real signature happens the normal way before
+filing. Submitting freezes a copy of exactly what they sent, and it
+lands in **Portal Review** like any other form.
+
+**Turning an approved wizard into a document.** Open the submission
+in Portal Review, check the side-by-side, and **Import**. Then the
+button under it generates the document into the case's Documents:
+
+- **Declaration** → a formatted declaration (court caption, numbered
+  paragraphs, perjury block, signature lines) stamped **DRAFT**.
+- **Petition for Divorce** → a DRAFT petition plus a client data
+  sheet with everything else they told you.
+- **Parenting Plan** → a DRAFT plan.
+- **Child Support Worksheet data** → the support worksheet (still the
+  simplified estimate — verify against RCW 26.19 as always).
+- **Financial Declaration / Confidential Information / Certificate
+  of Dissolution / Temporary Orders** → a client **data sheet**:
+  their confirmed answers, laid out so you can transfer verified
+  figures onto the official form.
+
+Everything generated from a wizard is a **draft for attorney
+completion**. Nothing files itself with the court, ever.
+
+**Switching documents on and off.** Staff sidebar: **Portal →
+Library**. Each implemented document has a Switch on/off button —
+switch one off and it disappears from every client's portal (a
+half-finished draft of it can't be opened either). The same screen
+shows which clients have **drafts in progress** and how many
+submissions are waiting in Portal Review. Turning a document off
+doesn't delete anything; switch it back on and drafts resume.
+
+**Protection orders are deliberately not a wizard.** PO 001 is in the
+catalog (Rare tier) so the list is complete, but a client who needs
+protection needs the office, urgently — not a form queue.
+
+**If something looks wrong.** A wizard 404s for a client? Check the
+Library screen — it's probably switched off, or it's an Uncommon/Rare
+entry (catalog-only this release). A fact showing the "wrong" value
+on a confirm card? That's the confirmed vault value — the fix is the
+client record (or confirming their pending update on import), not
+the wizard. A client swears they submitted and staff can't see it?
+Drafts are invisible to staff by design; only submitted wizards
+appear in Portal Review.

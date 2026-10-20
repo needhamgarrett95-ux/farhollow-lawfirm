@@ -17,17 +17,35 @@
     {% for step in fdef.steps %}
       <tr class="portal-compare-step"><td colspan="3">{{ step.title }}</td></tr>
       {% for f in step.fields %}
-      {% set sv = submitted.get(f.name, '') %}
+      {% set sv = display(f, submitted.get(f.name)) %}
       {% set cv = current.get(f.name, '') %}
       <tr{% if sv and sv != cv %} class="row-diff"{% endif %}>
         <td><strong>{{ f.label }}</strong>{% if not f.target %}<br><span class="muted">reference only</span>{% endif %}</td>
-        <td>{{ sv or '—' }}</td>
-        <td>{{ cv or '—' }}</td>
+        <td>{% if sv %}{% for line in sv.split('\n') %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}—{% endif %}</td>
+        <td>{% if cv %}{% for line in cv.split('\n') %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     {% endfor %}
     </tbody>
   </table>
+
+  {% if pending_updates %}
+  <h2>Changes to saved information</h2>
+  <p class="muted">These are facts the office already had on file that the client <strong>changed</strong> while completing this document. The record still shows the old values — <strong>Import</strong> confirms the new ones; <strong>Dismiss</strong> rejects them. Nothing was overwritten when the client submitted.</p>
+  <table class="table portal-compare">
+    <thead><tr><th>Saved fact</th><th>Was</th><th>Client changed to</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for p in pending_updates %}
+      <tr>
+        <td><strong>{{ p.label }}</strong></td>
+        <td>{{ p.old or '—' }}</td>
+        <td>{{ p.new or '—' }}</td>
+        <td>{{ {'pending': 'waiting for your decision', 'confirmed': 'confirmed on import', 'rejected': 'rejected on dismiss'}[p.status] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 
   {% if sub.status == 'submitted' %}
   <div class="actions-row">
@@ -48,6 +66,13 @@
     <button type="submit" class="btn btn-primary">Generate Child Support Worksheet from these figures</button>
   </form>
   <p class="muted">Creates the worksheet PDF in the case's documents, using the imported net incomes, daycare, and health insurance. Verify against the official RCW 26.19 schedule before filing — the template is an estimate.</p>
+  {% endif %}
+  {% if is_wizard %}
+  <form method="post" action="{{ url_for('portal_form_generate_document', sub_id=sub.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <button type="submit" class="btn btn-primary">{{ {'declaration': 'Generate Declaration (DRAFT)', 'petition': 'Generate DRAFT petition + client data sheet', 'parenting_plan': 'Generate DRAFT parenting plan', 'support': 'Generate Child Support Worksheet (DRAFT)', 'data_sheet': 'Generate client data sheet (DRAFT)'}[fdef.generate.kind] }}</button>
+  </form>
+  <p class="muted">Creates the document in the case's documents from the approved information above. Everything generated from a client wizard is a <strong>draft for attorney completion</strong> — review it before anything is filed.</p>
   {% endif %}
   {% elif sub.status == 'dismissed' %}
   <p class="muted">This submission was dismissed without importing. The submitted values stay on record above.</p>

@@ -81,6 +81,11 @@ def _styles():
                                textColor=HexColor("#92400e"), leading=13,
                                backColor=HexColor("#fef3c7"),
                                borderPadding=8, spaceAfter=10),
+        "draft": ParagraphStyle("draft", fontName="Helvetica-Bold", fontSize=11,
+                                textColor=HexColor("#991b1b"), leading=14,
+                                alignment=TA_CENTER,
+                                backColor=HexColor("#fee2e2"),
+                                borderPadding=8, spaceAfter=12),
     }
 
 
@@ -148,6 +153,16 @@ def _ai_disclosure_footnote(story, s):
         "court rules.",
         s["muted"],
     ))
+
+
+DRAFT_BANNER_TEXT = ("DRAFT — NOT FOR FILING — ATTORNEY REVIEW REQUIRED")
+
+
+def _draft_banner(story, s):
+    """Mark a client-generated document as a draft (v2.8.0). Rendered
+    only when the caller sets data['draft'] — attorney-built template
+    documents are unaffected."""
+    story.append(Paragraph(DRAFT_BANNER_TEXT, s["draft"]))
 
 
 def _esc(text):
@@ -269,6 +284,8 @@ def build_petition_dissolution(data, logo_path=None):
     _court_caption(story, s, data.get("county"), data.get("case_number"),
                    data.get("petitioner"), data.get("respondent"),
                    "PETITION FOR DISSOLUTION OF MARRIAGE")
+    if data.get("draft"):
+        _draft_banner(story, s)
 
     paras = []
     paras.append(
@@ -311,6 +328,8 @@ def build_parenting_plan(data, logo_path=None):
     _court_caption(story, s, data.get("county"), data.get("case_number"),
                    data.get("parent_a"), data.get("parent_b"),
                    "PARENTING PLAN")
+    if data.get("draft"):
+        _draft_banner(story, s)
     story.append(Paragraph("I. Children", s["h1"]))
     kids = _children_lines(data.get("children"))
     if kids:
@@ -351,6 +370,8 @@ def build_support_worksheet(data, logo_path=None):
     story.append(Paragraph("<b>CHILD SUPPORT WORKSHEET</b> (Estimate)", s["title"]))
     story.append(Paragraph(
         "Simplified worksheet — see disclaimer below.", s["subtitle"]))
+    if data.get("draft"):
+        _draft_banner(story, s)
 
     calc = calc_support(data.get("parent_a_income"), data.get("parent_b_income"),
                         len(data.get("children") or []),
@@ -479,12 +500,146 @@ def build_cover_letter(data, logo_path=None):
     return buf.getvalue()
 
 
+# ---------------------------------------------------------------------------
+# Wizard-generated documents (v2.8.0 — Document Library)
+# ---------------------------------------------------------------------------
+# These builders render CLIENT-WIZARD output. Everything they produce is
+# a draft: the declaration carries the DRAFT banner until the attorney
+# finalizes it, and the data sheet exists so staff can transfer verified
+# figures onto the official court form.
+PERJURY_BLOCK = (
+    "I declare under penalty of perjury under the laws of the state of "
+    "Washington that the foregoing is true and correct."
+)
+
+
+def build_wizard_declaration(data, logo_path=None):
+    """The flagship declaration: caption, numbered paragraphs assembled
+    from the client's wizard sections, perjury attestation block, and
+    signature/date lines. Always DRAFT-bannered (client draft
+    attestation in the portal; wet/verified signature before filing).
+
+    data keys: county, case_number, petitioner, respondent, declarant,
+    paragraphs (list of str), attest_name, submitted_on, city.
+    """
+    s = _styles()
+    buf, doc = _doc("Declaration")
+    story = []
+    _court_caption(story, s, data.get("county"), data.get("case_number"),
+                   data.get("petitioner"), data.get("respondent"),
+                   "DECLARATION")
+    _draft_banner(story, s)
+    declarant = data.get("declarant") or ""
+    story.append(Paragraph(
+        f"I, <b>{_esc(declarant)}</b>, declare as follows:", s["body_l"]))
+    story.append(Spacer(1, 6))
+    _numbered_paras(story, s, [str(p) for p in (data.get("paragraphs") or [])
+                               if str(p).strip()])
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(PERJURY_BLOCK, s["body"]))
+    story.append(Spacer(1, 8))
+    city = data.get("city") or "Port Angeles"
+    story.append(Paragraph(
+        f"Signed at {_esc(city)}, Washington, on this ______ day of "
+        f"______________, 20___.", s["body_l"]))
+    story.append(Paragraph(f"<b>{_esc(declarant)}</b><br/>Declarant",
+                           s["sig"]))
+    story.append(Spacer(1, 16))
+    attest_bits = []
+    if data.get("attest_name"):
+        attest_bits.append(
+            f"Name typed in the client portal as the draft attestation: "
+            f"{_esc(data['attest_name'])}")
+    if data.get("submitted_on"):
+        attest_bits.append(f"Submitted through the client portal on "
+                           f"{_esc(data['submitted_on'])}")
+    attest_bits.append(
+        "This is a DRAFT. The declarant's verified signature is required "
+        "before this declaration may be filed with the court.")
+    story.append(Paragraph(" — ".join(attest_bits) + ".", s["muted"]))
+    doc.build(story)
+    return buf.getvalue()
+
+
+def build_wizard_data_sheet(data, logo_path=None):
+    """Generic client-data sheet: letterhead, DRAFT banner, and
+    label/value sections assembled from a wizard snapshot. Staff use it
+    to transfer verified figures onto the official form.
+
+    data keys: title, subtitle (official form reference), client_name,
+    case_number, submitted_on, sections = [{title, rows=[(label, value)]}].
+    """
+    s = _styles()
+    buf, doc = _doc(str(data.get("title") or "Client Data Sheet"))
+    story = []
+    _letterhead(story, logo_path, s)
+    story.append(Paragraph(
+        f"<b>{_esc(str(data.get('title') or 'CLIENT DATA SHEET').upper())}</b>",
+        s["title"]))
+    if data.get("subtitle"):
+        story.append(Paragraph(_esc(data["subtitle"]), s["subtitle"]))
+    _draft_banner(story, s)
+    meta_rows = []
+    if data.get("client_name"):
+        meta_rows.append(("Client", data["client_name"]))
+    if data.get("case_number"):
+        meta_rows.append(("Case No.", str(data["case_number"])))
+    if data.get("submitted_on"):
+        meta_rows.append(("Provided through the client portal",
+                          str(data["submitted_on"])))
+    if meta_rows:
+        t = Table(
+            [[Paragraph(f"<b>{_esc(k)}</b>", s["cell"]),
+              Paragraph(_esc(v), s["cell"])] for k, v in meta_rows],
+            colWidths=[2.1 * inch, 4.4 * inch])
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, BORDER),
+            ("BACKGROUND", (0, 0), (0, -1), LIGHT_BG),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(t)
+    for section in data.get("sections") or []:
+        rows = [(k, v) for k, v in (section.get("rows") or [])
+                if str(v).strip()]
+        if not rows:
+            continue
+        story.append(Paragraph(_esc(section.get("title") or ""),
+                               s["h1"]))
+        t = Table(
+            [[Paragraph(f"<b>{_esc(k)}</b>", s["cell"]),
+              Paragraph(_esc(str(v)).replace("\n", "<br/>"), s["cell"])]
+             for k, v in rows],
+            colWidths=[2.1 * inch, 4.4 * inch])
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(t)
+    story.append(Spacer(1, 14))
+    story.append(Paragraph(
+        "Prepared from information the client provided through the "
+        "client portal. Attorney review required — transfer verified "
+        "figures to the official form before filing.", s["warn"]))
+    doc.build(story)
+    return buf.getvalue()
+
+
 BUILDERS = {
     "petition_dissolution": build_petition_dissolution,
     "parenting_plan": build_parenting_plan,
     "support_worksheet": build_support_worksheet,
     "declaration": build_declaration,
     "cover_letter": build_cover_letter,
+    "portal_declaration": build_wizard_declaration,
+    "wizard_data_sheet": build_wizard_data_sheet,
 }
 
 

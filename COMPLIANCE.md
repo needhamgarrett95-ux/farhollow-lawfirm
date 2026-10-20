@@ -242,3 +242,55 @@ counsel's review:
   software additionally warns staff on the client record. Whether to
   invite an opposing party at all remains the attorney's judgment
   under RPC 1.7.
+
+## 5. Addendum (v2.8.0) — Document Library, profile vault, and client wizards
+
+The Document Library lets clients complete guided wizards for common
+Washington family-law documents (declaration, financial declaration,
+confidential information form, vital-statistics certificate, and
+client-data capture for the petition, parenting plan, support
+worksheets, and temporary orders). Points for counsel's review:
+
+- **Drafts are drafts — attorney review before filing.** Everything a
+  client completes is a draft. Wizard submissions enter the same
+  staff review queue as other portal forms; nothing is imported into
+  the client record, and no document is generated, until a staff
+  member approves it, and every generated document is banner-marked
+  DRAFT for attorney completion. No client action in the portal files
+  anything with any court, and the software makes no representation
+  that generated drafts conform to the official forms — figures and
+  text must be verified against the official Washington Courts forms
+  (the catalog's verification sources and its explicitly *unverified*
+  entries are documented in `docs/FORM_CATALOG.md`).
+- **Perjury attestation language.** The Declaration wizard collects a
+  draft attestation in the portal (an explicit checkbox plus the
+  client's typed name) under the statement: "I declare under penalty
+  of perjury under the laws of the state of Washington that the
+  foregoing is true and correct." The generated declaration carries
+  that attestation block and signature/date lines and is labeled a
+  draft; a verified/wet signature in the manner the court requires
+  remains necessary before filing, and counsel should confirm the
+  attestation procedure (cf. GR 13 / RCW 9A.72.085) for each filing.
+- **No silent overwrite of confirmed client facts.** Facts the firm
+  already holds (the "profile vault": client record, children, case
+  financials, and a key/value fact store) are shown to clients as
+  confirmations. A client-changed value is held as a pending update
+  and takes effect only when staff import the submission; dismissing
+  the submission rejects the change. The prior value remains visible
+  to staff side-by-side throughout.
+- **Confidentiality (RPC 1.6).** Vault access is scoped server-side
+  to the authenticated client's own record, under the same tested
+  boundary as the rest of the portal (one client cannot read or
+  affect another's facts, drafts, or submissions by any URL).
+  Sensitive facts (SSN, dates of birth, protected account details)
+  are encrypted at rest with the firm's existing field encryption,
+  and SSN/ID values are masked (last four only) wherever the portal
+  displays them for confirmation. The Confidential Information Form
+  data (FL All Family 001) is GR 22 material: it is collected for the
+  sealed filing, and clients are instructed in the wizard to provide
+  account institutions with last-four digits only.
+- **Safety.** The Declaration wizard's optional safety section and
+  the catalog's protection-order entry are worded to route urgent
+  safety needs to the office (and, in the portal generally, to 911)
+  rather than into a document queue; protection filings remain a
+  staff-handled, same-day matter.

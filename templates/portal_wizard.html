@@ -1,0 +1,211 @@
+{% extends "portal_base.html" %}
+{% block title %}{{ wdef.title }} — Client Portal{% endblock %}
+{% block content %}
+<p class="p-muted"><a href="{{ url_for('portal_library') }}">← Document library</a></p>
+<h1 class="p-h1">{{ wdef.title }}</h1>
+<p class="p-muted">{{ entry.form_number }} · about {{ wdef.minutes }} minutes · Step {{ step_idx + 1 }} of {{ total_steps + 1 }}{% if step %} — <strong>{{ step.title }}</strong>{% else %} — <strong>Review &amp; send</strong>{% endif %}</p>
+<div class="p-progressbar"><span style="width: {{ ((step_idx + 1) * 100 // (total_steps + 1)) }}%"></span></div>
+{% if step_idx == 0 and wdef.explainer %}
+<p class="p-muted">{{ wdef.explainer }}</p>
+{% endif %}
+
+<div class="p-card">
+  <form method="post" class="p-form" id="wizardForm">
+    <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+    <input type="hidden" name="step" value="{{ step_idx }}">
+    {% if step %}
+    {% if wdef.case_required and step_idx == 0 %}
+    <label for="case_id">Which case is this for?</label>
+    {% if draft and draft.case_id %}
+    <select id="case_id" name="case_id">
+      {% for c in cases %}<option value="{{ c.id }}" {% if draft.case_id == c.id %}selected{% endif %}>{{ c.case_number }} — {{ c.title or c.case_type }}</option>{% endfor %}
+    </select>
+    {% elif cases | length == 1 %}
+    <p><strong>{{ cases[0].case_number }} — {{ cases[0].title or cases[0].case_type }}</strong></p>
+    <input type="hidden" name="case_id" value="{{ cases[0].id }}">
+    {% else %}
+    <select id="case_id" name="case_id" required>
+      <option value="">Choose a case…</option>
+      {% for c in cases %}<option value="{{ c.id }}">{{ c.case_number }} — {{ c.title or c.case_type }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    {% endif %}
+    {% if step.explainer %}<p class="p-wizard-explainer">{{ step.explainer }}</p>{% endif %}
+    {% for f in step.fields %}
+    {% set confirmed = vault.get(f.vault) if f.vault and f.vault != 'children' else '' %}
+    {% set is_confirm = confirmed and f.type in confirm_types %}
+    {% if is_confirm %}
+    {# ---- Vault CONFIRM card: never a blank input for a known fact ---- #}
+    <div class="p-confirm" data-confirm="{{ f.name }}">
+      <span class="p-confirm-label">{{ f.label }}{% if f.required %} <span class="p-req">*</span>{% endif %}</span>
+      <p class="p-confirm-value">We have: <strong>{{ vault_display.get(f.vault) }}</strong></p>
+      <div class="p-confirm-choices" role="radiogroup" aria-label="Confirm {{ f.label }}">
+        <label class="p-confirm-choice">
+          <input type="radio" name="cf_{{ f.name }}" value="keep" {% if data.get(f.name, '') == confirmed %}checked{% endif %}>
+          Still right
+        </label>
+        <label class="p-confirm-choice">
+          <input type="radio" name="cf_{{ f.name }}" value="change" {% if data.get(f.name, '') != confirmed %}checked{% endif %}>
+          It changed
+        </label>
+      </div>
+      <div class="p-confirm-edit">
+        {# Masked facts (SSN, license #): the saved value is never
+           shipped in the page — the edit box starts blank. #}
+        {% set edit_val = '' if f.vault in vault_masked else data.get(f.name, '') %}
+        {% if f.type == 'date' %}
+        <input type="date" name="{{ f.name }}" value="{{ edit_val }}">
+        {% elif f.type in ('money', 'currency') %}
+        <input type="text" inputmode="decimal" name="{{ f.name }}" value="{{ edit_val }}" placeholder="e.g. 3,200">
+        {% elif f.type == 'email' %}
+        <input type="email" name="{{ f.name }}" value="{{ edit_val }}">
+        {% elif f.type == 'tel' %}
+        <input type="tel" name="{{ f.name }}" value="{{ edit_val }}">
+        {% else %}
+        <input type="text" name="{{ f.name }}" value="{{ edit_val }}"{% if f.vault in vault_masked %} placeholder="Type the corrected value"{% endif %}>
+        {% endif %}
+      </div>
+      <p class="p-muted p-small">If it changed, the office confirms the new value with you before it replaces what's on your file — nothing is overwritten automatically.</p>
+      {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    </div>
+    {% elif f.type == 'repeater' %}
+    <label>{{ f.label }}</label>
+    {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    <div class="p-repeater" data-repeater="{{ f.name }}">
+      {% set items = data.get(f.name) or [] %}
+      {% for item in items %}
+      <div class="p-repeater-row">
+        <input type="text" name="{{ f.name }}_name" value="{{ item.name }}" placeholder="Child's full name" aria-label="Child's full name">
+        <input type="date" name="{{ f.name }}_dob" value="{{ item.date_of_birth }}" aria-label="Date of birth">
+      </div>
+      {% endfor %}
+      <div class="p-repeater-row">
+        <input type="text" name="{{ f.name }}_name" value="" placeholder="Child's full name" aria-label="Child's full name">
+        <input type="date" name="{{ f.name }}_dob" value="" aria-label="Date of birth">
+      </div>
+    </div>
+    <button type="button" class="btn btn-small p-repeater-add">+ Add another child</button>
+    {% elif f.type == 'checkboxes' %}
+    <label>{{ f.label }}{% if f.required %} <span class="p-req">*</span>{% endif %}</label>
+    <div class="p-type-grid p-type-grid-1" role="group" aria-label="{{ f.label }}">
+      {% set chosen = (data.get(f.name, '') or '').split(', ') %}
+      {% for opt in f.options %}
+      <label class="p-type-card">
+        <input type="checkbox" name="{{ f.name }}" value="{{ opt }}" {% if opt in chosen %}checked{% endif %}>
+        <span class="p-type-label">{{ opt }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    {% elif f.type == 'radio_cards' %}
+    <label>{{ f.label }}{% if f.required %} <span class="p-req">*</span>{% endif %}</label>
+    <div class="p-type-grid p-type-grid-1" role="radiogroup" aria-label="{{ f.label }}">
+      {% for opt in f.options %}
+      <label class="p-type-card">
+        <input type="radio" name="{{ f.name }}" value="{{ opt }}" {% if data.get(f.name, '') == opt %}checked{% endif %}>
+        <span class="p-type-label">{{ opt }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    {% elif f.type == 'select' %}
+    <label for="f_{{ f.name }}">{{ f.label }}{% if f.required %} <span class="p-req">*</span>{% endif %}</label>
+    <select id="f_{{ f.name }}" name="{{ f.name }}">
+      <option value="">Choose…</option>
+      {% for opt in f.options %}<option value="{{ opt }}" {% if data.get(f.name, '') == opt %}selected{% endif %}>{{ opt }}</option>{% endfor %}
+    </select>
+    {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    {% elif f.type == 'textarea' %}
+    <label for="f_{{ f.name }}">{{ f.label }}{% if f.required %} <span class="p-req">*</span>{% endif %}</label>
+    {% if f.prompt %}<p class="p-wizard-prompt">{{ f.prompt }}</p>{% endif %}
+    <textarea id="f_{{ f.name }}" name="{{ f.name }}" rows="{{ f.rows or 4 }}">{{ data.get(f.name, '') }}</textarea>
+    {% if f.guidance %}<p class="p-muted p-small">{{ f.guidance }}</p>{% endif %}
+    {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    {% else %}
+    <label for="f_{{ f.name }}">{{ f.label }}{% if f.required %} <span class="p-req">*</span>{% endif %}</label>
+    {% if f.type == 'date' %}
+    <input type="date" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% elif f.type in ('money', 'currency') %}
+    <input type="text" inputmode="decimal" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}" placeholder="e.g. 3,200">
+    {% elif f.type == 'email' %}
+    <input type="email" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% elif f.type == 'tel' %}
+    <input type="tel" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% else %}
+    <input type="text" id="f_{{ f.name }}" name="{{ f.name }}" value="{{ data.get(f.name, '') }}">
+    {% endif %}
+    {% if f.help %}<p class="p-muted p-small">{{ f.help }}</p>{% endif %}
+    {% endif %}
+    {% endfor %}
+    {% else %}
+    {# ---- Review step: friendly summary + attestation + submit ---- #}
+    <h2>Review your answers</h2>
+    <p class="p-muted">Check everything below. Use Back to fix anything — nothing goes to the office until you press the send button.</p>
+    {% for s in wdef.steps %}
+    <div class="p-review-section">
+      <h3>{{ s.title }}</h3>
+      {% for f in s.fields %}
+      {% set v = display(f, data.get(f.name)) %}
+      <div class="p-review-row">
+        <span class="p-review-label">{{ f.label }}</span>
+        <span class="p-review-value">{% if v %}{% for line in v.split('\n') %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}<span class="p-muted">—</span>{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% if wdef.attest %}
+    <div class="p-attest">
+      <h3>Your attestation</h3>
+      <p>“I declare under penalty of perjury under the laws of the state of Washington that the foregoing is true and correct.”</p>
+      <p class="p-muted p-small">Typing your name and checking the box is your draft attestation in the portal. The document stays a draft — the office reviews it with you, and a verified signature is added before anything is filed with the court.</p>
+      <label class="p-attest-check">
+        <input type="checkbox" name="attest_agree" value="yes" {% if data.get('attest_agree') == 'yes' %}checked{% endif %}>
+        I understand and agree to the statement above.
+      </label>
+      <label for="attest_name">Type your full legal name</label>
+      <input type="text" id="attest_name" name="attest_name" value="{{ data.get('attest_name', '') }}" autocomplete="name">
+    </div>
+    {% endif %}
+    {% endif %}
+    <div class="p-form-actions">
+      {% if step_idx > 0 %}
+      <button type="submit" name="action" value="back" class="btn" formnovalidate>← Back</button>
+      {% endif %}
+      <button type="submit" name="action" value="save_exit" class="btn" formnovalidate>Save &amp; finish later</button>
+      {% if step %}
+      <button type="submit" name="action" value="next" class="btn btn-primary btn-lg">{% if step_idx == total_steps - 1 %}Review your answers →{% else %}Save &amp; continue →{% endif %}</button>
+      {% else %}
+      <button type="submit" name="action" value="submit" class="btn btn-primary btn-lg">Send to the office</button>
+      {% endif %}
+    </div>
+    {% if not step %}
+    <p class="p-muted p-small">Sending freezes a copy of exactly what you see above. The office reviews it before anything is added to your file or prepared for the court.</p>
+    {% endif %}
+  </form>
+</div>
+
+<script>
+  // Confirm cards: reveal the edit box only when "It changed" is picked.
+  document.querySelectorAll('[data-confirm]').forEach(function (card) {
+    var edit = card.querySelector('.p-confirm-edit');
+    function sync() {
+      var picked = card.querySelector('input[type="radio"]:checked');
+      edit.style.display = (picked && picked.value === 'change') ? 'block' : 'none';
+    }
+    card.querySelectorAll('input[type="radio"]').forEach(function (r) {
+      r.addEventListener('change', sync);
+    });
+    sync();
+  });
+  // Repeater: "+ Add another child" clones the last (blank) row.
+  document.querySelectorAll('.p-repeater-add').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var rep = btn.parentElement.querySelector('.p-repeater');
+      var rows = rep.querySelectorAll('.p-repeater-row');
+      var clone = rows[rows.length - 1].cloneNode(true);
+      clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+      rep.appendChild(clone);
+    });
+  });
+</script>
+{% endblock %}

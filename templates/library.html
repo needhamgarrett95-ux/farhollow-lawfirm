@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Document Library — Case Management{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ icon('documents', 22) }} Document Library</h1>
+</div>
+<p class="muted">The verified Washington family-law catalog this firm works from. <strong>Common</strong> documents are live in the client portal as guided wizards (clients confirm facts from their profile vault instead of retyping them). Uncommon and Rare entries are catalog-only in this release — they arrive as wizards/packets in later releases and are <strong>not</strong> client-facing. Catalog verified October 2026 against the Washington Courts forms list; see <code>docs/FORM_CATALOG.md</code>. Nothing a client completes files itself — every wizard output is a staff-reviewed draft.</p>
+
+{% if drafts %}
+<div class="detail-card">
+  <h2>Drafts in progress</h2>
+  <table class="table">
+    <thead><tr><th>Client</th><th>Document</th><th>Case</th><th>Last worked on</th></tr></thead>
+    <tbody>
+    {% for d in drafts %}
+      <tr>
+        <td><a href="{{ url_for('client_detail', client_id=d.client_id) }}">{{ d.first_name }} {{ d.last_name }}</a></td>
+        <td>{{ wizard_titles.get(d.form_key, d.form_key) }}</td>
+        <td>{{ d.case_number or '—' }}</td>
+        <td>{{ d.updated_at[:16].replace('T', ' ') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% for tier in tiers %}
+<div class="detail-card">
+  <h2>{{ tier | capitalize }} tier</h2>
+  <table class="table">
+    <thead><tr><th>Form</th><th>Title</th><th>Client can complete</th><th>Portal</th><th></th></tr></thead>
+    <tbody>
+    {% for e in entries if e.tier == tier %}
+      <tr>
+        <td><strong>{{ e.form_number }}</strong>{% if not e.verified %}<br><span class="lib-warn">number unverified</span>{% endif %}</td>
+        <td>{{ e.title }}{% if e.note %}<br><span class="muted">{{ e.note }}</span>{% endif %}</td>
+        <td>{{ {'full': 'Yes — full wizard', 'partial': 'Partial — client data for an attorney document', 'none': 'No — staff/court document'}[e.completable] }}</td>
+        <td>
+          {% if e.implemented %}
+            {% if e.enabled %}<span class="lib-on">Available</span>{% if submitted_counts.get(e.wizard) %} · <a href="{{ url_for('portal_review') }}">{{ submitted_counts[e.wizard] }} awaiting review</a>{% endif %}
+            {% else %}<span class="muted">Switched off</span>{% endif %}
+          {% else %}
+            <span class="muted">In a later release</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if e.implemented %}
+          <form method="post" action="{{ url_for('library_toggle', slug=e.slug) }}">
+            <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+            <button type="submit" class="btn btn-small">{{ 'Switch off' if e.enabled else 'Switch on' }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+{% endblock %}

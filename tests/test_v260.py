@@ -507,7 +507,7 @@ def main():
     try:
         for name in ("app.py", "crypto.py", "deadlines.py",
                      "integrations.py", "invoice_pdf.py", "payroll.py",
-                     "paystub_pdf.py", "template_defs.py", "template_pdf.py"):
+                     "paystub_pdf.py", "template_defs.py", "template_pdf.py", "form_library.py"):
             shutil.copy(os.path.join(ROOT, name), scratch)
         shutil.copytree(os.path.join(ROOT, "templates"),
                         os.path.join(scratch, "templates"))

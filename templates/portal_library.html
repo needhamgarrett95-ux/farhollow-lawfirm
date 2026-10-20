@@ -1,0 +1,28 @@
+{% extends "portal_base.html" %}
+{% block title %}Document Library — Client Portal{% endblock %}
+{% block content %}
+<h1 class="p-h1">Document library</h1>
+<p class="p-muted">Court documents you can complete right here, at your own pace. Anything we've already saved about you is filled in for you to confirm — you should rarely have to type the same fact twice. Everything you send is a draft the office reviews with you before it's used.</p>
+
+{% for doc in docs %}
+<div class="p-card">
+  <div class="p-card-head">
+    <h2>{{ doc.wdef.title }}</h2>
+    {% set s = doc.sub %}
+    {% if s %}<span class="p-status p-status-{{ s.status }}">{{ {'draft': 'draft saved', 'submitted': 'sent — being reviewed', 'imported': 'added to your file', 'dismissed': 'reviewed'}[s.status] }}</span>{% endif %}
+  </div>
+  <p class="p-muted p-small">{{ doc.entry.form_number }} · about {{ doc.wdef.minutes }} minutes</p>
+  <p class="p-muted">{{ doc.wdef.description }}</p>
+  {% if s and s.status == 'draft' %}
+  <a class="btn btn-primary" href="{{ url_for('portal_wizard', slug=doc.entry.slug) }}">Continue where you left off</a>
+  {% elif s and s.status in ('submitted', 'imported') %}
+  <p class="p-muted p-small">The office has this one. If something changes, call or message the office and they'll help you update it.</p>
+  {% else %}
+  <a class="btn btn-primary" href="{{ url_for('portal_wizard', slug=doc.entry.slug) }}">Start</a>
+  {% endif %}
+</div>
+{% endfor %}
+{% if not docs %}
+<div class="p-card"><p class="p-muted p-empty">No documents are open right now. The office will let you know when there's something here for you.</p></div>
+{% endif %}
+{% endblock %}

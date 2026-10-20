@@ -40,7 +40,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRATCH = tempfile.mkdtemp(prefix="lawfirm-test-v270-")
 for _f in ("app.py", "crypto.py", "deadlines.py", "integrations.py",
            "invoice_pdf.py", "payroll.py", "paystub_pdf.py",
-           "template_defs.py", "template_pdf.py"):
+           "template_defs.py", "template_pdf.py", "form_library.py"):
     shutil.copy(os.path.join(REPO, _f), SCRATCH)
 for _d in ("templates", "static"):
     shutil.copytree(os.path.join(REPO, _d), os.path.join(SCRATCH, _d))

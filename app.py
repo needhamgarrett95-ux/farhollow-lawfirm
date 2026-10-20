@@ -697,6 +697,36 @@ CREATE TABLE IF NOT EXISTS case_financials (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (case_id, key)
 );
+-- Profile vault (v2.8.0): facts about a client that have no home
+-- column (marriage date/place, separation date, spouse employer,
+-- service address...). Sensitive values are Fernet-encrypted at rest
+-- via the same field crypto as clients. Every fact carries its
+-- source (intake / wizard key / staff) and updated_at.
+CREATE TABLE IF NOT EXISTS client_vault_facts (
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    fact_key TEXT NOT NULL,
+    value TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (client_id, fact_key)
+);
+-- A client-confirmed fact the client CHANGED in a wizard. The new
+-- value waits here until staff import the submission (confirm) or
+-- dismiss it (reject) — confirmed facts are never silently
+-- overwritten. old/new values are encrypted when the fact is
+-- sensitive.
+CREATE TABLE IF NOT EXISTS client_vault_pending (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    fact_key TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    submission_id INTEGER REFERENCES portal_form_submissions(id),
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT
+);
 """
 
 
@@ -1137,6 +1167,26 @@ def init_db():
             value TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL,
             PRIMARY KEY (case_id, key))""",
+        """CREATE TABLE IF NOT EXISTS client_vault_facts (
+            client_id INTEGER NOT NULL REFERENCES clients(id)
+                ON DELETE CASCADE,
+            fact_key TEXT NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (client_id, fact_key))""",
+        """CREATE TABLE IF NOT EXISTS client_vault_pending (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL REFERENCES clients(id)
+                ON DELETE CASCADE,
+            fact_key TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            submission_id INTEGER REFERENCES portal_form_submissions(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            reviewed_by INTEGER REFERENCES users(id),
+            reviewed_at TEXT)""",
         """CREATE INDEX IF NOT EXISTS idx_portal_uploads_client
             ON portal_uploads(client_id, status)""",
         """CREATE INDEX IF NOT EXISTS idx_portal_messages_client
@@ -2009,6 +2059,11 @@ NAV_GROUPS = [
          "active_prefixes": ["portal_review", "portal_form_review",
                              "portal_staff"],
          "badge": "nav_portal_count"},
+        # Document Library (v2.8.0): the verified WA form catalog and
+        # per-document portal enable/disable. The "documents" glyph is
+        # already in the filled-icon set (v2.5.2 invariant).
+        {"label": "Library", "icon": "documents", "endpoint": "library_view",
+         "permission": "view_clients", "active_prefixes": ["library"]},
     ]},
 ]
 
@@ -4340,6 +4395,10 @@ def invoice_pdf(invoice_id):
 # ----------------------------------------------------------------------------
 from template_defs import get_template, template_list
 from template_pdf import build_template_pdf, calc_support
+from form_library import (
+    LIBRARY, LIBRARY_BY_SLUG, TIERS, SCENARIOS, VAULT_FACTS,
+    WIZARD_DEFS, library_entry, implemented_entries, wizard_fields,
+)
 
 
 def _template_party_context(client_id, case_id):
@@ -7826,9 +7885,10 @@ PORTAL_FORM_DEFS = {
             ]},
             {"title": "Work & income basics", "fields": [
                 {"name": "employer_name", "label": "Your employer",
-                 "type": "text", "target": None,
-                 "help": "Kept with your submission for the office's "
-                         "reference."},
+                 "type": "text", "target": ("vault", "client.employer"),
+                 "vault": "client.employer",
+                 "help": "Saved to your profile so you don't have to "
+                         "type it again on later forms."},
                 {"name": "monthly_income",
                  "label": "Your monthly take-home pay ($)",
                  "type": "currency", "target": None,
@@ -7913,6 +7973,723 @@ def _portal_set_financial(db, case_id, key, value):
         " updated_at = excluded.updated_at",
         (case_id, key, value, datetime.now(timezone.utc).isoformat()),
     )
+
+
+# ============================================================================
+# Document Library + Profile Vault (v2.8.0)
+# ============================================================================
+# The vault is a READ/WRITE LAYER over data the firm already keeps:
+# clients columns, children rows, case_financials, plus the
+# client_vault_facts key/value store for facts with no home column.
+# Wizards (form_library.WIZARD_DEFS) read facts through get_vault_facts
+# and write back through the SAME staff-review/import pipeline as the
+# v2.6.0 quick-fill forms — with one extra rule: when a client CHANGES
+# a fact the vault already holds as confirmed, the new value is parked
+# in client_vault_pending at submit time and only lands when staff
+# import the submission. Confirmed facts are never silently overwritten.
+#
+# Boundary rule (same as the rest of the portal): every vault read and
+# write below is scoped to the signed-in portal client's own id, or to
+# staff routes behind view_clients/manage_clients permissions.
+
+
+def _portal_any_form_def(key):
+    """Form def for any portal submission key: v2.6.0 quick-fill form
+    or a v2.8.0 document wizard."""
+    return PORTAL_FORM_DEFS.get(key) or WIZARD_DEFS.get(key)
+
+
+# Client columns a portal import may write. The v2.6.0 quick-fill forms
+# keep their original whitelist; wizard defs add ssn (the Confidential
+# Information Form's whole job). Either way the column must actually
+# exist on the clients table (checked via PRAGMA at import time).
+_PORTAL_IMPORT_CLIENT_COLS = (
+    "email", "phone", "address", "date_of_birth", "spouse_name",
+    "spouse_dob")
+_WIZARD_IMPORT_CLIENT_COLS = _PORTAL_IMPORT_CLIENT_COLS + ("ssn",)
+_PORTAL_ENCRYPTED_CLIENT_COLS = ("date_of_birth", "spouse_dob", "ssn")
+
+# Field types that render as vault CONFIRM cards (scalar, short).
+# Textareas bound to the vault are prefilled for editing instead, and
+# repeaters render the saved list for editing.
+CONFIRM_FIELD_TYPES = ("text", "email", "tel", "date", "money",
+                       "currency", "select", "radio_cards")
+
+
+def _vault_mask(value):
+    """Display form for a sensitive fact on a confirm card."""
+    v = str(value or "")
+    if not v:
+        return ""
+    if len(v) <= 4:
+        return "••••"
+    return "••••" + v[-4:]
+
+
+def get_vault_facts(db, client_id, case_id=None):
+    """Assemble the profile vault for one client: fact key -> value.
+
+    Client columns come from the (decrypted) clients row; vault-store
+    facts are decrypted when the fact is sensitive; financial facts
+    come from case_financials for ``case_id`` (empty when no case).
+    The pseudo-fact "children" is NOT included — use _vault_children.
+    """
+    facts = {}
+    row = db.execute(
+        "SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    client = _decrypt_client(row) if row else {}
+    vrows = {r["fact_key"]: r for r in db.execute(
+        "SELECT * FROM client_vault_facts WHERE client_id = ?",
+        (client_id,)).fetchall()}
+    fin = _portal_financials(db, case_id)
+    for key, fdef in VAULT_FACTS.items():
+        store = fdef["store"]
+        if store == "client":
+            val = client.get(fdef["column"]) or ""
+        elif store == "vault":
+            r = vrows.get(key)
+            val = ""
+            if r:
+                val = r["value"] or ""
+                if fdef.get("sensitive") and looks_encrypted(val):
+                    val = decrypt_value(val)
+        else:  # financial
+            val = fin.get(fdef["fkey"], "")
+        facts[key] = val or ""
+    return facts
+
+
+def _vault_children(db, client_id):
+    """Children rows as wizard repeater items (decrypted DOBs)."""
+    return [
+        {"name": k.get("name") or "",
+         "date_of_birth": k.get("date_of_birth") or ""}
+        for k in (_decrypt_child(r) for r in db.execute(
+            "SELECT * FROM children WHERE client_id = ? ORDER BY id",
+            (client_id,)).fetchall())
+    ]
+
+
+def _vault_upsert_fact(db, client_id, key, value, source):
+    """Write a vault-store fact (encrypting when sensitive). Returns
+    False for facts that live in clients/case_financials instead."""
+    fdef = VAULT_FACTS.get(key)
+    if not fdef or fdef["store"] != "vault":
+        return False
+    stored = encrypt_value(value) if fdef.get("sensitive") else value
+    db.execute(
+        "INSERT INTO client_vault_facts (client_id, fact_key, value,"
+        " source, updated_at) VALUES (?, ?, ?, ?, ?)"
+        " ON CONFLICT(client_id, fact_key) DO UPDATE SET"
+        " value = excluded.value, source = excluded.source,"
+        " updated_at = excluded.updated_at",
+        (client_id, key, stored, source,
+         datetime.now(timezone.utc).isoformat()),
+    )
+    return True
+
+
+def _vault_record_pending(db, client_id, sub_id, data, fdef, case_id):
+    """At wizard submit: compare vault-bound answers with the
+    CONFIRMED vault. Where a confirmed value exists and the client
+    changed it, park the change in client_vault_pending for staff to
+    confirm at import. Returns how many pending updates were created.
+    First-time facts (nothing confirmed yet) do NOT pend — they flow
+    through import like the v2.6.0 forms."""
+    facts = get_vault_facts(db, client_id, case_id)
+    created = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for f in wizard_fields(fdef):
+        key = f.get("vault")
+        if not key or key == "children":
+            continue
+        new = str(data.get(f["name"], "") or "").strip()
+        old = str(facts.get(key, "") or "").strip()
+        if old and new and new != old:
+            fd = VAULT_FACTS.get(key) or {}
+            enc = (lambda v: encrypt_value(v)
+                   if fd.get("sensitive") else v)
+            db.execute(
+                "INSERT INTO client_vault_pending (client_id, fact_key,"
+                " old_value, new_value, submission_id, status,"
+                " created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+                (client_id, key, enc(old), enc(new), sub_id, now),
+            )
+            created += 1
+    return created
+
+
+def _vault_pending_display(db, sub_id):
+    """Pending/confirmed/rejected vault updates for one submission,
+    decrypted for the staff review screen."""
+    out = []
+    for r in db.execute(
+            "SELECT * FROM client_vault_pending WHERE submission_id = ?"
+            " ORDER BY id", (sub_id,)).fetchall():
+        fd = VAULT_FACTS.get(r["fact_key"]) or {}
+
+        def dec(v):
+            if v and fd.get("sensitive") and looks_encrypted(v):
+                return decrypt_value(v)
+            return v or ""
+        out.append({"label": fd.get("label", r["fact_key"]),
+                    "old": dec(r["old_value"]),
+                    "new": dec(r["new_value"]),
+                    "status": r["status"]})
+    return out
+
+
+def _vault_settle_pending(db, sub_id, status):
+    """Import confirms pending vault updates; dismiss rejects them."""
+    db.execute(
+        "UPDATE client_vault_pending SET status = ?, reviewed_by = ?,"
+        " reviewed_at = ? WHERE submission_id = ? AND status = 'pending'",
+        (status, session.get("user_id"),
+         datetime.now(timezone.utc).isoformat(), sub_id),
+    )
+
+
+def _library_disabled_slugs(db):
+    """Catalog slugs staff have switched off for the portal."""
+    try:
+        raw = json.loads(_meta_get("library_disabled", "[]") or "[]")
+        return {s for s in raw if isinstance(s, str)}
+    except (ValueError, TypeError):
+        return set()
+
+
+def _library_docs_for_client(db, client_id):
+    """Enabled + implemented library documents with this client's
+    latest submission state — the portal 'Forms to complete' list."""
+    disabled = _library_disabled_slugs(db)
+    docs = []
+    for entry in implemented_entries():
+        if entry["slug"] in disabled:
+            continue
+        wdef = WIZARD_DEFS[entry["wizard"]]
+        sub = db.execute(
+            "SELECT * FROM portal_form_submissions"
+            " WHERE client_id = ? AND form_key = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (client_id, wdef["key"]),
+        ).fetchone()
+        docs.append({"entry": entry, "wdef": wdef, "sub": sub})
+    return docs
+
+
+def _wizard_prefill(wdef, vault, children):
+    """First-open draft data: every vault-bound field starts from the
+    confirmed vault so the client confirms instead of retyping."""
+    data = {}
+    for f in wizard_fields(wdef):
+        if f["type"] == "repeater":
+            data[f["name"]] = list(children)
+        elif f.get("vault"):
+            data[f["name"]] = vault.get(f["vault"], "")
+    return data
+
+
+def _wizard_collect_step(form, step, data, vault):
+    """Merge one posted wizard step into the working data.
+
+    Confirm-card rule: for a vault-bound scalar field with a confirmed
+    value, the posted hidden radio decides — 'change' takes the typed
+    value, anything else keeps the CONFIRMED value (server truth wins
+    over whatever the browser sent)."""
+    for f in step["fields"]:
+        name = f["name"]
+        if f["type"] == "repeater":
+            names = form.getlist(name + "_name")
+            dobs = form.getlist(name + "_dob")
+            items = []
+            for i, nm in enumerate(names):
+                nm = (nm or "").strip()
+                dob = ((dobs[i] if i < len(dobs) else "") or "").strip()
+                if nm or dob:
+                    items.append({"name": nm, "date_of_birth": dob})
+            data[name] = items[:8]
+        elif f["type"] == "checkboxes":
+            data[name] = ", ".join(
+                v.strip() for v in form.getlist(name) if v.strip())
+        else:
+            key = f.get("vault")
+            confirmed = str(vault.get(key, "") or "") if key else ""
+            if (f["type"] in CONFIRM_FIELD_TYPES and confirmed.strip()
+                    and form.get("cf_" + name) != "change"):
+                data[name] = confirmed
+            else:
+                data[name] = form.get(name, "")
+    return data
+
+
+def _wizard_missing(wdef, data):
+    """(missing labels, first step index containing a missing field)
+    for required fields across all steps."""
+    missing = []
+    first_step = None
+    for si, step in enumerate(wdef["steps"]):
+        for f in step["fields"]:
+            if not f.get("required"):
+                continue
+            v = data.get(f["name"])
+            ok = bool(v) if isinstance(v, list) \
+                else bool(str(v or "").strip())
+            if not ok:
+                missing.append(f["label"])
+                if first_step is None:
+                    first_step = si
+    return missing, (first_step if first_step is not None else 0)
+
+
+def _wizard_value_display(f, value):
+    """Human-readable form of a snapshot value (staff review + client
+    summary screens)."""
+    if f["type"] == "repeater":
+        lines = []
+        for item in value or []:
+            nm = item.get("name", "")
+            dob = item.get("date_of_birth", "")
+            lines.append(f"{nm} (DOB: {dob})" if dob else nm)
+        return "\n".join(x for x in lines if x.strip())
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return str(value or "")
+
+
+# ----------------------------------------------------------------------------
+# Portal: the Document Library
+# ----------------------------------------------------------------------------
+@app.route("/portal/library")
+@portal_login_required
+def portal_library():
+    pu = g.portal_user
+    db = get_db()
+    docs = _library_docs_for_client(db, pu["client_id"])
+    return render_template("portal_library.html", pu=pu, docs=docs)
+
+
+@app.route("/portal/library/<slug>", methods=["GET", "POST"])
+@portal_login_required
+def portal_wizard(slug):
+    entry = library_entry(slug)
+    if not entry or not entry.get("implemented"):
+        abort(404)
+    wdef = WIZARD_DEFS.get(entry["wizard"])
+    if not wdef:
+        abort(404)
+    pu = g.portal_user
+    db = get_db()
+    cid = pu["client_id"]
+    if slug in _library_disabled_slugs(db):
+        abort(404)
+    key = wdef["key"]
+    steps = wdef["steps"]
+    total = len(steps)  # step index == total is the review screen
+    draft = _portal_get_draft(db, cid, key)
+    data = {}
+    if draft:
+        try:
+            data = json.loads(draft["data_json"] or "{}")
+        except (ValueError, TypeError):
+            data = {}
+    cases = _portal_open_cases(db, cid)
+    if wdef["case_required"] and not cases:
+        flash("This document needs an open case. Please message the "
+              "office.", "error")
+        return redirect(url_for("portal_library"))
+    case_id = draft["case_id"] if draft else None
+    if not case_id and len(cases) == 1:
+        case_id = cases[0]["id"]
+    vault = get_vault_facts(db, cid, case_id)
+    children = _vault_children(db, cid)
+    if not data:
+        data = _wizard_prefill(wdef, vault, children)
+
+    if request.method == "POST":
+        check_csrf()
+        step_idx = request.form.get("step", type=int) or 0
+        step_idx = max(0, min(step_idx, total))
+        action = request.form.get("action", "next")
+        if wdef["case_required"]:
+            picked = request.form.get("case_id", type=int)
+            if picked and db.execute(
+                    "SELECT id FROM cases WHERE id = ? AND client_id = ?",
+                    (picked, cid)).fetchone():
+                case_id = picked
+            vault = get_vault_facts(db, cid, case_id)
+        if step_idx < total:
+            data = _wizard_collect_step(
+                request.form, steps[step_idx], data, vault)
+        elif wdef.get("attest"):
+            data["attest_name"] = request.form.get("attest_name", "")
+            data["attest_agree"] = ("yes" if request.form.get(
+                "attest_agree") else "")
+        now = datetime.now(timezone.utc).isoformat()
+        if draft:
+            db.execute(
+                "UPDATE portal_form_submissions SET data_json = ?,"
+                " case_id = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(data), case_id, now, draft["id"]),
+            )
+            sub_id = draft["id"]
+        else:
+            cur = db.execute(
+                "INSERT INTO portal_form_submissions (client_id,"
+                " case_id, form_key, status, data_json, created_at,"
+                " updated_at) VALUES (?, ?, ?, 'draft', ?, ?, ?)",
+                (cid, case_id, key, json.dumps(data), now, now),
+            )
+            sub_id = cur.lastrowid
+        db.commit()
+        if action == "save_exit":
+            flash("Your progress is saved. You can pick up right where "
+                  "you left off.", "success")
+            return redirect(url_for("portal_library"))
+        if action == "submit" and step_idx == total:
+            missing, first_step = _wizard_missing(wdef, data)
+            if wdef.get("attest"):
+                if not str(data.get("attest_name", "")).strip():
+                    missing.append("your typed name (attestation)")
+                    first_step = total
+                if data.get("attest_agree") != "yes":
+                    missing.append("the attestation checkbox")
+                    first_step = total
+            if wdef["case_required"] and not case_id:
+                missing.append("the case this is for")
+            if missing:
+                flash("Almost there — these still need an answer: "
+                      + ", ".join(missing), "error")
+                return redirect(url_for(
+                    "portal_wizard", slug=slug, step=first_step))
+            db.execute(
+                "UPDATE portal_form_submissions SET status ="
+                " 'submitted', snapshot_json = ?, submitted_at = ?,"
+                " updated_at = ? WHERE id = ?",
+                (json.dumps(data), now, now, sub_id),
+            )
+            pending_n = _vault_record_pending(
+                db, cid, sub_id, data, wdef, case_id)
+            db.commit()
+            _portal_activity(
+                db, cid, "form",
+                f"Submitted the {wdef['title']} (Document Library)",
+                "portal_form_submissions", sub_id)
+            db.commit()
+            _portal_audit(
+                "portal_wizard_submitted",
+                f"Client submitted wizard '{key}' (submission"
+                f" id={sub_id}, case id={case_id},"
+                f" pending vault updates={pending_n})", pu)
+            flash("Sent to the office. They'll review it before "
+                  "anything is prepared for the court.", "success")
+            return redirect(url_for("portal_library"))
+        if action == "back":
+            next_step = max(0, step_idx - 1)
+        else:
+            next_step = min(total, step_idx + 1)
+        return redirect(url_for("portal_wizard", slug=slug,
+                                step=next_step))
+
+    step_idx = request.args.get("step", type=int) or 0
+    step_idx = max(0, min(step_idx, total))
+    vault_display = {
+        k: (_vault_mask(v) if (VAULT_FACTS.get(k) or {}).get("mask")
+            else v)
+        for k, v in vault.items()}
+    vault_masked = {k for k, fd in VAULT_FACTS.items() if fd.get("mask")}
+    return render_template(
+        "portal_wizard.html", pu=pu, entry=entry, wdef=wdef,
+        step_idx=step_idx,
+        step=steps[step_idx] if step_idx < total else None,
+        data=data, vault=vault, vault_display=vault_display,
+        vault_masked=vault_masked,
+        display=_wizard_value_display,
+        draft=draft, cases=cases,
+        total_steps=total, confirm_types=CONFIRM_FIELD_TYPES)
+
+
+# ----------------------------------------------------------------------------
+# Staff: Library view (catalog + portal switches + drafts in progress)
+# ----------------------------------------------------------------------------
+@app.route("/library")
+@permission_required("view_clients")
+def library_view():
+    db = get_db()
+    disabled = _library_disabled_slugs(db)
+    entries = []
+    for e in LIBRARY:
+        row = dict(e)
+        row["enabled"] = e["slug"] not in disabled
+        entries.append(row)
+    wizard_keys = list(WIZARD_DEFS)
+    drafts = []
+    submitted_counts = {}
+    if wizard_keys:
+        marks = ",".join("?" for _ in wizard_keys)
+        drafts = db.execute(
+            "SELECT s.*, cl.first_name, cl.last_name, c.case_number"
+            " FROM portal_form_submissions s"
+            " JOIN clients cl ON cl.id = s.client_id"
+            " LEFT JOIN cases c ON c.id = s.case_id"
+            f" WHERE s.status = 'draft' AND s.form_key IN ({marks})"
+            " ORDER BY s.updated_at DESC", wizard_keys).fetchall()
+        for r in db.execute(
+                "SELECT form_key, COUNT(*) AS c"
+                " FROM portal_form_submissions WHERE status ="
+                f" 'submitted' AND form_key IN ({marks})"
+                " GROUP BY form_key", wizard_keys).fetchall():
+            submitted_counts[r["form_key"]] = r["c"]
+    titles = {k: v["title"] for k, v in WIZARD_DEFS.items()}
+    return render_template(
+        "library.html", entries=entries, tiers=TIERS,
+        scenarios=SCENARIOS, drafts=drafts,
+        submitted_counts=submitted_counts, wizard_titles=titles)
+
+
+@app.route("/library/<slug>/toggle", methods=["POST"])
+@permission_required("manage_clients")
+def library_toggle(slug):
+    check_csrf()
+    db = get_db()
+    entry = library_entry(slug)
+    if not entry or not entry.get("implemented"):
+        abort(404)
+    disabled = _library_disabled_slugs(db)
+    if slug in disabled:
+        disabled.discard(slug)
+        state = "enabled"
+    else:
+        disabled.add(slug)
+        state = "disabled"
+    _meta_set("library_disabled", json.dumps(sorted(disabled)))
+    db.commit()
+    audit("library_toggled",
+          f"Document Library: '{entry['title']}' {state} for the portal")
+    flash(f"“{entry['title']}” is now {state} in the client portal.",
+          "success")
+    return redirect(url_for("library_view"))
+
+
+# ----------------------------------------------------------------------------
+# Staff: generate a case document from an approved wizard submission
+# ----------------------------------------------------------------------------
+def _wizard_data_sections(wdef, snap):
+    """Label/value sections for the data-sheet builder, from a frozen
+    wizard snapshot (empty answers dropped)."""
+    sections = []
+    for step in wdef["steps"]:
+        rows = []
+        for f in step["fields"]:
+            val = _wizard_value_display(f, snap.get(f["name"]))
+            if val.strip():
+                rows.append((f["label"], val))
+        if rows:
+            sections.append({"title": step["title"], "rows": rows})
+    return sections
+
+
+def _declaration_paragraphs(snap):
+    """Assemble the declaration's numbered paragraphs from the
+    client's wizard sections, in reading order."""
+    paras = ["I am a party to this case. The facts below are true and "
+             "correct to the best of my knowledge."]
+
+    def add_text(key):
+        for p in str(snap.get(key) or "").split("\n\n"):
+            if p.strip():
+                paras.append(p.strip())
+    kids = snap.get("children") or []
+    if kids:
+        lines = "; ".join(
+            f"{k.get('name', '')} (born {k.get('date_of_birth') or '—'})"
+            for k in kids if k.get("name"))
+        if lines:
+            paras.append(f"My children are: {lines}.")
+    add_text("children_week")
+    add_text("children_school")
+    add_text("children_concerns")
+    add_text("money_story")
+    add_text("safety_concerns")
+    asks = str(snap.get("asks") or "").strip()
+    if asks:
+        paras.append(f"I am asking the court to: {asks}.")
+    add_text("asks_details")
+    return paras
+
+
+@app.route("/portal-review/forms/<int:sub_id>/generate-document",
+           methods=["POST"])
+@permission_required("use_templates")
+def portal_form_generate_document(sub_id):
+    """Turn an APPROVED (imported) wizard submission into a document
+    in the case file: the flagship declaration, a draft petition /
+    parenting plan through the existing template layouts, a support
+    worksheet, or a client data sheet. Everything produced here is a
+    DRAFT for attorney completion — nothing files itself."""
+    check_csrf()
+    db = get_db()
+    sub = db.execute(
+        "SELECT * FROM portal_form_submissions WHERE id = ?", (sub_id,)
+    ).fetchone()
+    if not sub:
+        abort(404)
+    wdef = WIZARD_DEFS.get(sub["form_key"])
+    if not wdef or "generate" not in wdef:
+        flash("That submission doesn't generate a document.", "error")
+        return redirect(url_for("portal_form_review", sub_id=sub_id))
+    if sub["status"] != "imported":
+        flash("Import the submission first — documents are generated "
+              "from approved information only.", "error")
+        return redirect(url_for("portal_form_review", sub_id=sub_id))
+    case_id = sub["case_id"]
+    if not case_id:
+        row = db.execute(
+            "SELECT id FROM cases WHERE client_id = ? AND status ="
+            " 'open' ORDER BY id DESC LIMIT 1",
+            (sub["client_id"],)).fetchone()
+        case_id = row["id"] if row else None
+    if not case_id:
+        flash("This document needs a case to file into. Open a case "
+              "for the client first, then generate.", "error")
+        return redirect(url_for("portal_form_review", sub_id=sub_id))
+    try:
+        snap = json.loads(sub["snapshot_json"] or "{}")
+    except (ValueError, TypeError):
+        snap = {}
+    gen = wdef["generate"]
+    kind = gen["kind"]
+    logo_path = os.path.join(BASE_DIR, "static", "dgm-logo.png")
+    try:
+        client, children, case = _template_party_context(
+            sub["client_id"], case_id)
+        client_name = (f"{client.get('first_name', '')}"
+                       f" {client.get('last_name', '')}".strip()
+                       if client else "")
+        spouse_name = client.get("spouse_name", "") if client else ""
+        case_number = case["case_number"] if case else ""
+        county = "Clallam"
+        submitted_on = (sub["submitted_at"] or "")[:10]
+        made = []
+
+        def save(stem, layout, data):
+            pdf = build_template_pdf(layout, data, logo_path=logo_path)
+            ver = _save_generated_doc(
+                case_id, f"{stem}.pdf", pdf, gen["category"],
+                f"Generated from portal {wdef['title']}"
+                f" (submission id={sub_id}) — DRAFT, attorney review"
+                " required")
+            made.append(f"{stem}.pdf (v{ver})")
+
+        if kind == "declaration":
+            save(gen["file_stem"], "portal_declaration", {
+                "county": county, "case_number": case_number,
+                "petitioner": client_name, "respondent": spouse_name,
+                "declarant": client_name,
+                "paragraphs": _declaration_paragraphs(snap),
+                "attest_name": snap.get("attest_name", ""),
+                "submitted_on": submitted_on,
+            })
+        elif kind == "petition":
+            relief = str(snap.get("other_relief") or "")
+            if snap.get("name_change"):
+                relief = (relief + "\n\n" if relief else "") + (
+                    "Petitioner also requests restoration of their"
+                    f" former name: {snap['name_change']}.")
+            save(gen["file_stem"], "petition_dissolution", {
+                "county": county, "case_number": case_number,
+                "petitioner": client_name, "respondent": spouse_name,
+                "marriage_date": snap.get("marriage_date", ""),
+                "marriage_place": snap.get("marriage_place", ""),
+                "separation_date": snap.get("separation_date", ""),
+                "property_request": snap.get("property_request", ""),
+                "maintenance_request":
+                    snap.get("maintenance_request", "") or "None",
+                "other_relief": relief,
+                "children": children, "draft": True,
+                "ai_disclosure": False,
+            })
+            save(gen["file_stem"] + "_Client_Data", "wizard_data_sheet", {
+                "title": f"{wdef['title']} — Client Data",
+                "subtitle": f"Official form: {wdef['official']} —"
+                            " client-supplied data for attorney"
+                            " completion",
+                "client_name": client_name, "case_number": case_number,
+                "submitted_on": submitted_on,
+                "sections": _wizard_data_sections(wdef, snap),
+            })
+        elif kind == "parenting_plan":
+            decision_map = {
+                "Jointly — both parents together": "Joint",
+                "By me alone": "Sole to A",
+                "By the other parent alone": "Sole to B",
+            }
+            schedule = str(snap.get("residential_schedule") or "")
+            if snap.get("living_now"):
+                schedule = ("Current arrangement: "
+                            + str(snap["living_now"]).strip()
+                            + "\n\nProposed schedule:\n" + schedule)
+            details = str(snap.get("decision_details") or "")
+            restrictions = str(snap.get("restrictions") or "").strip()
+            if restrictions and restrictions != "None of these":
+                details += ("\n\n" if details else "") + (
+                    "Restrictions requested: " + restrictions + ".")
+                if snap.get("restrictions_details"):
+                    details += " " + str(
+                        snap["restrictions_details"]).strip()
+            save(gen["file_stem"], "parenting_plan", {
+                "county": county, "case_number": case_number,
+                "parent_a": client_name, "parent_b": spouse_name,
+                "children": children,
+                "residential_schedule": schedule,
+                "holidays": snap.get("holidays", ""),
+                "decision_making": decision_map.get(
+                    str(snap.get("decision_making") or ""), ""),
+                "decision_details": details,
+                "transportation": snap.get("transportation", ""),
+                "draft": True, "ai_disclosure": False,
+            })
+        elif kind == "support":
+            def _m(key):
+                return re.sub(r"[^0-9.\-]", "",
+                              str(snap.get(key, "") or ""))
+            kids_ctx = children or [
+                {"name": k.get("name", ""),
+                 "date_of_birth": k.get("date_of_birth", "")}
+                for k in (snap.get("children") or [])]
+            save(gen["file_stem"], "support_worksheet", {
+                "parent_a": client_name,
+                "parent_a_income": _m("client_net_income"),
+                "parent_b": spouse_name,
+                "parent_b_income": _m("other_parent_net_income"),
+                "daycare": _m("daycare"),
+                "health_insurance": _m("health_insurance"),
+                "children": kids_ctx, "draft": True,
+                "notes": "Generated from the client's portal Child"
+                         " Support Worksheet figures (submission"
+                         f" id={sub_id}). DRAFT — verify against the"
+                         " official RCW 26.19 schedule before filing.",
+                "ai_disclosure": False,
+            })
+        else:  # data_sheet
+            save(gen["file_stem"], "wizard_data_sheet", {
+                "title": f"{wdef['title']} — Client Data",
+                "subtitle": f"Official form: {wdef['official']} —"
+                            " transfer verified figures to the"
+                            " official form",
+                "client_name": client_name, "case_number": case_number,
+                "submitted_on": submitted_on,
+                "sections": _wizard_data_sections(wdef, snap),
+            })
+        audit("portal_document_generated",
+              f"Generated {', '.join(made)} for case (id={case_id})"
+              f" from portal submission {sub_id}")
+        flash("Generated and saved to the case's documents: "
+              + "; ".join(made)
+              + ". These are drafts — review before filing.",
+              "success")
+    except Exception as e:
+        flash(f"Could not generate the document: {e}", "error")
+    return redirect(url_for("portal_form_review", sub_id=sub_id))
 
 
 # ----------------------------------------------------------------------------
@@ -8189,6 +8966,7 @@ def portal_documents():
         "portal_documents.html", pu=pu, uploads=uploads,
         open_requests=open_requests, doc_types=PORTAL_DOC_TYPES,
         cases=_portal_client_cases(db, cid),
+        library_docs=_library_docs_for_client(db, cid),
         preselect_request=request.args.get("request", type=int),
         preselect_type=request.args.get("type", ""),
     )
@@ -8296,7 +9074,8 @@ def portal_forms():
             (cid, key),
         ).fetchone()
     return render_template(
-        "portal_forms.html", pu=pu, form_defs=PORTAL_FORM_DEFS, subs=subs)
+        "portal_forms.html", pu=pu, form_defs=PORTAL_FORM_DEFS, subs=subs,
+        library_docs=_library_docs_for_client(db, cid))
 
 
 def _portal_get_draft(db, client_id, form_key):
@@ -8735,7 +9514,7 @@ def portal_review():
         submitted_forms=submitted_forms, threads=threads,
         activity=activity, client_cases=client_cases,
         doc_types=PORTAL_DOC_TYPES, categories=DOC_CATEGORIES,
-        form_defs=PORTAL_FORM_DEFS)
+        form_defs={**PORTAL_FORM_DEFS, **WIZARD_DEFS})
 
 
 @app.route("/portal-review/uploads/<int:upload_id>/accept",
@@ -8892,12 +9671,14 @@ def _portal_form_current_values(db, sub, fdef):
             (sub["client_id"],)).fetchall()
     ]
     fin = _portal_financials(db, sub["case_id"])
+    vault = get_vault_facts(db, sub["client_id"], sub["case_id"])
     out = {}
     for f in _portal_form_fields(fdef):
         t = f.get("target")
         val = ""
         if not t:
-            val = "(kept with the submission)"
+            val = vault.get(f["vault"], "") if f.get("vault") \
+                else "(kept with the submission)"
         elif t[0] == "client":
             val = client_d.get(t[1]) or ""
         elif t[0] == "child":
@@ -8907,6 +9688,12 @@ def _portal_form_current_values(db, sub, fdef):
                     "name" if kind == "name" else "date_of_birth") or ""
         elif t[0] == "financial":
             val = fin.get(t[1], "")
+        elif t[0] == "vault":
+            val = vault.get(t[1], "")
+        elif t[0] == "children":
+            val = "\n".join(
+                f"{k.get('name', '')} (DOB:"
+                f" {k.get('date_of_birth') or '—'})" for k in kids)
         out[f["name"]] = val
     return out
 
@@ -8924,7 +9711,7 @@ def portal_form_review(sub_id):
     ).fetchone()
     if not sub:
         abort(404)
-    fdef = PORTAL_FORM_DEFS.get(sub["form_key"])
+    fdef = _portal_any_form_def(sub["form_key"])
     if not fdef:
         abort(404)
     try:
@@ -8934,7 +9721,10 @@ def portal_form_review(sub_id):
     current = _portal_form_current_values(db, sub, fdef)
     return render_template(
         "portal_form_review.html", sub=sub, fdef=fdef,
-        submitted=submitted, current=current)
+        submitted=submitted, current=current,
+        display=_wizard_value_display,
+        pending_updates=_vault_pending_display(db, sub_id),
+        is_wizard=sub["form_key"] in WIZARD_DEFS)
 
 
 @app.route("/portal-review/forms/<int:sub_id>/import", methods=["POST"])
@@ -8950,32 +9740,54 @@ def portal_form_import(sub_id):
     if sub["status"] != "submitted":
         flash("Only a submitted form can be imported.", "error")
         return redirect(url_for("portal_form_review", sub_id=sub_id))
-    fdef = PORTAL_FORM_DEFS[sub["form_key"]]
+    fdef = _portal_any_form_def(sub["form_key"])
+    if not fdef:
+        abort(404)
     try:
         data = json.loads(sub["snapshot_json"] or "{}")
     except (ValueError, TypeError):
         data = {}
     now = datetime.now(timezone.utc).isoformat()
     changed = []
-    # Client-record fields (DOBs are encrypted at rest — encrypt here too).
+    is_wizard = sub["form_key"] in WIZARD_DEFS
+    allowed_cols = (_WIZARD_IMPORT_CLIENT_COLS if is_wizard
+                    else _PORTAL_IMPORT_CLIENT_COLS)
+    client_cols = {r["name"] for r in db.execute(
+        "PRAGMA table_info(clients)")}
+    # Client-record fields (DOBs/SSN are encrypted at rest — encrypt
+    # here too). The column must be whitelisted for this form kind AND
+    # actually exist on the clients table.
     for f in _portal_form_fields(fdef):
         t = f.get("target")
         if not t or t[0] != "client":
             continue
         col = t[1]
-        if col not in ("email", "phone", "address", "date_of_birth",
-                       "spouse_name", "spouse_dob"):
+        if col not in allowed_cols or col not in client_cols:
             continue
         val = str(data.get(f["name"], "") or "").strip()
         if not val:
             continue
         store = (encrypt_value(val)
-                 if col in ("date_of_birth", "spouse_dob") else val)
+                 if col in _PORTAL_ENCRYPTED_CLIENT_COLS else val)
         db.execute(
             f"UPDATE clients SET {col} = ?, updated_at = ? WHERE id = ?",
             (store, now, sub["client_id"]),
         )
         changed.append(f["label"])
+    # Vault-store facts (marriage date/place, employer, service
+    # address...) — first-time facts land here; changed confirmed
+    # facts land here too, but only because staff just confirmed them
+    # on this screen (see client_vault_pending).
+    for f in _portal_form_fields(fdef):
+        t = f.get("target")
+        if not t or t[0] != "vault":
+            continue
+        val = str(data.get(f["name"], "") or "").strip()
+        if not val:
+            continue
+        if _vault_upsert_fact(db, sub["client_id"], t[1], val,
+                              source=f"portal:{sub['form_key']}"):
+            changed.append(f["label"])
     # Children, grouped by slot: match by name, else add.
     slots = {}
     for f in _portal_form_fields(fdef):
@@ -9007,6 +9819,39 @@ def portal_form_import(sub_id):
                 (sub["client_id"], name, encrypt_value(dob)),
             )
             changed.append(f"Child '{name}' added")
+    # Children from a wizard REPEATER: same match-by-name rule.
+    for f in _portal_form_fields(fdef):
+        t = f.get("target")
+        if not t or t[0] != "children":
+            continue
+        items = data.get(f["name"])
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            name = str(item.get("name", "") or "").strip()
+            dob = str(item.get("date_of_birth", "") or "").strip()
+            if not name:
+                continue
+            existing = db.execute(
+                "SELECT id FROM children WHERE client_id = ?"
+                " AND lower(name) = lower(?)",
+                (sub["client_id"], name),
+            ).fetchone()
+            if existing:
+                if dob:
+                    db.execute(
+                        "UPDATE children SET date_of_birth = ?"
+                        " WHERE id = ?",
+                        (encrypt_value(dob), existing["id"]),
+                    )
+                    changed.append(f"Child '{name}' birth date")
+            else:
+                db.execute(
+                    "INSERT INTO children (client_id, name,"
+                    " date_of_birth) VALUES (?, ?, ?)",
+                    (sub["client_id"], name, encrypt_value(dob)),
+                )
+                changed.append(f"Child '{name}' added")
     # Financial values into case_financials.
     if sub["case_id"]:
         for f in _portal_form_fields(fdef):
@@ -9023,6 +9868,9 @@ def portal_form_import(sub_id):
         " reviewed_by = ?, reviewed_at = ? WHERE id = ?",
         (session.get("user_id"), now, sub_id),
     )
+    # Importing confirms any pending vault updates from this
+    # submission (their new values were applied by the loops above).
+    _vault_settle_pending(db, sub_id, "confirmed")
     db.commit()
     audit("portal_form_imported",
           f"Imported {fdef['title']} from client (id={sub['client_id']})"
@@ -9045,15 +9893,19 @@ def portal_form_dismiss(sub_id):
     if sub["status"] != "submitted":
         flash("Only a submitted form can be dismissed.", "error")
         return redirect(url_for("portal_form_review", sub_id=sub_id))
+    fdef = _portal_any_form_def(sub["form_key"])
     db.execute(
         "UPDATE portal_form_submissions SET status = 'dismissed',"
         " reviewed_by = ?, reviewed_at = ? WHERE id = ?",
         (session.get("user_id"),
          datetime.now(timezone.utc).isoformat(), sub_id),
     )
+    # Dismissing rejects any pending vault updates from this
+    # submission — the confirmed facts stay as they were.
+    _vault_settle_pending(db, sub_id, "rejected")
     db.commit()
     audit("portal_form_dismissed",
-          f"Dismissed {PORTAL_FORM_DEFS[sub['form_key']]['title']} from"
+          f"Dismissed {(fdef or {}).get('title', sub['form_key'])} from"
           f" client (id={sub['client_id']}) without importing")
     flash("Dismissed — the submission stays on record but nothing was "
           "imported.", "success")

@@ -1851,3 +1851,57 @@ html[data-theme="dark"] .p-bubble-row.mine .p-bubble { background: var(--brand);
   .portal-review-form select, .portal-review-form input[type="text"] { width: 100%; }
   .portal-review-form .btn { justify-content: center; min-height: 44px; }
 }
+
+/* ================= v2.8.0 — Document Library, vault & wizards ==========
+   Confirm cards (saved facts the client verifies instead of retyping),
+   the children repeater, wizard review/attestation, and the staff
+   library badges. Appended only — earlier rules are untouched. */
+.p-check-done { background: var(--success); border-color: var(--success); }
+.p-type-grid-1 { grid-template-columns: 1fr; }
+.p-type-grid-1 .p-type-card:last-child:nth-child(odd) { grid-column: auto; }
+.p-wizard-explainer { color: var(--muted); margin: 0 0 14px; }
+.p-wizard-prompt { color: var(--muted); font-size: 0.92rem; margin: 2px 0 6px; }
+.p-confirm {
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; margin: 0 0 16px; background: var(--card);
+}
+.p-confirm-label { font-weight: 600; display: block; margin-bottom: 4px; }
+.p-confirm-value { margin: 0 0 10px; font-size: 1.02rem; }
+.p-confirm-choices { display: flex; gap: 8px; flex-wrap: wrap; }
+.p-confirm-choice {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 8px 14px; min-height: 40px; cursor: pointer; font-weight: 600;
+}
+.p-confirm-choice:has(input:checked) {
+  border-color: var(--navy); background: var(--info-bg); color: var(--info-text);
+}
+.p-confirm-edit { margin-top: 10px; }
+.p-repeater-row {
+  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 8px; margin-bottom: 8px;
+}
+.p-repeater-add { margin: 2px 0 14px; }
+.p-review-section { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.p-review-section h3 { margin: 6px 0 8px; }
+.p-review-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  gap: 4px 14px; padding: 5px 0;
+}
+.p-review-label { font-weight: 600; }
+.p-review-value { overflow-wrap: anywhere; }
+.p-attest {
+  border: 1px solid var(--gold, #b9975b); border-radius: 12px;
+  padding: 14px 16px; margin-top: 16px; background: var(--card);
+}
+.p-attest-check {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-weight: 600; margin: 10px 0; cursor: pointer;
+}
+.p-attest-check input { width: 22px; height: 22px; flex: 0 0 auto; }
+.lib-on { color: var(--success); font-weight: 600; }
+.lib-warn { color: var(--error); font-weight: 600; font-size: 0.85rem; }
+@media (max-width: 768px) {
+  .p-review-row { grid-template-columns: minmax(0, 1fr); }
+  .p-repeater-row { grid-template-columns: minmax(0, 1fr); }
+}

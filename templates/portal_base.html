@@ -29,7 +29,7 @@
   <nav class="p-topnav">
     <a href="{{ url_for('portal_home') }}" class="{% if request.endpoint == 'portal_home' %}active{% endif %}">Home</a>
     <a href="{{ url_for('portal_documents') }}" class="{% if request.endpoint == 'portal_documents' %}active{% endif %}">Documents</a>
-    <a href="{{ url_for('portal_forms') }}" class="{% if request.endpoint in ('portal_forms', 'portal_form_fill') %}active{% endif %}">Forms</a>
+    <a href="{{ url_for('portal_forms') }}" class="{% if request.endpoint in ('portal_forms', 'portal_form_fill', 'portal_library', 'portal_wizard') %}active{% endif %}">Forms</a>
     <a href="{{ url_for('portal_messages') }}" class="{% if request.endpoint == 'portal_messages' %}active{% endif %}">Messages{% if portal_unread %} <span class="bdg">{{ portal_unread }}</span>{% endif %}</a>
   </nav>
   <div class="p-user">
@@ -61,7 +61,7 @@
     <span class="ptab-ic">{{ icon_filled('documents', 24) }}</span>
     <span class="ptab-label">Documents</span>
   </a>
-  <a class="ptab {% if request.endpoint in ('portal_forms', 'portal_form_fill') %}on{% endif %}" href="{{ url_for('portal_forms') }}">
+  <a class="ptab {% if request.endpoint in ('portal_forms', 'portal_form_fill', 'portal_library', 'portal_wizard') %}on{% endif %}" href="{{ url_for('portal_forms') }}">
     <span class="ptab-ic">{{ icon_filled('templates', 24) }}</span>
     <span class="ptab-label">Forms</span>
   </a>

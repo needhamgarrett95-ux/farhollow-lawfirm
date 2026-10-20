@@ -21,4 +21,14 @@
   {% endif %}
 </div>
 {% endfor %}
+
+{% if library_docs %}
+<div class="p-card">
+  <div class="p-card-head">
+    <h2>Document library</h2>
+  </div>
+  <p class="p-muted">Court documents — a declaration, the financial declaration, the parenting plan, and more — that you complete here with your saved information filled in for you.</p>
+  <a class="btn btn-primary" href="{{ url_for('portal_library') }}">Open the document library ({{ library_docs | length }} documents)</a>
+</div>
+{% endif %}
 {% endblock %}

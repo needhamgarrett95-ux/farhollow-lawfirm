@@ -4,6 +4,23 @@
 <h1 class="p-h1">Documents</h1>
 <p class="p-muted">Send documents to the office securely. Everything you send is reviewed by the office before it goes into your file — you'll see it below while it's waiting.</p>
 
+{% if library_docs %}
+<div class="p-card">
+  <h2>Forms to complete</h2>
+  <p class="p-muted">Court documents you can fill out right here — most of your information is already filled in from your file; you just confirm it. These are drafts the office reviews with you.</p>
+  <ul class="p-checklist">
+    {% for doc in library_docs %}
+    <li>
+      <span class="p-check {% if doc.sub and doc.sub.status in ('submitted', 'imported') %}p-check-done{% else %}p-check-open{% endif %}"></span>
+      <span class="p-check-text"><strong>{{ doc.wdef.title }}</strong><br><span class="p-muted">{{ doc.entry.form_number }} · about {{ doc.wdef.minutes }} minutes{% if doc.sub and doc.sub.status == 'draft' %} · draft saved{% elif doc.sub and doc.sub.status == 'submitted' %} · sent — being reviewed{% elif doc.sub and doc.sub.status == 'imported' %} · added to your file{% endif %}</span></span>
+      <a class="btn btn-small" href="{{ url_for('portal_wizard', slug=doc.entry.slug) }}">{{ 'Continue' if doc.sub and doc.sub.status == 'draft' else 'Open' }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="p-muted p-small"><a href="{{ url_for('portal_library') }}">See the full document library →</a></p>
+</div>
+{% endif %}
+
 <div class="p-card">
   <h2>Send a document</h2>
   <form method="post" action="{{ url_for('portal_document_upload') }}" enctype="multipart/form-data" class="p-form">
