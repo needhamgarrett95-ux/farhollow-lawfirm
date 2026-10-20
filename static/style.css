@@ -220,6 +220,9 @@ dt { font-weight: 600; color: var(--muted); font-size: 13px; }
 dd { margin: 0; }
 .plain-list { list-style: none; padding: 0; margin: 8px 0; }
 .plain-list li { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+/* Prose variant: paragraph-style items that must flow as normal text
+   (flex space-between mangles sentences into scattered columns). */
+.plain-list.prose li { display: block; line-height: 1.55; }
 .inline { display: inline; }
 .child-form { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .child-form input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
